@@ -15,9 +15,19 @@ test.describe("settings and about", () => {
     await settings.getByRole("radio", { name: "Read only" }).click();
     await expect(settings.getByText("can't change, save, or open prototypes")).toBeVisible();
     await settings.getByRole("button", { name: /^Default device:/ }).click();
+    const devices = page.getByRole("listbox");
+    await expect(devices).toBeVisible();
+    // A menu opened from a dialog paints above it: the point at its centre belongs to the menu, not the dialog behind.
+    await expect(devices).toBeInViewport();
+    await expect(async () => {
+      const box = (await devices.boundingBox())!;
+      const onTop = await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest(".sb-select-popover"), { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+      expect(onTop).toBe(true);
+    }).toPass();
     await page.getByRole("combobox", { name: /Search Default device/ }).fill("iPad");
-    await page.keyboard.press("Enter");
-    await expect(settings.getByText("No trusted projects yet.")).toBeVisible();
+    await page.getByRole("option", { name: /iPad/ }).first().click();
+    await expect(devices).toBeHidden();
+    await expect(settings.getByText("No trusted prototypes yet.")).toBeVisible();
     await page.waitForTimeout(250);
     await screenshot(page, "app-12-settings");
 

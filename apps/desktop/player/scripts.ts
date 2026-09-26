@@ -22,7 +22,7 @@ export function withPausableScripts<R extends EngineRegistry>(registry: R, pause
         original.evaluate.call(original, ctx);
         return;
       }
-      const message = `Scripts in this project are paused. Trust the project in Sonobe on your computer to run "${ctx.node.name ?? (ctx.id as Id)}".`;
+      const message = `Scripts in this prototype are paused. Trust the prototype in Sonobe on your computer to run “${ctx.node.name ?? (ctx.id as Id)}”.`;
       const issue = (ctx.services as Partial<Pick<typeof ctx.services, "issue">>).issue;
       if (typeof issue === "function") issue.call(ctx.services, "script_untrusted", "warning", message);
       else ctx.warnOnce?.("script_untrusted", message);

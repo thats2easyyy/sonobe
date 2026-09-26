@@ -32,16 +32,19 @@ const VARIANTS: Record<DialogVariant, ButtonVariant> = { primary: "primary", dan
 function ConfirmDialog({ request, onSettle }: { request: Extract<DialogRequest, { kind: "confirm" }>; onSettle: Settle }) {
   const titleId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const { title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false } = request.options;
   return (
-    <Dialog open onOpenChange={(open) => !open && onSettle(false)} aria-labelledby={titleId} width={440} className="sb-appdialog" initialFocusRef={confirmRef} modalScope="serviceDialog">
+    <Dialog open onOpenChange={(open) => !open && onSettle(false)} aria-labelledby={titleId} width={440} className="sb-appdialog" initialFocusRef={danger ? cancelRef : confirmRef} modalScope="serviceDialog">
       <div className="sb-appdialog__body">
         <h2 id={titleId} className="sb-appdialog__title">
           {title}
         </h2>
         {message && <p className="sb-appdialog__text">{message}</p>}
         <div className="sb-appdialog__actions">
-          <Button onClick={() => onSettle(false)}>{cancelLabel}</Button>
+          <Button ref={cancelRef} onClick={() => onSettle(false)}>
+            {cancelLabel}
+          </Button>
           <Button ref={confirmRef} variant={danger ? "danger" : "primary"} onClick={() => onSettle(true)}>
             {confirmLabel}
           </Button>
@@ -106,21 +109,30 @@ function PromptDialog({ request, onSettle }: { request: Extract<DialogRequest, {
 function ChooseDialog({ request, onSettle }: { request: Extract<DialogRequest, { kind: "choose" }>; onSettle: Settle }) {
   const titleId = useId();
   const { title, message, actions } = request.options;
-  const primaryRef = useRef<HTMLButtonElement>(null);
-  const primaryIndex = Math.max(0, actions.findIndex((a) => a.variant === "primary"));
+  const focusRef = useRef<HTMLButtonElement>(null);
+  const start = actions.filter((a) => a.align === "start");
+  const end = actions.filter((a) => a.align !== "start");
+  const focused = (end.find((a) => a.variant === "primary") ?? end.at(-1) ?? actions[0])?.value;
+  const button = (action: (typeof actions)[number]) =>
+    action.align === "start" ? (
+      <Button key={action.value} variant="ghost" data-tone={action.variant === "danger" ? "danger" : undefined} onClick={() => onSettle(action.value)}>
+        {action.label}
+      </Button>
+    ) : (
+      <Button key={action.value} ref={action.value === focused ? focusRef : undefined} variant={VARIANTS[action.variant ?? "default"]} onClick={() => onSettle(action.value)}>
+        {action.label}
+      </Button>
+    );
   return (
-    <Dialog open onOpenChange={(open) => !open && onSettle(null)} aria-labelledby={titleId} width={460} className="sb-appdialog" initialFocusRef={primaryRef} modalScope="serviceDialog">
+    <Dialog open onOpenChange={(open) => !open && onSettle(null)} aria-labelledby={titleId} width={460} className="sb-appdialog" initialFocusRef={focusRef} modalScope="serviceDialog">
       <div className="sb-appdialog__body">
         <h2 id={titleId} className="sb-appdialog__title">
           {title}
         </h2>
         {message && <p className="sb-appdialog__text">{message}</p>}
-        <div className="sb-appdialog__actions" data-count={actions.length}>
-          {actions.map((action, index) => (
-            <Button key={action.value} ref={index === primaryIndex ? primaryRef : undefined} variant={VARIANTS[action.variant ?? "default"]} onClick={() => onSettle(action.value)}>
-              {action.label}
-            </Button>
-          ))}
+        <div className="sb-appdialog__actions">
+          {start.length > 0 && <div className="sb-appdialog__actions-start">{start.map(button)}</div>}
+          {end.map(button)}
         </div>
       </div>
     </Dialog>

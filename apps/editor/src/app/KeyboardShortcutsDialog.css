@@ -1,41 +1,39 @@
 .sb-shortcuts {
-  height: min(640px, calc(100vh - 120px));
-}
-
-.sb-shortcuts__body {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.sb-shortcuts__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-5) var(--space-6);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.sb-shortcuts__title {
-  flex: 1;
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  height: min(640px, calc(100vh - 96px));
 }
 
 .sb-shortcuts__search {
-  width: 220px;
+  flex: none;
+  padding: var(--space-1) var(--space-7) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sb-shortcuts .sb-dialog__header[data-scrolled] {
+  border-bottom-color: transparent;
+}
+
+.sb-shortcuts .sb-shortcuts__body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .sb-shortcuts__sections {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: var(--space-5) var(--space-6) var(--space-6);
-  column-gap: var(--space-8);
+  padding: var(--space-5) var(--space-7) var(--space-6);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sb-shortcuts__sections:focus-visible {
+  outline-offset: -2px;
+}
+
+.sb-shortcuts__columns {
   columns: 2 300px;
+  column-gap: var(--space-8);
 }
 
 .sb-shortcuts__section {
@@ -45,8 +43,8 @@
 
 .sb-shortcuts__section-title {
   margin: 0 0 var(--space-3);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -62,6 +60,14 @@
   min-height: 26px;
 }
 
+.sb-shortcuts__row[data-gesture] {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  padding: var(--space-2) 0;
+}
+
 .sb-shortcuts__action {
   margin: 0;
   color: var(--text-primary);
@@ -74,12 +80,17 @@
   text-align: right;
 }
 
+.sb-shortcuts__row[data-gesture] .sb-shortcuts__keys {
+  text-align: left;
+}
+
 .sb-shortcuts__gesture {
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .sb-shortcuts__empty {
   margin: 0;
   color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }

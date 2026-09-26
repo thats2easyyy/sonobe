@@ -25,6 +25,31 @@ test.describe("command palette and app commands", () => {
     expect(problems).toEqual([]);
   });
 
+  test("Keyboard Shortcuts scrolls down through every section and never sideways", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    await runCommand(page, "Keyboard Shortcuts");
+    const sheet = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+    await expect(sheet).toBeVisible();
+    const sections = sheet.locator(".sb-shortcuts__sections");
+    const overflow = await sections.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+    expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
+    const gestures = sheet.getByRole("heading", { name: "Gestures" });
+    await gestures.scrollIntoViewIfNeeded();
+    await expect(gestures).toBeInViewport();
+    expect(await sections.evaluate((el) => el.scrollLeft)).toBe(0);
+    await sections.evaluate((el) => el.scrollTo(0, 0));
+    await sheet.getByLabel("Search shortcuts").focus();
+    await page.keyboard.press("Tab");
+    await expect(sheet.getByRole("region", { name: "Shortcuts" })).toBeFocused();
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => sections.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    expect(problems).toEqual([]);
+  });
+
   test("Insert Layer, Use as Mask, and Rename", async ({ page }) => {
     const problems = collectConsoleProblems(page);
     // The demo's layer target cables (@card.scale…) used to log React Flow #008 while their handles registered.

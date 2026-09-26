@@ -59,7 +59,7 @@ describe("editor session", () => {
 
     const declined = session.confirmDiscardChanges("open");
     const request = dialogs.getState().queue[0]!;
-    expect(request).toMatchObject({ kind: "choose", options: { title: 'Save changes to "Untitled"?', actions: [{ value: "save", variant: "primary" }, { value: "discard", variant: "danger" }, { value: "cancel" }] } });
+    expect(request).toMatchObject({ kind: "choose", options: { title: "Save changes to “Untitled”?", actions: [{ value: "discard", variant: "danger", align: "start" }, { value: "cancel" }, { value: "save", variant: "primary" }] } });
     dialogs.getState().dismiss(request.id);
     expect(await declined).toBe(false);
 
@@ -152,7 +152,7 @@ describe("editor session", () => {
     expect((await other.openProject("browser:Scripted")).ok).toBe(true);
     expect(other.scriptTrust.getState()).toMatchObject({ required: true, trusted: false, scriptCount: 1 });
     const asking = other.runtime.requestScriptTrust();
-    await vi.waitFor(() => expect(dialogs.getState().queue[0]).toMatchObject({ kind: "choose", options: { title: 'Run the scripts in "Scripted"?', actions: [{ value: "trust" }, { value: "cancel" }] } }));
+    await vi.waitFor(() => expect(dialogs.getState().queue[0]).toMatchObject({ kind: "choose", options: { title: "Run the scripts in “Scripted”?", actions: [{ value: "trust" }, { value: "cancel" }] } }));
     dialogs.getState().settle(dialogs.getState().queue[0]!.id, "trust");
     expect(await asking).toBe(true);
     expect(other.scriptTrust.getState().trusted).toBe(true);

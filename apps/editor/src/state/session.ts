@@ -156,12 +156,12 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     options.confirmDiscard ??
     (async ({ name, action }) => {
       const choice = await dialogs.choose<DiscardChoice>({
-        title: `Save changes to "${name}"?`,
-        message: action === "reload" ? "The project changed on disk. Your unsaved changes will be lost if you reload." : "Your changes will be lost if you don't save them.",
+        title: `Save changes to “${name}”?`,
+        message: action === "reload" ? "The prototype changed on disk. Your unsaved changes will be lost if you reload." : "Your changes will be lost if you don't save them.",
         actions: [
-          { value: "save", label: "Save", variant: "primary" },
-          { value: "discard", label: "Don't Save", variant: "danger" },
+          { value: "discard", label: "Don't Save", variant: "danger", align: "start" },
           { value: "cancel", label: "Cancel" },
+          { value: "save", label: "Save", variant: "primary" },
         ],
       });
       return choice ?? "cancel";
@@ -194,8 +194,8 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     ...(options.trustPersistence ? { persistence: options.trustPersistence } : {}),
     confirm: async ({ name, scriptCount }) => {
       const choice = await dialogs.choose<"trust" | "cancel">({
-        title: `Run the scripts in "${name ?? "this prototype"}"?`,
-        message: `This project has ${scriptCount === 1 ? "a JavaScript patch" : `${scriptCount} JavaScript patches`}. Scripts can use the network and read what you type into the prototype. Only trust projects from people you trust.`,
+        title: `Run the scripts in “${name ?? "this prototype"}”?`,
+        message: `This prototype has ${scriptCount === 1 ? "a JavaScript patch" : `${scriptCount} JavaScript patches`}. Scripts can use the network and read what you type into it. Only trust prototypes from people you trust.`,
         actions: [
           { value: "trust", label: "Trust and Run", variant: "primary" },
           { value: "cancel", label: "Not Now" },

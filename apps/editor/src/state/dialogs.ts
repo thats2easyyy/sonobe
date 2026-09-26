@@ -12,7 +12,7 @@
  *   switch (request.kind) {
  *     case "confirm": // title, message, confirmLabel/cancelLabel, danger → settle(true | false)
  *     case "prompt":  // defaultValue, placeholder, validate(value) → message or null → settle(text | null)
- *     case "choose":  // actions [{ value, label, variant }] → settle(action.value | null)
+ *     case "choose":  // actions [{ value, label, variant, align }] → settle(action.value | null)
  *     case "pick":    // items [{ value, label, description }] → settle(item.value | null)
  *   }
  * }
@@ -31,6 +31,8 @@ export interface DialogAction<T extends string = string> {
   value: T;
   label: string;
   variant?: DialogVariant;
+  /** "start" puts the action on the left, for a destructive or tertiary choice; a danger action there is quiet, not a red fill. */
+  align?: "start";
 }
 
 interface DialogBase {

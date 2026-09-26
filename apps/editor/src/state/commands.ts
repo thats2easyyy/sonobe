@@ -121,7 +121,7 @@ function reportPaste(notify: Notify, result: PasteActionResult): void {
 
 function reportFile(notify: Notify, verb: string, result: FileResult): void {
   if (result.ok || result.cancelled) return;
-  notify({ title: `Couldn't ${verb}`, description: result.error ?? "Something went wrong.", tone: "danger" });
+  notify({ title: `Couldn't ${verb}`, ...(result.error ? { description: result.error } : {}), tone: "danger" });
 }
 
 const defaultClipboard = () => {
@@ -184,7 +184,7 @@ export function registerDocumentCommands(registry: CommandRegistry, session: Edi
       run: () => historyStep("Redo"),
     },
     { id: "file.new", title: "New Prototype", category: "File", shortcut: "Mod+N", allowInInput: true, icon: FilePlus, keywords: ["blank", "create"], run: async () => void (await session.newProject()) },
-    { id: "file.open", title: "Open…", category: "File", shortcut: "Mod+O", allowInInput: true, icon: FolderOpen, keywords: ["project", "load"], when: () => session.host !== null, disabledReason: "Opening projects needs the desktop app or a browser with folder access", run: async () => reportFile(notify, "open the project", await session.openProject()) },
+    { id: "file.open", title: "Open…", category: "File", shortcut: "Mod+O", allowInInput: true, icon: FolderOpen, keywords: ["project", "load"], when: () => session.host !== null, disabledReason: "Opening prototypes needs the desktop app or a browser with folder access", run: async () => reportFile(notify, "open the prototype", await session.openProject()) },
     {
       id: "file.save",
       title: "Save",

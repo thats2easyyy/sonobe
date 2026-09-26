@@ -12,7 +12,7 @@ import { useCommandList, useCommands } from "../ui/commands/CommandProvider.tsx"
 import { isCommandHidden, type Command } from "../ui/commands/commandRegistry.ts";
 import { COMMAND_CATEGORY_ORDER } from "../ui/commands/paletteOrder.ts";
 import type { Platform } from "../ui/commands/shortcutManager.ts";
-import { Dialog } from "../ui/Dialog.tsx";
+import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
 import { Kbd } from "../ui/Kbd.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import "./KeyboardShortcutsDialog.css";
@@ -32,6 +32,8 @@ export interface ShortcutSection {
 
 export const PATCH_KEYS_SECTION = "Patch Editor Keys";
 export const GESTURES_SECTION = "Gestures";
+
+const PANEL_EDGE_ENTRY: ShortcutEntry = { title: "Reset a panel's width", keys: "Double-click its edge" };
 
 /** Pointer gestures, in the platform's modifier names. */
 export function gestureEntries(platform: Platform): ShortcutEntry[] {
@@ -58,6 +60,7 @@ export function shortcutSections(commands: readonly Command[], registry: Registr
     const category = command.category ?? "General";
     byCategory.set(category, [...(byCategory.get(category) ?? []), { title: command.id === "app.commandPalette" ? "Command Palette" : command.title, shortcut: command.shortcut }]);
   }
+  byCategory.set("General", [...(byCategory.get("General") ?? []), PANEL_EDGE_ENTRY]);
   const rank = (category: string) => {
     const index = COMMAND_CATEGORY_ORDER.indexOf(category);
     return index === -1 ? COMMAND_CATEGORY_ORDER.length : index;
@@ -87,7 +90,7 @@ export interface KeyboardShortcutsDialogProps {
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} aria-label="Keyboard shortcuts" width={760} modalScope="shortcuts" className="sb-shortcuts">
+    <Dialog open={open} onOpenChange={onOpenChange} width={DIALOG_WIDTH.lg} modalScope="shortcuts" className="sb-shortcuts">
       <ShortcutsBody onClose={() => onOpenChange(false)} />
     </Dialog>
   );
@@ -101,37 +104,40 @@ function ShortcutsBody({ onClose }: { onClose: () => void }) {
   const sections = useMemo(() => shortcutSections(commands, session.registry, platform), [commands, session.registry, platform]);
   const shown = filterShortcutSections(sections, query);
   return (
-    <div className="sb-shortcuts__body">
-      <header className="sb-shortcuts__header">
-        <h2 className="sb-shortcuts__title">Keyboard Shortcuts</h2>
+    <>
+      <Dialog.Header title="Keyboard Shortcuts" onClose={onClose} />
+      <div className="sb-shortcuts__search">
         <TextField
           size="sm"
           autoFocus
           aria-label="Search shortcuts"
           placeholder="Search shortcuts"
           leading={<Search size={12} strokeWidth={2} />}
-          containerClassName="sb-shortcuts__search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onCancel={() => (query ? setQuery("") : onClose())}
         />
-      </header>
-      <div className="sb-shortcuts__sections sb-scroll">
-        {shown.length === 0 && <p className="sb-shortcuts__empty">No shortcuts match “{query.trim()}”.</p>}
-        {shown.map((section) => (
-          <section key={section.title} className="sb-shortcuts__section" aria-label={section.title}>
-            <h3 className="sb-shortcuts__section-title">{section.title}</h3>
-            <dl className="sb-shortcuts__list">
-              {section.entries.map((entry, i) => (
-                <div key={`${entry.title}:${i}`} className="sb-shortcuts__row">
-                  <dt className="sb-shortcuts__action">{entry.title}</dt>
-                  <dd className="sb-shortcuts__keys">{entry.shortcut ? <Kbd shortcut={entry.shortcut} /> : <span className="sb-shortcuts__gesture">{entry.keys}</span>}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ))}
       </div>
-    </div>
+      <Dialog.Body className="sb-shortcuts__body">
+        <div className="sb-shortcuts__sections sb-scroll" role="region" aria-label="Shortcuts" tabIndex={0}>
+          {shown.length === 0 && <p className="sb-shortcuts__empty">No shortcuts match “{query.trim()}”.</p>}
+          <div className="sb-shortcuts__columns">
+            {shown.map((section) => (
+              <section key={section.title} className="sb-shortcuts__section" aria-label={section.title}>
+                <h3 className="sb-shortcuts__section-title">{section.title}</h3>
+                <dl className="sb-shortcuts__list">
+                  {section.entries.map((entry, i) => (
+                    <div key={`${entry.title}:${i}`} className="sb-shortcuts__row" data-gesture={!entry.shortcut || undefined}>
+                      <dt className="sb-shortcuts__action">{entry.title}</dt>
+                      <dd className="sb-shortcuts__keys">{entry.shortcut ? <Kbd shortcut={entry.shortcut} /> : <span className="sb-shortcuts__gesture">{entry.keys}</span>}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </div>
+      </Dialog.Body>
+    </>
   );
 }

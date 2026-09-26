@@ -18,7 +18,7 @@ describe("keyboard shortcuts cheat sheet", () => {
   it("lists commands with shortcuts in menu order, then single-key inserts and gestures", () => {
     const sections = shortcutSections(commands, getRegistry(), "mac");
     expect(sections.map((s) => s.title)).toEqual(["File", "View", "Patches", "General", PATCH_KEYS_SECTION, GESTURES_SECTION]);
-    expect(sections.find((s) => s.title === "General")!.entries).toEqual([{ title: "Command Palette", shortcut: ["Mod+K", "Mod+Shift+P"] }]);
+    expect(sections.find((s) => s.title === "General")!.entries).toEqual([{ title: "Command Palette", shortcut: ["Mod+K", "Mod+Shift+P"] }, { title: "Reset a panel's width", keys: "Double-click its edge" }]);
     const keys = sections.find((s) => s.title === PATCH_KEYS_SECTION)!.entries;
     expect(keys).toContainEqual({ title: "Insert Variable Broadcaster", shortcut: "W" });
     expect(keys).toContainEqual({ title: "Insert Pop Animation", shortcut: "A" });

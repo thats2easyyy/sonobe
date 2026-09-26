@@ -212,7 +212,7 @@ export function withScriptTrust<R extends EngineRegistry>(registry: R, allowed: 
         return;
       }
       const issue = (ctx.services as Partial<Pick<typeof ctx.services, "issue">>).issue;
-      const message = `Scripts in this project are paused. Trust the project to run "${ctx.node.name ?? (ctx.id as Id)}".`;
+      const message = `Scripts in this prototype are paused. Trust the prototype to run “${ctx.node.name ?? (ctx.id as Id)}”.`;
       if (typeof issue === "function") issue.call(ctx.services, "script_untrusted", "warning", message);
       else ctx.warnOnce?.("script_untrusted", message);
     },

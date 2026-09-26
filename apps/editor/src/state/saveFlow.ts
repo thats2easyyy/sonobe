@@ -15,14 +15,14 @@ export async function saveDocumentInteractively(document: DocumentStore, dialogs
   if (result.ok || result.errorCode !== "disk_changed") return result;
   const s = document.getState();
   const files = (s.externalChange?.paths ?? []).filter((p) => p !== ".");
-  const what = files.length ? `${files.slice(0, 3).join(", ")}${files.length > 3 ? ` and ${files.length - 3} more` : ""} changed on disk` : "The project changed on disk";
+  const what = files.length ? `${files.slice(0, 3).join(", ")}${files.length > 3 ? ` and ${files.length - 3} more` : ""} changed on disk` : "The prototype changed on disk";
   const choice = await dialogs.choose<SaveConflictChoice>({
-    title: `"${s.doc.project.name}" changed outside Sonobe`,
+    title: `“${s.doc.project.name}” changed outside Sonobe`,
     message: `${what} while you had unsaved changes. Save Anyway replaces those changes with your version. Reload uses the version on disk and drops your unsaved changes.`,
     actions: [
-      { value: "overwrite", label: "Save Anyway", variant: "danger" },
-      { value: "reload", label: "Reload", variant: "primary" },
+      { value: "overwrite", label: "Save Anyway", variant: "danger", align: "start" },
       { value: "cancel", label: "Cancel" },
+      { value: "reload", label: "Reload", variant: "primary" },
     ],
   });
   if (choice === "overwrite") return document.getState().save({ overwriteExternal: true });
