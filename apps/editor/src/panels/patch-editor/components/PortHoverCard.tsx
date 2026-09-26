@@ -10,7 +10,7 @@ import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { toCssColor } from "../../../ui/lib/colorMath.ts";
 import { useFloating } from "../../../ui/lib/useFloating.ts";
 import { formatValue, formatValueLong, isLoopValue, pickCopy, type LoopLike } from "@sonobe/core/graph";
-import { portKey, type GraphModel } from "../model/types.ts";
+import { addressNode, portKey, type GraphModel } from "../model/types.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
 import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { useWatchedCopy } from "../state/watch.ts";
@@ -27,7 +27,7 @@ export function PortHoverCard({ model }: { model: GraphModel }) {
   if (!hover || (hover.rect.width === 0 && hover.rect.height === 0)) return null;
   const port = model.ports.get(portKey(hover.side, hover.address));
   if (!port) return null;
-  return <Card key={hover.address} rect={hover.rect} side={hover.side} address={hover.address} model={model} />;
+  return <Card key={hover.address} rect={hover.rect} side={hover.side} address={hover.address} keyboard={hover.keyboard === true} model={model} />;
 }
 
 const inside = (r: DOMRect | RectLike, x: number, y: number) => x >= r.x - SLOP && x <= r.x + r.width + SLOP && y >= r.y - SLOP && y <= r.y + r.height + SLOP;
@@ -95,12 +95,16 @@ function LoopTable({ loop, type, name, format }: { loop: LoopLike; type: ValueTy
   );
 }
 
-function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "out"; address: string; model: GraphModel }) {
+function Card({ rect, side, address, keyboard, model }: { rect: RectLike; side: "in" | "out"; address: string; keyboard: boolean; model: GraphModel }) {
   const { liveEnabled, session } = usePatchEditor();
+  const armed = useUi((s) => s.armed);
   const cardRef = useRef<HTMLDivElement | null>(null);
   useDismiss(rect, cardRef);
   const port = model.ports.get(portKey(side, address))!;
   const floating = useFloating<HTMLDivElement>({ open: true, anchor: rect, placement: side === "in" ? "left-start" : "right-start", offset: 12 });
+  const nodeId = addressNode(address)?.nodeId;
+  const ownerData = model.nodes.find((n) => n.id === nodeId)?.data;
+  const owner = ownerData && "title" in ownerData ? ownerData.title : undefined;
   const liveAddress = side === "out" ? port.address : port.link;
   const live = useLiveValue(liveEnabled ? liveAddress : null);
   const copy = useWatchedCopy(session);
@@ -115,19 +119,22 @@ function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "ou
   if (loop) valueLine = copy === null ? `Loop of ${loop.items.length}` : formatValueLong(loop, port.type, { ...enumOptions, copy });
   else if (live !== undefined) valueLine = port.type === "pulse" ? "Fires for one frame at a time" : format(live, port.type);
   else if (side === "in" && !port.connected && port.type !== "pulse" && !layerTarget) valueLine = literal !== undefined ? format(literal, port.type) : port.defaultValue !== undefined ? `${format(port.defaultValue, port.type)} (default)` : null;
-  const hint = loop
-    ? "Hover a copy to watch it here, in every patch, and in the inspector"
-    : side === "out"
-      ? "Drag to connect · click, then ⇧-click inputs"
+  const keyHint = side === "out" ? "Enter arms it, then Enter on an input connects (⇧ for several)" : armed ? `Enter connects ${armed.label}` : "Arm an output with Enter, then come here";
+  const pointerHint =
+    side === "out"
+      ? port.connected
+        ? null
+        : "Drag to connect, or select it, then select inputs (⇧ for several)"
       : port.knob
-        ? "Click the chip to tune it in Knobs"
+        ? "Select the chip to tune it in Knobs"
         : port.connected
           ? "Drag the cable end to move or remove it"
           : layerTarget
-            ? "Drag a cable here, or click Drive… to pick a patch"
+            ? "Drag a cable here, or use Drive… to pick a patch"
             : port.literal !== undefined
               ? "Drag to scrub · ⌥-click to reset"
-              : "Drag onto the canvas to add a patch";
+              : "Drag into empty space to add a patch";
+  const hint = loop ? "Hover a copy to watch it here, in every patch, and in the inspector" : keyboard ? keyHint : pointerHint;
   const placeRef = floating.ref;
   const setRefs = useCallback(
     (el: HTMLDivElement | null) => {
@@ -141,7 +148,7 @@ function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "ou
       <div ref={setRefs} className="sb-pe-hovercard" style={floating.style} {...(loop ? { role: "dialog", "aria-label": `${port.name}: live copies`, "data-interactive": "" } : { role: "tooltip" })}>
         <div className="sb-pe-hovercard__head">
           <PortGlyph type={port.type} size={9} />
-          <span className="sb-pe-hovercard__name">{port.name}</span>
+          <span className="sb-pe-hovercard__name">{owner ? `${owner} · ${port.name}` : port.name}</span>
           <span className="sb-pe-hovercard__type">
             {VALUE_TYPE_LABELS[port.type]}
             {port.wholeLoop ? " · whole loop" : port.loop ? " · loop" : ""}
@@ -171,7 +178,7 @@ function Card({ rect, side, address, model }: { rect: RectLike; side: "in" | "ou
             {port.issue.message}
           </p>
         )}
-        <div className="sb-pe-hovercard__hint">{hint}</div>
+        {hint && <div className="sb-pe-hovercard__hint">{hint}</div>}
       </div>
     </Portal>
   );

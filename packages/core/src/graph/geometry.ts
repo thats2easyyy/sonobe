@@ -15,7 +15,7 @@ export const COMMENT_PADDING = { top: 36, right: 20, bottom: 20, left: 20 } as c
 /** Horizontal control-point distance for a cable. */
 export function cableControlOffset(sx: number, tx: number): number {
   const dx = tx - sx;
-  return dx >= 0 ? Math.max(36, dx * 0.5) : Math.max(60, Math.min(160, -dx * 0.5));
+  return dx >= 0 ? Math.max(Math.min(36, 10 + dx * 0.5), dx * 0.5) : Math.max(60, Math.min(160, -dx * 0.5));
 }
 
 /** SVG path for a cable from an output (sx, sy) into an input (tx, ty). */

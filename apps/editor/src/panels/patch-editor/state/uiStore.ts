@@ -19,6 +19,17 @@ export interface HoverPort {
   side: PortSide;
   /** Viewport rect of the row. */
   rect: { x: number; y: number; width: number; height: number };
+  /** Opened by keyboard focus, so the card's hint speaks of keys, not the pointer. */
+  keyboard?: true;
+}
+
+/** Why a cable was refused, shown where it was dropped. */
+export interface ConnectHintState {
+  /** Where the cable was released, in viewport pixels. */
+  client: { x: number; y: number };
+  reason: string;
+  hint?: string;
+  converter?: { label: string; insert: () => void };
 }
 
 export interface DetachState {
@@ -34,10 +45,14 @@ export interface PatchEditorUiState {
   /** An output clicked for shift-click fan-out. */
   armed: ArmedPort | null;
   hoverPort: HoverPort | null;
+  connectHint: ConnectHintState | null;
   /** A cable picked up from its input end. */
   detaching: DetachState | null;
   /** Type of the port a cable is being dragged from (connection line color). */
   draggingType: ValueType | null;
+  /** The node that cable started from, and which end the person holds (a picked-up cable is held by its output). */
+  draggingFrom: string | null;
+  draggingSide: PortSide | null;
   /** Cable highlighted for splicing while dragging a patch with ⌘ held. */
   spliceEdge: string | null;
   /** Knife stroke in canvas-local screen coordinates. */
@@ -65,8 +80,11 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
   return createStore<PatchEditorUiState>()((set) => ({
     armed: null,
     hoverPort: null,
+    connectHint: null,
     detaching: null,
     draggingType: null,
+    draggingFrom: null,
+    draggingSide: null,
     spliceEdge: null,
     knife: null,
     ghosts: null,

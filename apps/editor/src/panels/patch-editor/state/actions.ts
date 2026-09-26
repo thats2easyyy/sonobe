@@ -13,6 +13,7 @@ import {
   type Op,
   type PatchNode,
   type ValueType,
+  walkLayers,
 } from "@sonobe/core";
 import type { PatchRegistry } from "@sonobe/patches";
 import type { ReactFlowInstance } from "@xyflow/react";
@@ -102,6 +103,8 @@ export interface ActionDeps {
   pointer: () => XY | null;
   openPicker: (request: PickerRequest) => void;
   openInfo: (patchId: Id) => void;
+  /** Called with every patch an insert adds, so the view can pan to it when it landed off screen. */
+  reveal?: (patchId: Id) => void;
 }
 
 export interface TidyUpOptions {
@@ -122,10 +125,12 @@ export interface PatchEditorActions {
   apply(ops: readonly Op[], label: string, options?: { coalesceKey?: string; quiet?: boolean }): ApplyOpsResult;
   insertPatch(type: string, position: XY, options?: InsertPatchOptions): Id | undefined;
   insertAtPointer(type: string): void;
-  connect(from: string, to: string): boolean;
+  /** `client` (viewport pixels) is where a refusal is explained, when there is no pointer to say (a keyboard connect). */
+  connect(from: string, to: string, client?: XY): boolean;
   reroute(from: string, oldTo: string, newTo: string): void;
   disconnect(addresses: readonly string[], label?: string): void;
-  explainConnection(from: string, to: string, position: XY): void;
+  /** Say why two ports don't connect: in a popover at `client` (viewport pixels) when the person dropped a cable there, otherwise in a toast. `position` is where an inserted converter goes. */
+  explainConnection(from: string, to: string, position: XY, client?: XY): void;
   setLiteral(address: string, value: InputValue | null, options?: { coalesce?: boolean }): void;
   rename(patchId: Id, name: string): void;
   toggleMute(ids?: readonly Id[]): void;
@@ -262,6 +267,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       if (id) {
         select([id]);
         if (connect?.side === "in") connected([connect.address]);
+        deps.reveal?.(id);
       }
       return id;
     },
@@ -272,7 +278,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       actions.insertPatch(type, { x: pointer.x - 24, y: pointer.y - HEADER_HEIGHT / 2 });
     },
 
-    connect(from, to) {
+    connect(from, to, client) {
       const current = doc().components[componentId];
       const existing = findInput(current, to);
       if (isLinkInput(existing) && existing.link === from) return true;
@@ -280,7 +286,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const result = apply([{ op: "connect", component: componentId, from, to }], `Connect ${portLabel(d, componentId, registry, from)} to ${portLabel(d, componentId, registry, to)}`, { quiet: true });
       if (!result.ok) {
         const flow = deps.flow();
-        actions.explainConnection(from, to, deps.pointer() ?? (flow ? centerOfView(flow) : { x: 0, y: 0 }));
+        actions.explainConnection(from, to, deps.pointer() ?? (flow ? centerOfView(flow) : { x: 0, y: 0 }), client);
       } else connected([to]);
       return result.ok;
     },
@@ -313,7 +319,7 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       ui.getState().set({ selectedEdges: ui.getState().selectedEdges.filter((id) => !live.some((a) => id === `cable:${a}`)) });
     },
 
-    explainConnection(from, to, position) {
+    explainConnection(from, to, position, client) {
       const check = checkConnection(doc(), componentId, registry, from, to);
       if (check.ok) return;
       const suggestion = check.suggestions.find((s) => s.ops?.some((op) => op.op === "addPatch"));
@@ -322,39 +328,50 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const d = doc();
       const fromType = portTypeAt(d, componentId, registry, from, "out");
       const toType = portTypeAt(d, componentId, registry, to, "in");
+      const plainReason = (reason: string | undefined) => {
+        let text = (reason ?? "Those ports don't connect.").replace(/\s*\([^()]*→[^()]*\)/, "");
+        for (const id of new Set([from, to].map((address) => address.split(".")[0]!))) {
+          const node = component()?.patches[id];
+          if (node) text = text.replaceAll(`"${id}"`, `“${patchTitle(node, getPatchSpec(registry, node.type))}”`);
+        }
+        return text;
+      };
       const title =
         check.code === "type_mismatch" && fromType && toType
           ? `${portLabel(d, componentId, registry, from)} is ${article(VALUE_TYPE_LABELS[fromType])}, but ${portLabel(d, componentId, registry, to)} needs ${article(VALUE_TYPE_LABELS[toType])}.`
-          : (check.reason ?? "Those ports don't connect.");
+          : plainReason(check.reason);
+      const description = suggestion ? suggestion.description : check.hint;
+      const insert =
+        suggestion && converter
+          ? () => {
+              const placed: Rect[] = [];
+              const ops = placeSuggestion(suggestion, componentId, position).map((op): Op => {
+                if (op.op !== "addPatch" || !op.patch.ui) return op;
+                const node: PatchNode = { type: op.patch.type, inputs: {}, ui: { x: op.patch.ui.x, y: op.patch.ui.y } };
+                if (op.patch.typeParam) node.typeParam = op.patch.typeParam;
+                const at = freeSpot(node, op.patch.ui, "any", placed);
+                placed.push({ ...at, ...estimatePatchSize(doc(), registry, node, { component: componentId, measure: nodeTextMeasurer() }) });
+                return { ...op, patch: { ...op.patch, ui: { ...op.patch.ui, ...at } } };
+              });
+              const result = apply(ops, `Insert ${converter.name} between ${portLabel(doc(), componentId, registry, from)} and ${portLabel(doc(), componentId, registry, to)}`);
+              const id = Object.values(result.idMap)[0];
+              if (result.ok && id) {
+                select([id]);
+                connected([to]);
+              }
+            }
+          : undefined;
+      const label = converter ? `Insert ${converter.name}` : undefined;
+      if (client) {
+        ui.getState().set({ connectHint: { client, reason: title, ...(description ? { hint: description } : {}), ...(insert && label ? { converter: { label, insert } } : {}) } });
+        return;
+      }
       void toast({
         id: "patch-editor-connect",
         title,
-        ...(suggestion ? { description: suggestion.description } : check.hint ? { description: check.hint } : {}),
+        ...(description ? { description } : {}),
         tone: "warn",
-        ...(suggestion && converter
-          ? {
-              action: {
-                label: `Insert ${converter.name}`,
-                onClick: () => {
-                  const placed: Rect[] = [];
-                  const ops = placeSuggestion(suggestion, componentId, position).map((op): Op => {
-                    if (op.op !== "addPatch" || !op.patch.ui) return op;
-                    const node: PatchNode = { type: op.patch.type, inputs: {}, ui: { x: op.patch.ui.x, y: op.patch.ui.y } };
-                    if (op.patch.typeParam) node.typeParam = op.patch.typeParam;
-                    const at = freeSpot(node, op.patch.ui, "any", placed);
-                    placed.push({ ...at, ...estimatePatchSize(doc(), registry, node, { component: componentId, measure: nodeTextMeasurer() }) });
-                    return { ...op, patch: { ...op.patch, ui: { ...op.patch.ui, ...at } } };
-                  });
-                  const result = apply(ops, `Insert ${converter.name} between ${portLabel(doc(), componentId, registry, from)} and ${portLabel(doc(), componentId, registry, to)}`);
-                  const id = Object.values(result.idMap)[0];
-                  if (result.ok && id) {
-                    select([id]);
-                    connected([to]);
-                  }
-                },
-              },
-            }
-          : {}),
+        ...(insert && label ? { action: { label, onClick: insert } } : {}),
       });
     },
 
@@ -668,7 +685,15 @@ export function createPatchEditorActions(deps: ActionDeps): PatchEditorActions {
       const target = doc().components[targetId];
       const trimmed = name.trim();
       if (!target || !trimmed || trimmed === target.name) return;
-      apply([{ op: "updateComponent", id: targetId, name: trimmed }], `Rename component “${target.name}” to “${trimmed}”`);
+      // Instances still carrying the old name follow it; one an author renamed keeps theirs.
+      const ops: Op[] = [{ op: "updateComponent", id: targetId, name: trimmed }];
+      for (const [owner, c] of Object.entries(doc().components)) {
+        for (const [id, node] of Object.entries(c.patches)) if (node.component === targetId && node.name === target.name) ops.push({ op: "updatePatch", component: owner, id, name: trimmed });
+        walkLayers(c.layers, (layer) => {
+          if (layer.component === targetId && layer.name === target.name) ops.push({ op: "updateLayer", component: owner, id: layer.id, name: trimmed });
+        });
+      }
+      apply(ops, `Rename component “${target.name}” to “${trimmed}”`);
     },
 
     publishPort(address, side) {

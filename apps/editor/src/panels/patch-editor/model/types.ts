@@ -43,4 +43,6 @@ export type InterfaceFlowNode = Node<InterfaceNodeData, "interface">;
 export type CommentFlowNode = Node<CommentNodeData, "comment">;
 export type FlowNode = PatchFlowNode | LayerFlowNode | InterfaceFlowNode | CommentFlowNode;
 
-export type CableFlowEdge = Edge<CableData, "cable">;
+/** A cable's data plus whether a selected node is at either end. */
+export type CableFlowData = CableData & { related?: boolean };
+export type CableFlowEdge = Edge<CableFlowData, "cable">;

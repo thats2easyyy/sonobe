@@ -9,6 +9,7 @@ import { useStore } from "zustand";
 import { categoryColorVar } from "../../../theme/tokens.ts";
 import { Button } from "../../../ui/Button.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
+import { Tooltip } from "../../../ui/Tooltip.tsx";
 import { PRESENCE_FLASH_MS } from "../../../state/presence.ts";
 import { loopBadgeReserve, loopLengthOf } from "@sonobe/core/graph";
 import type { CommentFlowNode, InterfaceFlowNode, LayerFlowNode, NodeIssue, PatchFlowNode } from "../model/types.ts";
@@ -16,13 +17,26 @@ import { usePatchEditor, useLiveValue, useUi } from "../state/context.ts";
 import { CATEGORY_ICONS, LAYER_ICONS } from "./icons.ts";
 import { CollapsedPorts, PortRows } from "./PortRows.tsx";
 
+const FOCUS_FRAMES = 10;
+
 function TitleInput({ initial, onCommit, onCancel, multiline = false, ariaLabel }: { initial: string; onCommit: (value: string) => void; onCancel: () => void; multiline?: boolean; ariaLabel: string }) {
   const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const [value, setValue] = useState(initial);
   const done = useRef(false);
+  // A node that was just added stays hidden until React Flow measures it, and a hidden field can't take focus.
   useLayoutEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
+    const el = ref.current;
+    if (!el) return;
+    let frame = 0;
+    let tries = 0;
+    const focus = () => {
+      if (getComputedStyle(el).visibility !== "hidden") {
+        el.focus();
+        el.select();
+      } else if (++tries < FOCUS_FRAMES) frame = requestAnimationFrame(focus);
+    };
+    focus();
+    return () => cancelAnimationFrame(frame);
   }, []);
   const commit = () => {
     if (done.current) return;
@@ -51,6 +65,12 @@ function TitleInput({ initial, onCommit, onCancel, multiline = false, ariaLabel 
     },
   };
   return multiline ? <textarea rows={2} {...props} /> : <input {...props} />;
+}
+
+/** The patch's name; a renamed patch shows what it is in a tooltip. */
+function NodeTitle({ title, specName }: { title: string; specName: string | undefined }) {
+  const label = <span className="sb-pe-node__title">{title}</span>;
+  return specName ? <Tooltip content={specName}>{label}</Tooltip> : label;
 }
 
 function IssueBadge({ issues }: { issues: readonly NodeIssue[] }) {
@@ -164,9 +184,7 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
             onCancel={() => ui.getState().set({ editingTitle: null, namingComponent: null })}
           />
         ) : (
-          <span className="sb-pe-node__title" title={data.customName ? data.specName : undefined}>
-            {data.title}
-          </span>
+          <NodeTitle title={data.title} specName={data.customName ? data.specName : undefined} />
         )}
         {showVariant && <span className="sb-pe-chip">{typeLabel(data.typeParam!).replace(/ \[.*\]$/, "").replace(/^on\/off \(boolean\)$/, "boolean")}</span>}
         {showLoop && (

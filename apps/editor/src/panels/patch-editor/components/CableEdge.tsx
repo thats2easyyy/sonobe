@@ -343,6 +343,7 @@ export const CableEdgeView = memo(function CableEdgeView({ id, sourceX, sourceY,
     <g
       className="sb-pe-cable"
       data-selected={selected || undefined}
+      data-related={data.related || undefined}
       data-invalid={data.invalid ? true : undefined}
       data-loop={data.loop || undefined}
       data-live={live || undefined}
@@ -351,7 +352,7 @@ export const CableEdgeView = memo(function CableEdgeView({ id, sourceX, sourceY,
       style={{ "--sb-cable": data.invalid ? "var(--danger)" : portColorVar(data.sourceType) } as CSSProperties}
     >
       {data.loop && <path className="sb-pe-cable__loop" d={d} />}
-      {(live || selected || splicing) && <path className="sb-pe-cable__glow" d={d} />}
+      <path className="sb-pe-cable__glow" d={d} data-on={live || selected || splicing || data.related || undefined} />
       <path className="sb-pe-cable__wire" d={d} />
       <path className="sb-pe-cable__hit react-flow__edge-interaction" d={d} />
       {stateSource && <Orb id={id} d={d} sx={sourceX} sy={sourceY} tx={targetX} ty={targetY} source={stateSource} target={data.to} color={data.invalid ? "var(--danger)" : portColorVar(data.sourceType)} pulse={data.sourceType === "pulse"} reduced={reducedMotion} />}

@@ -82,6 +82,7 @@ interface Palette {
   textAccent: string;
   category: Record<PatchCategory, string>;
   comment: Record<string, string>;
+  commentFill: Record<string, string>;
 }
 
 function palette(theme: ThemeName): Palette {
@@ -102,8 +103,15 @@ function palette(theme: ThemeName): Palette {
     textAccent: t["text-accent"],
     category: CATEGORY_COLORS[theme],
     comment: COMMENT_COLORS[theme],
+    commentFill: COMMENT_FILLS[theme],
   };
 }
+
+/** Frame fills by comment color (patch-editor.css `--sb-comment-fill-<name>`): brighter than the title colors for yellow, orange and pink, which go muddy at a low tint. */
+export const COMMENT_FILLS: Record<ThemeName, Record<string, string>> = {
+  dark: { ...COMMENT_COLORS.dark, yellow: "#F6D220", orange: "#FD8540", pink: "#FC2D92" },
+  light: { ...COMMENT_COLORS.light, yellow: "#DEBB1B", orange: "#FC6D14", pink: "#ED1585" },
+};
 
 const PALETTES: Record<ThemeName, Palette> = { dark: palette("dark"), light: palette("light") };
 
@@ -238,8 +246,8 @@ function drawNode(p: Palette, node: GraphNode, box: Rect, shape: NodeShape): str
   const issue = issues.length ? (issues.some((i) => i.severity === "error") ? p.danger : p.warn) : undefined;
   parts.push(el("rect", { x: box.x, y: box.y, width: box.width, height: box.height, rx: 8, fill: p.node }));
   // The header: the category color over the node background, with a hairline under it.
-  parts.push(el("path", { d: collapsed ? roundedRect(box.x, box.y, box.width, B.header, 8, 8) : roundedRect(box.x, box.y, box.width, B.header, 8, 0), fill: accent, "fill-opacity": data.kind === "layer" ? 0.2 : 0.15 }));
-  if (!collapsed) parts.push(el("rect", { x: box.x, y: box.y + B.header - 1, width: box.width, height: 1, fill: accent, "fill-opacity": 0.2 }));
+  parts.push(el("path", { d: collapsed ? roundedRect(box.x, box.y, box.width, B.header, 8, 8) : roundedRect(box.x, box.y, box.width, B.header, 8, 0), fill: accent, "fill-opacity": p.theme === "light" ? 0.3 : 0.26 }));
+  if (!collapsed) parts.push(el("rect", { x: box.x, y: box.y + B.header - 1, width: box.width, height: 1, fill: accent, "fill-opacity": 0.4 }));
   parts.push(el("rect", { x: box.x + 8, y: box.y + 6, width: B.icon, height: B.icon, rx: 3, fill: accent, "fill-opacity": 0.26 }));
   parts.push(el("circle", { cx: box.x + 8 + B.icon / 2, cy: box.y + 6 + B.icon / 2, r: 3, fill: accent }));
   // Chips after the title, drawn from the right edge back.
@@ -322,13 +330,14 @@ function drawComment(p: Palette, node: GraphNode): string {
   const [x, y, width, height] = [node.position.x, node.position.y, node.width ?? NODE_BOX.comment.width, node.height ?? NODE_BOX.comment.height];
   const color = p.comment[data.color ?? "gray"] ?? p.comment.gray!;
   const gray = (data.color ?? "gray") === "gray";
+  const fill = p.commentFill[data.color ?? "gray"] ?? color;
   const title = fit(data.text.split("\n")[0]!.trim(), "comment", Math.max(0, width - 44));
   return el(
     "g",
     { "data-comment": data.commentId },
     [
-      el("rect", { x, y, width, height, rx: 12, fill: gray ? p.text : color, "fill-opacity": gray ? 0.025 : 0.06 }),
-      el("rect", { x: x + 0.5, y: y + 0.5, width: width - 1, height: height - 1, rx: 11.5, fill: "none", stroke: gray ? p.border.color : color, "stroke-opacity": gray ? 0.06 : 0.2 }),
+      el("rect", { x, y, width, height, rx: 12, fill: gray ? p.text : fill, "fill-opacity": gray ? 0.025 : p.theme === "light" ? 0.08 : 0.11 }),
+      el("rect", { x: x + 0.5, y: y + 0.5, width: width - 1, height: height - 1, rx: 11.5, fill: "none", stroke: gray ? p.border.color : fill, "stroke-opacity": gray ? 0.06 : 0.34 }),
       text(x + 14, y + 21, title, "comment", gray ? p.tertiary : color),
     ].join(""),
   );

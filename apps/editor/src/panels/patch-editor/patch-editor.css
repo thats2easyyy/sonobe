@@ -19,6 +19,10 @@
   --sb-comment-purple: #a585f0;
   --sb-comment-blue: #5f9ee8;
   --sb-comment-green: #5dba7f;
+  --sb-comment-fill-mix: 11%;
+  --sb-comment-fill-yellow: #f6d220;
+  --sb-comment-fill-orange: #fd8540;
+  --sb-comment-fill-pink: #fc2d92;
 }
 
 [data-theme="light"] .sb-pe,
@@ -29,6 +33,10 @@
   --sb-comment-purple: #7a55cf;
   --sb-comment-blue: #2f74c4;
   --sb-comment-green: #2e8a52;
+  --sb-comment-fill-mix: 8%;
+  --sb-comment-fill-yellow: #debb1b;
+  --sb-comment-fill-orange: #fc6d14;
+  --sb-comment-fill-pink: #ed1585;
 }
 
 .sb-pe__canvas {
@@ -61,17 +69,49 @@
   margin: 0 0 var(--space-3) var(--space-4);
   padding: 0;
   background: transparent;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   line-height: 16px;
 }
 
 .sb-pe .react-flow__attribution a {
-  color: var(--text-disabled);
+  color: var(--text-tertiary);
   text-decoration: none;
 }
 
 .sb-pe .react-flow__attribution a:hover {
   color: var(--text-secondary);
+}
+
+/* A graph that runs past the pane fades out at that edge, so it reads as continuing. Opacity only. */
+.sb-pe__canvas::before,
+.sb-pe__canvas::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.sb-pe__canvas::after {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  background: linear-gradient(to left, var(--canvas-bg), transparent);
+}
+
+.sb-pe__canvas::before {
+  right: 0;
+  bottom: 0;
+  left: 104px;
+  height: 24px;
+  background: linear-gradient(to top, var(--canvas-bg), transparent);
+}
+
+.sb-pe__canvas[data-crop-right]::after,
+.sb-pe__canvas[data-crop-bottom]::before {
+  opacity: 1;
 }
 
 /* Until the first fit, don't flash the graph at 100% from the corner. */
@@ -104,6 +144,13 @@
     0 8px 20px -10px rgba(0, 0, 0, 0.6);
 }
 
+@media (forced-colors: active) {
+  .sb-pe .react-flow__node:focus-visible .sb-pe-node {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
 /* ---------------------------------------------------------------------- */
 /* Nodes                                                                   */
 /* ---------------------------------------------------------------------- */
@@ -120,10 +167,15 @@
     0 8px 20px -10px rgba(0, 0, 0, 0.6);
   font-size: var(--font-size-xs);
   line-height: 1.2;
+  --sb-pe-header-tint: 26%;
+  --sb-pe-header-lift: 12%;
+  --sb-pe-header-mix: var(--sb-pe-header-tint);
   transition: opacity var(--duration-base) var(--ease-standard);
 }
 
 [data-theme="light"] .sb-pe-node {
+  --sb-pe-header-tint: 30%;
+  --sb-pe-header-lift: 6%;
   box-shadow:
     0 0 0 1px var(--patch-node-border),
     0 6px 16px -8px rgba(20, 20, 40, 0.18);
@@ -421,10 +473,17 @@
   gap: var(--space-3);
   height: 28px;
   padding: 0 var(--space-4) 0 var(--space-4);
-  border-bottom: 1px solid color-mix(in srgb, var(--sb-cat) 20%, var(--patch-node-border));
+  border-bottom: 1px solid color-mix(in srgb, var(--sb-cat) 40%, var(--patch-node-border));
   border-radius: var(--sb-pe-node-radius) var(--sb-pe-node-radius) 0 0;
-  background: color-mix(in srgb, var(--sb-cat) 15%, var(--patch-node-bg));
+  background: color-mix(in oklch, var(--sb-cat) var(--sb-pe-header-mix), var(--patch-node-bg));
   cursor: grab;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .sb-pe-node:hover .sb-pe-node__header {
+    --sb-pe-header-mix: calc(var(--sb-pe-header-tint) + var(--sb-pe-header-lift));
+  }
 }
 
 .sb-pe .react-flow__node.dragging .sb-pe-node__header {
@@ -697,6 +756,9 @@ textarea.sb-pe-title-input {
   gap: var(--space-3);
   min-width: 0;
   height: 100%;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .sb-pe-port--in {
@@ -712,6 +774,30 @@ textarea.sb-pe-title-input {
   flex: 0 1 auto;
   justify-content: flex-end;
   padding-right: var(--space-5);
+}
+
+.sb-pe-port:focus {
+  outline: none;
+}
+
+.sb-pe-port:focus-visible {
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  .sb-pe-port:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+@media (hover: hover) {
+  .sb-pe-port:not(.sb-pe-port--spacer):hover {
+    background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+    border-radius: var(--radius-xs);
+  }
 }
 
 .sb-pe-port__label {
@@ -777,14 +863,32 @@ textarea.sb-pe-title-input {
     box-shadow var(--duration-base) var(--ease-standard);
 }
 
+/* An unconnected port is hollow: a full-strength ring that reads on the node in both themes. The glows below layer over it. */
+.sb-pe-handle .sb-portglyph:not([data-connected], [data-glyph="ring"]) {
+  --sb-pe-ring: inset 0 0 0 1.5px var(--sb-port-color);
+  background: color-mix(in srgb, var(--sb-port-color) 16%, transparent);
+  box-shadow: var(--sb-pe-ring);
+}
+
+.sb-pe-handle .sb-portglyph[data-glyph="ring"] {
+  --sb-pe-ring: inset 0 0 0 calc(var(--sb-port-size) * 0.2) var(--sb-port-color);
+}
+
+.sb-pe-handle .sb-portglyph[data-live] {
+  box-shadow:
+    var(--sb-pe-ring, 0 0 transparent),
+    0 0 0 3px color-mix(in srgb, var(--sb-port-color) 30%, transparent);
+}
+
 .sb-pe .react-flow__handle.sb-pe-handle:hover .sb-portglyph,
 .sb-pe .react-flow__handle.sb-pe-handle.connectingto .sb-portglyph {
-  opacity: 1;
   scale: 1.3;
 }
 
 .sb-pe .react-flow__handle.sb-pe-handle.connectingto.valid .sb-portglyph {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sb-port-color) 40%, transparent);
+  box-shadow:
+    var(--sb-pe-ring, 0 0 transparent),
+    0 0 0 3px color-mix(in srgb, var(--sb-port-color) 40%, transparent);
 }
 
 .sb-pe .react-flow__handle.sb-pe-handle.connectingto:not(.valid) .sb-portglyph {
@@ -830,21 +934,39 @@ textarea.sb-pe-title-input {
   opacity: 1;
 }
 
-.sb-pe-port[data-armable="true"] .sb-portglyph {
-  opacity: 1;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sb-port-color) 35%, transparent);
+.sb-pe-port:is([data-armable="true"], [data-armable="convert"]) .sb-portglyph {
+  box-shadow:
+    var(--sb-pe-ring, 0 0 transparent),
+    0 0 0 3px color-mix(in srgb, var(--sb-port-color) 35%, transparent);
 }
 
-.sb-pe-port[data-armable="true"] {
+/* A drop that converts the value gets a dashed ring instead of a solid glow. */
+.sb-pe-port[data-armable="convert"] .sb-portglyph {
+  outline: 1.5px dashed var(--sb-port-color);
+  outline-offset: 2px;
+}
+
+.sb-pe-port:is([data-armable="true"], [data-armable="convert"]) {
   cursor: pointer;
 }
 
-.sb-pe-port[data-armable="true"]:hover .sb-pe-port__label {
+.sb-pe-port:is([data-armable="true"], [data-armable="convert"]):hover .sb-pe-port__label {
   color: var(--text-primary);
+}
+
+/* While a cable is dragged or an output is armed, the ports that can't take it step back. Their contents dim, not the row, so a keyboard focus ring stays at full strength. */
+.sb-pe-port > :is(.sb-pe-port__label, .sb-pe-port__live, .sb-pe-handle) {
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.sb-pe__canvas[data-connecting="out"] .sb-pe-port--in:not([data-armable="true"], [data-armable="convert"]) > *,
+.sb-pe__canvas[data-connecting="in"] .sb-pe-port--out:not([data-armable="true"], [data-armable="convert"]) > * {
+  opacity: 0.35;
 }
 
 .sb-pe-port--out[data-armed] .sb-portglyph {
   box-shadow:
+    var(--sb-pe-ring, 0 0 transparent),
     0 0 0 2px var(--patch-node-bg),
     0 0 0 3.5px var(--sb-port-color);
 }
@@ -891,11 +1013,18 @@ textarea.sb-pe-title-input {
   line-height: 16px;
   white-space: nowrap;
   cursor: ew-resize;
-  transition: background-color var(--duration-fast) var(--ease-standard);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.sb-pe-value:hover {
-  background: var(--bg-field-hover);
+.sb-pe-value:not(.sb-pe-value--static, .sb-pe-value--knob, .sb-pe-value--input, [data-scrubbing]):hover {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
+.sb-pe-value:not(.sb-pe-value--static, .sb-pe-value--knob, .sb-pe-value--input, [data-scrubbing]):active {
+  background: color-mix(in srgb, var(--text-primary) 17%, transparent);
 }
 
 .sb-pe-value:focus-visible {
@@ -1104,11 +1233,12 @@ textarea.sb-pe-title-input {
 
 .sb-pe-comment {
   --sb-comment: var(--sb-comment-gray);
+  --sb-comment-fill: var(--sb-comment);
   position: absolute;
   inset: 0;
   border-radius: var(--radius-xl);
-  background: color-mix(in srgb, var(--sb-comment) 6%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-comment) 20%, transparent);
+  background: color-mix(in oklch, var(--sb-comment-fill) var(--sb-comment-fill-mix), var(--canvas-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--sb-comment-fill) 34%, transparent);
   transition: box-shadow var(--duration-fast) var(--ease-standard);
 }
 
@@ -1120,14 +1250,17 @@ textarea.sb-pe-title-input {
 
 .sb-pe-comment[data-color="yellow"] {
   --sb-comment: var(--sb-comment-yellow);
+  --sb-comment-fill: var(--sb-comment-fill-yellow);
 }
 
 .sb-pe-comment[data-color="orange"] {
   --sb-comment: var(--sb-comment-orange);
+  --sb-comment-fill: var(--sb-comment-fill-orange);
 }
 
 .sb-pe-comment[data-color="pink"] {
   --sb-comment: var(--sb-comment-pink);
+  --sb-comment-fill: var(--sb-comment-fill-pink);
 }
 
 .sb-pe-comment[data-color="purple"] {
@@ -1206,7 +1339,9 @@ textarea.sb-pe-title-input {
 .sb-pe-cable__wire {
   stroke: var(--sb-cable);
   stroke-width: 2;
-  transition: stroke-width var(--duration-fast) var(--ease-standard);
+  transition:
+    stroke-width var(--duration-fast) var(--ease-standard),
+    stroke-opacity var(--duration-fast) var(--ease-standard);
 }
 
 .sb-pe-cable__hit {
@@ -1230,12 +1365,29 @@ textarea.sb-pe-title-input {
   opacity: 0.2;
 }
 
+.sb-pe-cable__glow:not([data-on]) {
+  display: none;
+}
+
 .sb-pe-cable[data-live] .sb-pe-cable__wire {
+  stroke-width: 2.5;
+}
+
+.sb-pe-cable[data-related] .sb-pe-cable__wire {
   stroke-width: 2.5;
 }
 
 .sb-pe-cable[data-selected] .sb-pe-cable__wire {
   stroke-width: 2.75;
+}
+
+.sb-pe-cable[data-related] .sb-pe-cable__glow {
+  opacity: 0.22;
+}
+
+/* With a node selected in a busy graph, the cables that don't touch it step back. Stroke-opacity, not opacity: a group opacity per cable held a 40-cable graph near 30 fps. */
+.sb-pe__canvas[data-focus] .sb-pe-cable:not([data-related], [data-selected]) :is(.sb-pe-cable__wire, .sb-pe-cable__loop) {
+  stroke-opacity: 0.35;
 }
 
 .sb-pe-cable[data-selected] .sb-pe-cable__glow {
@@ -1254,6 +1406,29 @@ textarea.sb-pe-title-input {
 
 .sb-pe .react-flow__edge:hover .sb-pe-cable__wire {
   stroke-width: 2.75;
+}
+
+.sb-pe .react-flow__edge:focus,
+.sb-pe .react-flow__edge:focus-visible {
+  outline: none;
+}
+
+/* A cable reached with the keyboard: thicker, with a ring-colored glow, so Enter and Delete have a visible target. */
+.sb-pe .react-flow__edge:focus-visible .sb-pe-cable__wire {
+  stroke-width: 3.5px;
+}
+
+.sb-pe .react-flow__edge:focus-visible .sb-pe-cable__glow {
+  display: inline;
+  stroke: var(--focus-ring);
+  stroke-width: 9;
+  opacity: 0.45;
+}
+
+@media (forced-colors: active) {
+  .sb-pe .react-flow__edge:focus-visible .sb-pe-cable__wire {
+    stroke: Highlight;
+  }
 }
 
 /*
@@ -1603,13 +1778,33 @@ textarea.sb-pe-title-input {
   min-width: 0;
 }
 
+.sb-pe-crumbs__item:not([data-current]) {
+  flex: none;
+}
+
+.sb-pe-crumbs__item[data-current] {
+  flex: 1 1 auto;
+}
+
 .sb-pe-crumbs__sep {
   flex: none;
-  color: var(--text-disabled);
+  color: var(--text-tertiary);
+}
+
+.sb-pe-crumbs--overlay .sb-pe-crumbs__lead {
+  display: none;
+}
+
+.sb-pe-crumbs :is(button, [aria-current]) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sb-pe-crumbs button {
-  height: 22px;
+  min-width: 7ch;
+  max-width: 14ch;
+  height: 24px;
   padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
@@ -1624,7 +1819,18 @@ textarea.sb-pe-title-input {
   color: var(--text-primary);
 }
 
+.sb-pe-crumbs .sb-pe-crumbs__more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 24px;
+  padding: 0;
+}
+
 .sb-pe-crumbs [aria-current] {
+  min-width: 8ch;
   padding: 0 var(--space-3);
   color: var(--text-primary);
   font-weight: var(--font-weight-medium);
@@ -1679,7 +1885,7 @@ textarea.sb-pe-title-input {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   padding: 2px;
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
@@ -1691,6 +1897,17 @@ textarea.sb-pe-title-input {
 .sb-pe-toolbar {
   flex: none;
   margin-left: auto;
+}
+
+/* The labelled Insert patch button keeps the icon buttons' 24px target and reads at the interactive-label size. */
+.sb-btn.sb-pe-toolbar__insert[data-size="sm"] {
+  font-size: var(--font-size-sm);
+}
+
+.sb-pe-toolbar__insert::after {
+  content: "";
+  position: absolute;
+  inset: -1px 0;
 }
 
 /* Docked in the Patches panel header: plain header buttons. */
@@ -1716,8 +1933,9 @@ textarea.sb-pe-title-input {
 }
 
 .sb-pe-zoom__value {
+  position: relative;
   min-width: 40px;
-  height: 18px;
+  height: var(--control-h-sm);
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
@@ -1725,6 +1943,16 @@ textarea.sb-pe-title-input {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
+}
+
+.sb-pe-zoom__value::after {
+  content: "";
+  position: absolute;
+  inset: -1px 0;
+}
+
+.sb-pe__canvas[data-narrow] .sb-pe-zoom__optional {
+  display: none;
 }
 
 .sb-pe-zoom__value:hover {
@@ -1782,23 +2010,41 @@ textarea.sb-pe-title-input {
 
 .sb-pe-hint {
   position: absolute;
-  bottom: var(--space-5);
+  bottom: calc(var(--space-5) + 30px);
   left: 50%;
   z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  height: 30px;
-  padding: 0 var(--space-2) 0 var(--space-5);
-  border-radius: var(--radius-full);
+  max-width: calc(100% - 2 * var(--space-5));
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-5);
+  border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow:
     0 0 0 1px var(--border-subtle),
     var(--shadow-md);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
+  font-size: var(--font-size-sm);
   transform: translateX(-50%);
+}
+
+.sb-pe-hint > :is(.sb-portglyph, .sb-iconbtn) {
+  flex: none;
+}
+
+.sb-pe-hint__text {
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.sb-pe-hint__text--short,
+.sb-pe__canvas[data-compact] .sb-pe-hint__text--long {
+  display: none;
+}
+
+.sb-pe__canvas[data-compact] .sb-pe-hint__text--short {
+  display: block;
 }
 
 .sb-pe-hint strong {
@@ -1811,24 +2057,44 @@ textarea.sb-pe-title-input {
   top: 50%;
   left: 50%;
   z-index: 4;
-  max-width: 340px;
-  text-align: center;
+  width: min(340px, calc(100% - 32px));
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
 
-.sb-pe-empty__title {
-  margin-bottom: var(--space-3);
-  color: var(--text-secondary);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
+.sb-pe-empty .sb-btn {
+  pointer-events: auto;
 }
 
-.sb-pe-empty__body {
-  color: var(--text-tertiary);
+.sb-pe-empty .sb-btn[data-size="sm"] {
   font-size: var(--font-size-sm);
-  line-height: 1.7;
-  text-wrap: pretty;
+}
+
+.sb-pe-empty .sb-btn::after {
+  content: "";
+  position: absolute;
+  inset: -1px 0;
+}
+
+.sb-pe-empty__legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-5) var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-pe-empty__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+}
+
+.sb-pe-empty__keys > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* Hover card */
@@ -1869,7 +2135,7 @@ textarea.sb-pe-title-input {
 .sb-pe-hovercard__type {
   margin-left: auto;
   color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   letter-spacing: 0.02em;
 }
@@ -1881,7 +2147,7 @@ textarea.sb-pe-title-input {
   border-radius: var(--radius-sm);
   background: var(--bg-field);
   font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -1899,12 +2165,13 @@ textarea.sb-pe-title-input {
 .sb-pe-hovercard__meta code {
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
 }
 
 .sb-pe-hovercard__docs {
   margin: 0;
   color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   text-wrap: pretty;
 }
@@ -1912,6 +2179,7 @@ textarea.sb-pe-title-input {
 .sb-pe-hovercard__issue {
   margin: 0;
   color: var(--warn-text);
+  font-size: var(--font-size-sm);
   line-height: 1.45;
 }
 
@@ -1922,8 +2190,8 @@ textarea.sb-pe-title-input {
 .sb-pe-hovercard__hint {
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 /* A looped value's copies: the card takes the pointer so rows can be hovered. */
@@ -1939,7 +2207,7 @@ textarea.sb-pe-title-input {
   overflow-y: auto;
   overscroll-behavior: contain;
   font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
 }
 
 .sb-pe-hovercard__copy {
@@ -1991,321 +2259,6 @@ textarea.sb-pe-title-input {
   padding: var(--space-2);
   color: var(--text-tertiary);
   font-family: var(--font-sans);
-}
-
-/* Patch picker and link search */
-.sb-pe-picker {
-  height: min(540px, calc(100vh - 160px));
-}
-
-.sb-pe-picker__item,
-.sb-pe-linksearch__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  width: 100%;
-  min-width: 0;
-}
-
-.sb-pe-picker__icon {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--sb-cat) 18%, transparent);
-  color: var(--sb-cat);
-}
-
-.sb-pe-picker__name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--font-size-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-pe-picker__alias {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-pe-picker__key {
-  margin-left: auto;
-}
-
-.sb-pe-picker__preview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-}
-
-.sb-pe-picker__preview-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-5);
-}
-
-.sb-pe-picker__preview-icon {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--sb-cat) 18%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-cat) 28%, transparent);
-  color: var(--sb-cat);
-}
-
-.sb-pe-picker__preview-titles {
-  flex: 1;
-  min-width: 0;
-}
-
-.sb-pe-picker__preview-title {
-  color: var(--text-primary);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: -0.01em;
-}
-
-.sb-pe-picker__preview-category {
-  color: var(--sb-cat);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-}
-
-.sb-pe-picker__preview-category code {
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
-}
-
-.sb-pe-picker__summary {
-  max-width: 48ch;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--font-size-md);
-  line-height: 1.5;
-  text-wrap: pretty;
-}
-
-.sb-pe-picker__status {
-  margin: 0;
-  padding: var(--space-4) var(--space-5);
-  border-radius: var(--radius-md);
-  background: var(--warn-soft);
-  color: var(--warn-text);
-  font-size: var(--font-size-xs);
-  line-height: 1.45;
-}
-
-.sb-pe-picker__port-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-6);
-}
-
-.sb-pe-picker__ports,
-.sb-pe-info__ports {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.sb-pe-eyebrow {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.sb-pe-picker__port {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-width: 0;
-  font-size: var(--font-size-sm);
-}
-
-.sb-pe-picker__port-name {
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-}
-
-.sb-pe-picker__port-type {
-  margin-left: auto;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
-.sb-pe-picker__pairs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.sb-pe-picker__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.sb-pe-picker__chip {
-  padding: 2px var(--space-4);
-  border-radius: var(--radius-full);
-  background: var(--bg-field);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-}
-
-.sb-pe-picker__shortcut {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-top: auto;
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
-.sb-pe-picker__hint {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.sb-pe-picker__hint--end {
-  margin-left: auto;
-}
-
-.sb-pe-picker__empty {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  color: var(--text-secondary);
-}
-
-.sb-pe-picker__empty-hint {
-  color: var(--text-tertiary);
-}
-
-.sb-pe-linksearch {
-  width: 380px;
-  height: 340px;
-  overflow: hidden;
-}
-
-.sb-pe-linksearch .sb-searchlist {
-  height: 100%;
-}
-
-.sb-pe-linksearch__port {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
-.sb-pe-linksearch__port[data-exact] {
-  color: var(--text-secondary);
-}
-
-/* Patch info */
-.sb-pe-info {
-  max-height: min(680px, calc(100vh - 80px));
-}
-
-.sb-pe-info__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  max-height: min(680px, calc(100vh - 80px));
-  padding: var(--space-7);
-  overflow: auto;
-}
-
-.sb-pe-info__port {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
-}
-
-.sb-pe-info__port .sb-portglyph {
-  margin-top: 4px;
-}
-
-.sb-pe-info__desc {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-  line-height: 1.45;
-}
-
-.sb-pe-info__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.sb-pe-info__example pre,
-.sb-pe-docs pre {
-  margin: var(--space-3) 0 0;
-  padding: var(--space-4) var(--space-5);
-  overflow-x: auto;
-  border-radius: var(--radius-md);
-  background: var(--bg-sunken);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
-  line-height: 1.55;
-}
-
-.sb-pe-docs {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.55;
-}
-
-.sb-pe-docs p,
-.sb-pe-docs ul {
-  margin: 0 0 var(--space-4);
-}
-
-.sb-pe-docs ul {
-  padding-left: var(--space-7);
-}
-
-.sb-pe-docs h4 {
-  margin: var(--space-6) 0 var(--space-3);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-}
-
-.sb-pe-docs code {
-  padding: 0 3px;
-  border-radius: var(--radius-xs);
-  background: var(--bg-field);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 0.92em;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2495,10 +2448,44 @@ textarea.sb-pe-title-input {
   background: color-mix(in srgb, var(--selection) 16%, transparent);
 }
 
-.sb-pe-linksearch__sep {
-  color: var(--text-tertiary);
-}
-
 .sb-pe-splice {
   min-width: 264px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Why a dropped cable was refused                                         */
+/* ---------------------------------------------------------------------- */
+
+.sb-popover.sb-pe-connecthint {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.sb-pe-connecthint__icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn-text);
+}
+
+.sb-pe-connecthint__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 272px;
+}
+
+.sb-pe-connecthint__reason {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.sb-pe-connecthint__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
 }

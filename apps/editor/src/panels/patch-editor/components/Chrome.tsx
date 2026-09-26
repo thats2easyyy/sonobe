@@ -1,12 +1,16 @@
 /** Patch editor chrome: toolbar, zoom and minimap controls, live scope and watched copy, hints, empty state. */
 
 import { useReactFlow, useViewport } from "@xyflow/react";
-import { ChevronDown, ChevronLeft, ChevronRight, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, WandSparkles, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Map as MapIcon, MessageSquarePlus, Minus, Plus, Scan, Workflow, X } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "../../../ui/Button.tsx";
+import { EmptyState } from "../../../ui/EmptyState.tsx";
 import { IconButton } from "../../../ui/IconButton.tsx";
 import { Kbd } from "../../../ui/Kbd.tsx";
 import { useContextMenu, type MenuEntry } from "../../../ui/Menu.tsx";
 import { PortGlyph } from "../../../ui/PortGlyph.tsx";
+import { Tooltip } from "../../../ui/Tooltip.tsx";
 import { FIT_VIEW_PADDING } from "../model/geometry.ts";
 import { instanceChoiceKey } from "../model/instances.ts";
 import { patchEditorBridge } from "../state/bridge.ts";
@@ -20,15 +24,63 @@ export interface ToolbarProps {
   container?: Element | null;
 }
 
+/** Below this header width the Insert patch button drops its "Patch" label. */
+const LABELLED_INSERT_MIN = 300;
+
+/** One Tab stop for a toolbar: arrows, Home and End move between its buttons. */
+function useRovingToolbar() {
+  const bar = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+  const buttons = () => [...(bar.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+  return {
+    ref: bar,
+    tabIndex: (index: number) => (index === active ? 0 : -1),
+    onFocus(event: FocusEvent<HTMLDivElement>) {
+      const target: EventTarget = event.target;
+      const index = buttons().findIndex((button) => button === target);
+      if (index >= 0) setActive(index);
+    },
+    onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+      const items = buttons();
+      const at = items.findIndex((button) => button === document.activeElement);
+      if (at < 0) return;
+      const next = { ArrowRight: (at + 1) % items.length, ArrowLeft: (at - 1 + items.length) % items.length, Home: 0, End: items.length - 1 }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      items[next]!.focus();
+    },
+  };
+}
+
 /** Tidy up, comment, insert. Docked in a panel header when `container` is given, else floating in the canvas's top bar. */
 export function Toolbar({ container }: ToolbarProps) {
   const { actions } = usePatchEditor();
   const docked = container !== undefined && container !== null;
+  const roving = useRovingToolbar();
+  const [labelled, setLabelled] = useState(true);
+  useLayoutEffect(() => {
+    const host = container?.closest("header") ?? container ?? roving.ref.current?.parentElement;
+    if (!host) return;
+    const measure = () => setLabelled(host.clientWidth >= LABELLED_INSERT_MIN);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [container, roving.ref]);
   const bar = (
-    <div className="sb-pe-toolbar" data-docked={docked || undefined} role="toolbar" aria-label="Patch editor tools">
-      <IconButton size={docked ? "xs" : "sm"} icon={<WandSparkles size={docked ? 13 : 14} />} label="Tidy up" shortcut="Ctrl+T" onClick={() => void actions.tidyUp()} />
-      <IconButton size={docked ? "xs" : "sm"} icon={<MessageSquarePlus size={docked ? 13 : 14} />} label="Add comment" shortcut="Ctrl+Alt+C" onClick={() => actions.commentSelection()} />
-      <IconButton size={docked ? "xs" : "sm"} icon={<Plus size={docked ? 13 : 14} />} label="Insert patch" shortcut="Alt+Enter" onClick={() => actions.openPicker()} />
+    <div ref={roving.ref} className="sb-pe-toolbar" data-docked={docked || undefined} role="toolbar" aria-label="Patch editor tools" onFocus={roving.onFocus} onKeyDown={roving.onKeyDown}>
+      <IconButton size="sm" icon={<Workflow size={14} />} label="Tidy up" shortcut="Ctrl+T" tabIndex={roving.tabIndex(0)} onClick={() => void actions.tidyUp()} />
+      <IconButton size="sm" icon={<MessageSquarePlus size={14} />} label="Add comment" shortcut="Ctrl+Alt+C" tabIndex={roving.tabIndex(1)} onClick={() => actions.commentSelection()} />
+      {labelled ? (
+        <Tooltip content="Insert patch" shortcut="Alt+Enter">
+          <Button className="sb-pe-toolbar__insert" variant="ghost" size="sm" icon={<Plus size={14} />} aria-label="Insert patch" tabIndex={roving.tabIndex(2)} onClick={() => actions.openPicker()}>
+            Patch
+          </Button>
+        </Tooltip>
+      ) : (
+        <IconButton size="sm" icon={<Plus size={14} />} label="Insert patch" shortcut="Alt+Enter" tabIndex={roving.tabIndex(2)} onClick={() => actions.openPicker()} />
+      )}
     </div>
   );
   return docked ? createPortal(bar, container) : bar;
@@ -39,13 +91,15 @@ export function ZoomControls() {
   const { zoom } = useViewport();
   const { ui, markViewportManual } = usePatchEditor();
   const minimap = useUi((s) => s.minimap);
+  const percent = Math.round(zoom * 100);
   return (
     <div className="sb-pe-zoom" role="group" aria-label="Zoom">
-      <IconButton size="xs" icon={<MapIcon size={12} />} label={minimap ? "Hide minimap" : "Show minimap"} shortcut="Shift+M" active={minimap} onClick={() => ui.getState().set({ minimap: !minimap })} tooltipPlacement="top" />
-      <span className="sb-pe-zoom__divider" aria-hidden />
+      <IconButton className="sb-pe-zoom__optional" size="sm" icon={<MapIcon size={14} />} label={minimap ? "Hide minimap" : "Show minimap"} shortcut="Shift+M" active={minimap} onClick={() => ui.getState().set({ minimap: !minimap })} tooltipPlacement="top" />
+      <span className="sb-pe-zoom__divider sb-pe-zoom__optional" aria-hidden />
       <IconButton
-        size="xs"
-        icon={<Minus size={12} />}
+        className="sb-pe-zoom__optional"
+        size="sm"
+        icon={<Minus size={14} />}
         label="Zoom out"
         shortcut="Mod+-"
         onClick={() => {
@@ -54,20 +108,23 @@ export function ZoomControls() {
         }}
         tooltipPlacement="top"
       />
-      <button
-        type="button"
-        className="sb-pe-zoom__value sb-tabular"
-        onClick={() => {
-          markViewportManual();
-          void flow.zoomTo(1, { duration: 160 });
-        }}
-        aria-label="Zoom to 100%"
-      >
-        {Math.round(zoom * 100)}%
-      </button>
+      <Tooltip content="Zoom to 100%" shortcut="Mod+0" placement="top">
+        <button
+          type="button"
+          className="sb-pe-zoom__value sb-tabular"
+          onClick={() => {
+            markViewportManual();
+            void flow.zoomTo(1, { duration: 160 });
+          }}
+          aria-label={`${percent}%, zoom to 100%`}
+        >
+          {percent}%
+        </button>
+      </Tooltip>
       <IconButton
-        size="xs"
-        icon={<Plus size={12} />}
+        className="sb-pe-zoom__optional"
+        size="sm"
+        icon={<Plus size={14} />}
         label="Zoom in"
         shortcut="Mod+="
         onClick={() => {
@@ -76,7 +133,7 @@ export function ZoomControls() {
         }}
         tooltipPlacement="top"
       />
-      <IconButton size="xs" icon={<Scan size={12} />} label="Zoom to fit" shortcut="Shift+1" onClick={() => void flow.fitView({ duration: 200, padding: FIT_VIEW_PADDING })} tooltipPlacement="top" />
+      <IconButton size="sm" icon={<Scan size={14} />} label="Zoom to fit" shortcut="Shift+1" onClick={() => void flow.fitView({ duration: 200, padding: FIT_VIEW_PADDING })} tooltipPlacement="top" />
     </div>
   );
 }
@@ -185,20 +242,48 @@ export function ArmedHint() {
   return (
     <div className="sb-pe-hint" role="status">
       <PortGlyph type={armed.type} size={9} />
-      <span>
-        Click an input to connect <strong>{armed.label}</strong>. Hold <Kbd>⇧</Kbd> to connect several.
+      <span className="sb-pe-hint__text sb-pe-hint__text--long">
+        Select an input to connect <strong>{armed.label}</strong>. Hold <Kbd>⇧</Kbd> to connect several.
       </span>
-      <IconButton size="xs" icon={<X size={12} />} label="Cancel" shortcut="Escape" onClick={() => ui.getState().set({ armed: null })} />
+      <span className="sb-pe-hint__text sb-pe-hint__text--short">
+        Connect <strong>{armed.label}</strong>: select an input
+      </span>
+      <IconButton size="sm" icon={<X size={12} />} label="Cancel" shortcut="Escape" onClick={() => ui.getState().set({ armed: null })} />
     </div>
   );
 }
 
+/** A blank graph: how to add the first patch, on a block that lets double-clicks through to the canvas. */
 export function EmptyGraph() {
+  const { actions } = usePatchEditor();
   return (
     <div className="sb-pe-empty" aria-live="polite">
-      <div className="sb-pe-empty__title">No patches yet</div>
-      <div className="sb-pe-empty__body">
-        Double-click the canvas or press <Kbd shortcut="Alt+Enter" /> to add one. Hover here and press <Kbd>I</Kbd> for an Interaction, <Kbd>S</Kbd> for a Switch, <Kbd>A</Kbd> for a Pop Animation.
+      <EmptyState
+        variant="inline"
+        size="sm"
+        title="No patches yet"
+        description="Double-click here to add a patch."
+        actions={
+          <>
+            <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => actions.openPicker()}>
+              Insert patch
+            </Button>
+            <Kbd shortcut="Alt+Enter" />
+          </>
+        }
+      />
+      <div className="sb-pe-empty__legend">
+        <span className="sb-pe-empty__keys">
+          <span>
+            <Kbd>I</Kbd> Interaction
+          </span>
+          <span>
+            <Kbd>S</Kbd> Switch
+          </span>
+          <span>
+            <Kbd>A</Kbd> Pop Animation
+          </span>
+        </span>
       </div>
     </div>
   );

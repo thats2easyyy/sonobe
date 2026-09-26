@@ -33,7 +33,7 @@ import {
   type ReactFlowState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LARGE_GRAPH_NODES, useGestureDocument } from "./state/gestureDocument.ts";
 import { useStore } from "zustand";
 import { rectOfElement } from "../../state/bounds.ts";
@@ -55,10 +55,12 @@ import { ArmedHint, EmptyGraph, LiveScopeChip, PatchEditorBreadcrumbs, Toolbar, 
 import { LinkDragSearch, PatchInfoDialog, PatchPickerDialog, SpliceChooser, type SpliceChoiceRequest } from "./components/Dialogs.tsx";
 import { cableMenu, commentMenu, layerMenu, paneMenu, patchMenu, portMenu, type MenuContext } from "./components/menus.ts";
 import { CommentNodeView, InterfaceNodeView, LayerNodeView, PatchNodeView } from "./components/NodeViews.tsx";
+import { ConnectHint } from "./components/ConnectHint.tsx";
 import { PortHoverCard } from "./components/PortHoverCard.tsx";
+import { cableLabel, nodeTitles } from "./model/cableLabel.ts";
 import { orientConnection, portAtHandle, quickConnectCheck, type HandleRef } from "./model/connect.ts";
 import { patchTitle, spliceOptions, type SpliceOption } from "./model/editOps.ts";
-import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, layerNameIn, pointInRect, portCenterY, readableViewport, sampleCable, type Point, type Rect } from "./model/geometry.ts";
+import { boundsOf, boundsVisible, estimateNodeSize, FIT_VIEW_PADDING, HEADER_HEIGHT, isFarZoom, layerNameIn, pointInRect, portCenterY, readableViewport, sampleCable, type Point, type Rect, type ViewportLike } from "./model/geometry.ts";
 import { deriveGraph, estimatePatchSize, frameContents } from "@sonobe/core/graph";
 import { missingHandlesKey, parseMissingHandlesKey } from "./model/handles.ts";
 import { resolveLiveScope, scopedAddress, watchedPrefix, type LiveScope } from "./model/instances.ts";
@@ -133,6 +135,14 @@ const SETTLE_FRAMES = 40;
 const MOVE_MS = 600;
 /** How long graph.bounds waits at most for nodes and cables to finish appearing. */
 const APPEAR_WAIT_MS = 1200;
+/** Panes narrower than these drop the zoom steppers (narrow) or shorten the armed hint (compact). */
+const NARROW_PANE = 300;
+const COMPACT_PANE = 480;
+/** How far the graph must run past a pane edge before that edge fades. */
+const CROP_TOLERANCE = 8;
+const NO_CROP = { right: false, bottom: false };
+/** Screen room a patch brought into view keeps from the pane's edges (more above, for the top bar). */
+const VIEW_ROOM = { x: 40, y: 52 };
 
 /** The next frame, or a moment later in a window that doesn't paint (hidden windows may not run requestAnimationFrame). */
 const nextFrame = () => new Promise<void>((resolve) => {
@@ -147,6 +157,27 @@ const nextFrame = () => new Promise<void>((resolve) => {
 const moved = (move: Promise<unknown>) => Promise.race([move, new Promise((resolve) => setTimeout(resolve, MOVE_MS))]);
 
 type Flow = ReactFlowInstance<FlowNode, CableFlowEdge>;
+
+/** A cable as handed to React Flow with its selected and related flags, and the model edge it came from. */
+interface FlaggedEdge {
+  base: CableFlowEdge;
+  selected: boolean;
+  related: boolean;
+  edge: CableFlowEdge;
+}
+
+/** A cable with the label a screen reader reads, and the model edge it came from. */
+interface LabelledEdge {
+  base: CableFlowEdge;
+  label: string;
+  edge: CableFlowEdge;
+}
+
+/** What React Flow tells a keyboard user about a node; the ports are reached through the node. */
+const ARIA_LABELS = { "node.a11yDescription.default": "Press the Right Arrow (Alt and Right Arrow once it is selected) to reach its ports, Space to select it, Delete to remove it, and Escape to cancel." };
+
+/** Above this many cables, selecting a node dims the cables that don't touch it. */
+const DIM_CABLES_ABOVE = 12;
 
 /** The patch graph for the component being edited (selection.componentPath). */
 export function PatchEditor({ session: provided, showBreadcrumbs = true, showToolbar = true, toolbarContainer, defaultMinimap = false, commands = true, className, style, "aria-label": ariaLabel = "Patch editor" }: PatchEditorProps) {
@@ -243,6 +274,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   const [appear] = useState(() => createAppearStore({ reducedMotion: () => reducedMotionRef.current, brief: arrivals.revealed && !arrivals.replaced }));
   const pointerRef = useRef<XY | null>(null);
   const hoveringRef = useRef(false);
+  const revealInsertedRef = useRef<(id: Id) => void>(() => {});
   const mountedRef = useRef(true);
   const [picker, setPicker] = useState<PickerRequest | null>(null);
   const [linkSearch, setLinkSearch] = useState<LinkSearchRequest | null>(null);
@@ -284,6 +316,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   const minimap = useStore(ui, (s) => s.minimap);
   const selectedEdges = useStore(ui, (s) => s.selectedEdges);
   const ghosts = useStore(ui, (s) => s.ghosts);
+  const connecting = useStore(ui, (s) => (s.armed ? "out" : s.draggingType ? s.draggingSide : null));
 
   const workingMap = useMemo(() => {
     const map = new Map<Id, string[]>();
@@ -328,6 +361,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         pointer: () => pointerRef.current,
         openPicker: (request) => setPicker(request),
         openInfo: (patchId) => setInfoId(patchId),
+        reveal: (patchId) => revealInsertedRef.current(patchId),
       }),
     [session, registry, componentId, ui],
   );
@@ -421,6 +455,21 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     arrivals.replaced = false;
   }, [appear, fitted, arrivals]);
 
+  const [paneSize, setPaneSize] = useState<"regular" | "compact" | "narrow">("regular");
+  // Which edges of the pane the graph runs past, so the canvas can fade them (readable zoom keeps big graphs cropped).
+  const [crop, setCrop] = useState(NO_CROP);
+  const boundsCache = useRef<{ nodes: FlowNode[]; bounds: Rect | undefined }>({ nodes: [], bounds: undefined });
+  const updateCrop = useCallback((viewport: ViewportLike = flowRef.current.getViewport()) => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    if (boundsCache.current.nodes !== nodesRef.current) boundsCache.current = { nodes: nodesRef.current, bounds: boundsOf(nodesRef.current.map((n) => nodeRect(n))) };
+    const bounds = boundsCache.current.bounds;
+    const right = !!bounds && (bounds.x + bounds.width) * viewport.zoom + viewport.x > el.clientWidth + CROP_TOLERANCE;
+    const bottom = !!bounds && (bounds.y + bounds.height) * viewport.zoom + viewport.y > el.clientHeight + CROP_TOLERANCE;
+    setCrop((prev) => (prev.right === right && prev.bottom === bottom ? prev : { right, bottom }));
+  }, []);
+  useEffect(() => updateCrop(), [model.nodes, updateCrop]);
+
   const autoFit = useCallback((): boolean => {
     const el = wrapperRef.current;
     if (!el || el.clientWidth < MIN_CANVAS || el.clientHeight < MIN_CANVAS) return false;
@@ -428,9 +477,11 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     fitModeRef.current = true;
     setFitted(true);
     if (!bounds) return true;
-    moveRef.current = flowRef.current.setViewport(readableViewport(bounds, el.clientWidth, el.clientHeight, { maxZoom: 1, minZoom: MIN_ZOOM }));
+    const viewport = readableViewport(bounds, el.clientWidth, el.clientHeight, { maxZoom: 1, minZoom: MIN_ZOOM });
+    moveRef.current = flowRef.current.setViewport(viewport);
+    updateCrop(viewport);
     return true;
-  }, []);
+  }, [updateCrop]);
 
   const onInit = useCallback(() => {
     initializedRef.current = true;
@@ -478,6 +529,8 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     const el = wrapperRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     let before = { width: el.clientWidth, height: el.clientHeight };
+    const classify = (width: number) => (width < NARROW_PANE ? "narrow" : width < COMPACT_PANE ? "compact" : "regular");
+    if (before.width >= MIN_CANVAS && before.height >= MIN_CANVAS) setPaneSize(classify(before.width));
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
@@ -485,8 +538,10 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         const next = { width: el.clientWidth, height: el.clientHeight };
         const prev = before;
         before = next;
-        if (next.width === prev.width && next.height === prev.height) return;
         if (next.width < MIN_CANVAS || next.height < MIN_CANVAS) return;
+        setPaneSize(classify(next.width));
+        if (next.width === prev.width && next.height === prev.height) return;
+        updateCrop();
         const f = flowRef.current;
         const hiddenBefore = prev.width < MIN_CANVAS || prev.height < MIN_CANVAS;
         if (hiddenBefore) {
@@ -507,7 +562,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [autoFit]);
+  }, [autoFit, updateCrop]);
 
   // Cables wait for their port handles: a cable that arrives with a new port row (a layer target) would
   // reach React Flow before the row's handle is measured (error #008). Hold it back and re-measure the node.
@@ -519,13 +574,47 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     if (held.nodes.length) updateNodeInternals(held.nodes);
   }, [held, updateNodeInternals]);
 
+  // Cables at either end of a selected patch or layer light up (data.related). An edge keeps its object
+  // while its flags hold, so a selection change re-renders only the cables it touches.
+  const focusNodes = useMemo(() => new Set<string>([...selectedPatches, ...selectedLayers.map(layerNodeId)]), [selectedPatches, selectedLayers]);
+  const flaggedEdges = useRef(new Map<string, FlaggedEdge>());
+  const labelledEdges = useRef(new Map<string, LabelledEdge>());
   const edges = useMemo(() => {
     const hidden = held.missing.length ? new Set(held.missing) : null;
-    const ready = hidden ? model.edges.filter((e) => !hidden.has(e.id)) : model.edges;
-    if (selectedEdges.length === 0) return ready;
-    const set = new Set(selectedEdges);
-    return ready.map((e) => (set.has(e.id) ? { ...e, selected: true } : e));
-  }, [model.edges, selectedEdges, held]);
+    const titles = nodeTitles(model);
+    const kept = new Map<string, LabelledEdge>();
+    const ready = model.edges
+      .filter((e) => !hidden?.has(e.id))
+      .map((e) => {
+        const label = cableLabel(model, titles, e);
+        const before = labelledEdges.current.get(e.id);
+        const labelled = before && before.base === e && before.label === label ? before : { base: e, label, edge: { ...e, ariaLabel: label } };
+        kept.set(e.id, labelled);
+        return labelled.edge;
+      });
+    labelledEdges.current = kept;
+    const picked = selectedEdges.length ? new Set(selectedEdges) : null;
+    if (!picked && focusNodes.size === 0) {
+      flaggedEdges.current.clear();
+      return ready;
+    }
+    const flagged = new Map<string, FlaggedEdge>();
+    const next = ready.map((e) => {
+      const selected = picked?.has(e.id) ?? false;
+      const related = focusNodes.has(e.source) || focusNodes.has(e.target);
+      if (!selected && !related) return e;
+      const before = flaggedEdges.current.get(e.id);
+      if (before && before.base === e && before.selected === selected && before.related === related) {
+        flagged.set(e.id, before);
+        return before.edge;
+      }
+      const edge = { ...e, ...(selected ? { selected: true } : {}), ...(related ? { data: { ...e.data!, related: true } } : {}) };
+      flagged.set(e.id, { base: e, selected, related, edge });
+      return edge;
+    });
+    flaggedEdges.current = flagged;
+    return next;
+  }, [model, selectedEdges, focusNodes, held]);
 
   const onFlowError = useCallback<OnError>((code, message) => {
     // #008 is the held-back cable above; it draws once its handle is measured.
@@ -835,12 +924,17 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       if (parsed.side === "in" && port?.connected && port.link) {
         const edge = m.edges.find((e) => e.data?.to === port.address);
         if (edge?.data) {
-          ui.getState().set({ detaching: { edgeId: edge.id, from: port.link, to: port.address, sourceNode: edge.source, sourceHandle: edge.sourceHandle!, sourceType: edge.data.sourceType }, draggingType: edge.data.sourceType });
+          ui.getState().set({
+            detaching: { edgeId: edge.id, from: port.link, to: port.address, sourceNode: edge.source, sourceHandle: edge.sourceHandle!, sourceType: edge.data.sourceType },
+            draggingType: edge.data.sourceType,
+            draggingFrom: edge.source,
+            draggingSide: "out",
+          });
           bridge.getState().setCableDrag({ component: componentId, from: port.link, type: edge.data.sourceType });
           return;
         }
       }
-      ui.getState().set({ draggingType: port?.type ?? null });
+      ui.getState().set({ draggingType: port?.type ?? null, draggingFrom: params.nodeId, draggingSide: parsed.side });
       if (port && parsed.side === "out") bridge.getState().setCableDrag({ component: componentId, from: port.address, type: port.type });
     },
     [bridge, componentId, ui],
@@ -919,7 +1013,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       const origin = originRef.current;
       originRef.current = null;
       const detaching = ui.getState().detaching;
-      ui.getState().set({ detaching: null, draggingType: null });
+      ui.getState().set({ detaching: null, draggingType: null, draggingFrom: null, draggingSide: null });
       bridge.getState().setCableDrag(null);
       if (!origin || state.isValid) return;
       const client = clientPoint(event);
@@ -929,7 +1023,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         const toRef = { nodeId: state.toHandle.nodeId, handleId: state.toHandle.id ?? null };
         const parsed = parseHandleId(toRef.handleId);
         const oriented = detaching ? (parsed?.side === "in" ? { from: detaching.from, to: portAddress(toRef.nodeId, parsed.key) } : undefined) : orientConnection(origin, toRef);
-        if (oriented && oriented.to !== detaching?.to) actions.explainConnection(oriented.from, oriented.to, position);
+        if (oriented && oriented.to !== detaching?.to) actions.explainConnection(oriented.from, oriented.to, position, client);
         return;
       }
       const port = portAtHandle(m, origin);
@@ -992,13 +1086,33 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     [actions, appear, registry, session, componentId],
   );
 
+  /** Placement steers clear of what's already there, so a new patch can land off screen: pan it into view. */
+  const showNode = useCallback(
+    async (id: Id) => {
+      await nextFrame();
+      await nextFrame();
+      const el = wrapperRef.current;
+      const node = nodesRef.current.find((n) => n.id === id);
+      if (!mountedRef.current || !el || !node) return;
+      const rect = nodeRect(node);
+      const view = flowRef.current.getViewport();
+      if (boundsVisible(rect, { ...view, x: view.x - VIEW_ROOM.x, y: view.y - VIEW_ROOM.y }, el.clientWidth - 2 * VIEW_ROOM.x, el.clientHeight - 2 * VIEW_ROOM.y, 0)) return;
+      markViewportManual();
+      moveRef.current = flowRef.current.setCenter(rect.x + rect.width / 2, rect.y + rect.height / 2, { zoom: view.zoom, duration: reducedMotionRef.current ? 0 : 200 });
+    },
+    [markViewportManual, reducedMotionRef],
+  );
+  useEffect(() => {
+    revealInsertedRef.current = (id) => void showNode(id);
+  }, [showNode]);
+
   const onPickerPick = useCallback(
     (item: PickerItem, request: PickerRequest) => {
       if (request.replace) {
         actions.replaceWith(request.replace, item.spec.type, item.componentId);
         return;
       }
-      const at = request.position ?? pointerRef.current ?? centerOfView(flowRef.current, wrapperRef.current);
+      const at = request.position ?? (hoveringRef.current ? pointerRef.current : null) ?? centerOfView(flowRef.current, wrapperRef.current);
       actions.insertPatch(item.spec.type, { x: at.x - 24, y: at.y - HEADER_HEIGHT / 2 }, item.componentId ? { component: item.componentId, name: item.name } : {});
     },
     [actions],
@@ -1026,8 +1140,23 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     knifeRef.current = { id: event.pointerId, points: [[event.clientX, event.clientY]], moved: false, origin: event.currentTarget.getBoundingClientRect() };
   };
 
+  /** A node reached with Tab and not selected: Enter or the Right Arrow steps into its ports. A selected node keeps Enter for renaming and the arrows for nudging, so it takes Alt with the Right Arrow. */
+  const onKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if ((event.key !== "Enter" && event.key !== "ArrowRight") || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const node = event.target as HTMLElement;
+    if (!node.classList.contains("react-flow__node")) return;
+    if (event.altKey ? event.key !== "ArrowRight" : node.classList.contains("selected")) return;
+    const port = node.querySelector<HTMLElement>(".sb-pe-port[tabindex]");
+    if (!port) return;
+    event.preventDefault();
+    event.stopPropagation();
+    port.focus();
+  };
+
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    hoveringRef.current = true;
+    // Portaled parts (the header toolbar, the picker) bubble their pointer events here through the React tree.
+    hoveringRef.current = event.currentTarget.contains(event.target as Node);
+    if (!hoveringRef.current) return;
     pointerRef.current = flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY });
     const k = knifeRef.current;
     if (!k || k.id !== event.pointerId) return;
@@ -1249,8 +1378,15 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         className="sb-pe__canvas"
         data-fitting={(!fitted && !empty) || undefined}
         data-lod={farZoom ? "far" : undefined}
+        data-narrow={paneSize === "narrow" || undefined}
+        data-compact={paneSize !== "regular" || undefined}
+        data-crop-right={crop.right || undefined}
+        data-crop-bottom={crop.bottom || undefined}
+        data-connecting={connecting ?? undefined}
+        data-focus={(focusNodes.size > 0 && model.edges.length > DIM_CABLES_ABOVE) || undefined}
         onPointerEnter={activate}
         onPointerDownCapture={onPointerDownCapture}
+        onKeyDownCapture={onKeyDownCapture}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => {
@@ -1294,8 +1430,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           onNodeClick={onNodeClick}
           onPaneClick={() => ui.getState().set({ armed: null })}
           onInit={onInit}
-          onMove={() => {
+          onMove={(_event, viewport) => {
             if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+            updateCrop(viewport);
           }}
           onMoveEnd={(event, viewport) => {
             session.selection.getState().setPatchViewport(componentId, viewport);
@@ -1320,6 +1457,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           onError={onFlowError}
           attributionPosition="bottom-left"
           aria-label="Patch graph"
+          ariaLabelConfig={ARIA_LABELS}
         >
           <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} className="sb-pe-background" />
           {ghosts && (
@@ -1353,6 +1491,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         <ArmedHint />
         {empty && <EmptyGraph />}
         <PortHoverCard model={model} />
+        <ConnectHint />
         {menu.element}
       </div>
       <PatchPickerDialog request={picker} onClose={() => setPicker(null)} onPick={onPickerPick} />
@@ -1515,7 +1654,7 @@ function registerPatchEditorCommands(cmds: CommandsContextValue, entry: CommandE
   ];
   const unregister = cmds.registry.register(commands.filter((c) => !cmds.registry.get(c.id)));
   const unbind = singleKeyInserts(registry).map((insert) =>
-    cmds.shortcuts.bind({ id: `patchEditor.insert.${insert.type}`, shortcut: insert.shortcut, scope, when: () => !!target()?.hovering(), handler: () => target()?.actions.insertAtPointer(insert.type) }),
+    cmds.shortcuts.bind({ id: `patchEditor.insert.${insert.type}`, shortcut: insert.shortcut, scope, when: () => !!target()?.hovering() && !target()?.ui.getState().editingTitle, handler: () => target()?.actions.insertAtPointer(insert.type) }),
   );
   return () => {
     unregister();

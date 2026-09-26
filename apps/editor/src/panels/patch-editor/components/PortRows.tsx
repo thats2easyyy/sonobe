@@ -1,13 +1,14 @@
 /** Port rows shared by patch, layer, and interface nodes: handles, labels, inline values, live values. */
 
-import { canConnect } from "@sonobe/core";
+import { canConnect, type ValueType } from "@sonobe/core";
 import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
-import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
-import { PortGlyph } from "../../../ui/PortGlyph.tsx";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { isLoopValue, isTruthyState, liveReserve, liveText, pickCopy } from "@sonobe/core/graph";
 import { HEADER_HEIGHT } from "../model/geometry.ts";
 import { layerIdOfNode, type PortModel } from "../model/types.ts";
 import { usePatchEditor, useLiveValue, usePulseCount, useUi } from "../state/context.ts";
+import type { UiStore } from "../state/uiStore.ts";
 import { useWatchedCopy } from "../state/watch.ts";
 import { InlineValue, KnobChip } from "./InlineValue.tsx";
 
@@ -73,7 +74,86 @@ function useHoverCard(nodeId: string, port: PortModel) {
       hoverOwner = null;
       if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
     },
+    // Keyboard focus shows the same card at once; a click that focuses the row doesn't.
+    onFocus(event: FocusEvent<HTMLDivElement>) {
+      const el = event.currentTarget;
+      if (event.target !== el || !el.matches(":focus-visible")) return;
+      const r = el.getBoundingClientRect();
+      ui.getState().set({ hoverPort: { nodeId, address: port.address, side: port.side, rect: { x: r.left, y: r.top, width: r.width, height: r.height }, keyboard: true } });
+    },
+    onBlur(event: FocusEvent<HTMLDivElement>) {
+      if (event.target !== event.currentTarget) return;
+      const hover = ui.getState().hoverPort;
+      if (hover && hover.nodeId === nodeId && hover.address === port.address) ui.getState().set({ hoverPort: null });
+    },
   };
+}
+
+/** The port rows of a node, by side, for arrow-key travel. */
+function nodePorts(row: HTMLElement) {
+  const node = row.closest<HTMLElement>(".react-flow__node");
+  const rows = [...(node?.querySelectorAll<HTMLElement>(".sb-pe-row") ?? [])];
+  const side = (which: "in" | "out") => [...(node?.querySelectorAll<HTMLElement>(`.sb-pe-port--${which}[tabindex]`) ?? [])];
+  return { node, rows, in: side("in"), out: side("out") };
+}
+
+/**
+ * Keys on a focused port row: Up and Down move along its side, Left and Right cross to the other side,
+ * Enter or Space acts, and Escape cancels an armed output or closes a refusal, then returns to the node. Keys aimed at a
+ * control inside the row are its own.
+ */
+function onPortKeyDown(event: KeyboardEvent<HTMLDivElement>, ui: UiStore, activate: (shift: boolean, row: HTMLElement) => void) {
+  const row = event.currentTarget;
+  if (event.target !== row || event.altKey || event.metaKey || event.ctrlKey) return;
+  const { node, rows, ...sides } = nodePorts(row);
+  const mine = row.classList.contains("sb-pe-port--in") ? "in" : "out";
+  const along = sides[mine];
+  const at = along.indexOf(row);
+  let next: HTMLElement | undefined;
+  switch (event.key) {
+    case "Enter":
+    case " ":
+      activate(event.shiftKey, row);
+      break;
+    case "ArrowDown":
+      next = along[Math.min(at + 1, along.length - 1)];
+      break;
+    case "ArrowUp":
+      next = along[Math.max(at - 1, 0)];
+      break;
+    case "Home":
+      next = along[0];
+      break;
+    case "End":
+      next = along.at(-1);
+      break;
+    case "ArrowLeft":
+    case "ArrowRight": {
+      const other = sides[mine === "in" ? "out" : "in"];
+      const here = rows.indexOf(row.parentElement!);
+      next = other.slice().sort((a, b) => Math.abs(rows.indexOf(a.parentElement!) - here) - Math.abs(rows.indexOf(b.parentElement!) - here))[0];
+      break;
+    }
+    case "Escape":
+      if (ui.getState().armed) ui.getState().set({ armed: null });
+      else if (ui.getState().connectHint) ui.getState().set({ connectHint: null });
+      else node?.focus();
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  next?.focus();
+}
+
+/** A press on a port row leaves focus on the node: rows are for keyboard travel, so Enter still renames and the arrows still nudge. */
+function keepFocusOnNode(event: MouseEvent<HTMLDivElement>) {
+  if ((event.target as Element).closest("input, textarea, select, button, [contenteditable]")) return;
+  const node = event.currentTarget.closest<HTMLElement>(".react-flow__node");
+  if (!node) return;
+  event.preventDefault();
+  node.focus({ preventScroll: true });
 }
 
 /** Right-click on a port row: the port's menu instead of the node's. */
@@ -87,24 +167,56 @@ function usePortMenu(nodeId: string, port: PortModel) {
   };
 }
 
+/** Whether a cable from an output of type `from` can end at an input of type `to`: "convert" when the wire converts the value. */
+function dropFit(from: ValueType, to: ValueType): "true" | "convert" | "false" {
+  const check = canConnect(from, to);
+  return !check.ok ? "false" : check.conversion ? "convert" : "true";
+}
+
 const InputPort = memo(function InputPort({ nodeId, port, editable }: { nodeId: string; port: PortModel; editable: boolean }) {
   const { ui, actions } = usePatchEditor();
   const onContextMenu = usePortMenu(nodeId, port);
   const hover = useHoverCard(nodeId, port);
-  const armable = useUi((s) => (s.armed && s.armed.nodeId !== nodeId ? canConnect(s.armed.type, port.type).ok : null));
+  const armable = useUi((s) => {
+    const from = s.armed ? { type: s.armed.type, node: s.armed.nodeId } : s.draggingType && s.draggingSide === "out" ? { type: s.draggingType, node: s.draggingFrom } : null;
+    return from && from.node !== nodeId ? dropFit(from.type, port.type) : null;
+  });
   const highlighted = useUi((s) => s.highlightPort === port.address);
   const layerId = layerIdOfNode(nodeId);
   const undriven = layerId !== undefined && !port.connected;
-  const onClick = (event: MouseEvent<HTMLDivElement>) => {
+  const connectArmed = (keepArmed: boolean, row?: HTMLElement) => {
     const armed = ui.getState().armed;
-    if (!armed || !armable) return;
-    event.stopPropagation();
-    actions.connect(armed.address, port.address);
-    if (!event.shiftKey) ui.getState().set({ armed: null });
+    if (!armed) return;
+    const at = row?.getBoundingClientRect();
+    actions.connect(armed.address, port.address, at && { x: at.left, y: at.bottom });
+    if (!keepArmed) ui.getState().set({ armed: null });
   };
+  const onClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!ui.getState().armed || !armable || armable === "false") return;
+    event.stopPropagation();
+    connectArmed(event.shiftKey);
+  };
+  const armedLabel = useUi((s) => s.armed?.label);
+  const fit = armedLabel && armable ? (armable === "false" ? `. Can't connect ${armedLabel} here` : `. Enter connects ${armedLabel}`) : "";
   return (
-    <div className="sb-pe-port sb-pe-port--in" data-connected={port.connected || undefined} data-issue={port.issue?.severity} data-armable={armable ?? undefined} data-highlight={highlighted || undefined} data-undriven={undriven || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
-      <Handle type="target" position={Position.Left} id={port.handleId} className="sb-pe-handle sb-pe-handle--in" aria-label={`${port.name} input`}>
+    <div
+      className="sb-pe-port sb-pe-port--in"
+      role="group"
+      aria-roledescription="port"
+      aria-label={`${port.name} input, ${VALUE_TYPE_LABELS[port.type].toLowerCase()}${port.connected ? ", connected" : ""}${fit}`}
+      tabIndex={-1}
+      data-connected={port.connected || undefined}
+      data-issue={port.issue?.severity}
+      data-armable={armable ?? undefined}
+      data-highlight={highlighted || undefined}
+      data-undriven={undriven || undefined}
+      onClick={onClick}
+      onMouseDownCapture={keepFocusOnNode}
+      onKeyDown={(event) => onPortKeyDown(event, ui, connectArmed)}
+      onContextMenu={onContextMenu}
+      {...hover}
+    >
+      <Handle type="target" position={Position.Left} id={port.handleId} className="sb-pe-handle sb-pe-handle--in" aria-hidden>
         <PortGlyph type={port.type} connected={port.connected} size={9} />
       </Handle>
       <span className="sb-pe-port__label">{port.name}</span>
@@ -150,12 +262,16 @@ const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeI
   const live = useLiveValue(liveEnabled && showsLive ? port.address : null);
   const copy = useWatchedCopy(session);
   const armed = useUi((s) => s.armed?.address === port.address);
+  const armable = useUi((s) => (s.draggingType && s.draggingSide === "in" && s.draggingFrom !== nodeId ? dropFit(port.type, s.draggingType) : null));
   const truthy = copy === null ? isTruthyState(live) : pickCopy(live, copy).value === true;
+  const toggleArmed = () => {
+    const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
+    ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
+  };
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
     if (!(event.target as Element).closest(".sb-pe-handle")) return;
     event.stopPropagation();
-    const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
-    ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
+    toggleArmed();
   };
   const text = liveText(port, live, copy);
   // The slot is as wide as the longest value its type prints, whichever loop copy is watched, and is
@@ -165,14 +281,29 @@ const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeI
   const reserve = showsLive ? liveReserve(port, live) : 0;
   const slot = reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch`, ...(port.liveRoom !== undefined ? { "--sb-pe-live-room": `${port.liveRoom}px` } : {}) } as CSSProperties) : undefined;
   return (
-    <div className="sb-pe-port sb-pe-port--out" data-connected={port.connected || undefined} data-live={truthy || undefined} data-armed={armed || undefined} onClick={onClick} onContextMenu={onContextMenu} {...hover}>
+    <div
+      className="sb-pe-port sb-pe-port--out"
+      role="group"
+      aria-roledescription="port"
+      aria-label={`${port.name} output, ${VALUE_TYPE_LABELS[port.type].toLowerCase()}${port.connected ? ", connected" : ""}${armed ? ", armed. Select an input to connect it" : ""}`}
+      tabIndex={-1}
+      data-connected={port.connected || undefined}
+      data-live={truthy || undefined}
+      data-armed={armed || undefined}
+      data-armable={armable ?? undefined}
+      onClick={onClick}
+      onMouseDownCapture={keepFocusOnNode}
+      onKeyDown={(event) => onPortKeyDown(event, ui, toggleArmed)}
+      onContextMenu={onContextMenu}
+      {...hover}
+    >
       {(text || reserve > 0) && (
         <span className="sb-pe-port__live sb-tabular" style={slot}>
           {text}
         </span>
       )}
       <span className="sb-pe-port__label">{port.name}</span>
-      <Handle type="source" position={Position.Right} id={port.handleId} className="sb-pe-handle sb-pe-handle--out" aria-label={`${port.name} output`}>
+      <Handle type="source" position={Position.Right} id={port.handleId} className="sb-pe-handle sb-pe-handle--out" aria-hidden>
         <PortGlyph type={port.type} connected={port.connected || armed} live={truthy} size={9} />
         {liveEnabled && port.type === "pulse" && <PulseRing address={port.address} />}
       </Handle>

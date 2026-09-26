@@ -21,11 +21,11 @@ afterEach(() => {
   session = null;
 });
 
-function setup(doc: SonobeDocument = createDemoDocument(registry), componentId = "main", flow: ActionDeps["flow"] = () => null) {
+function setup(doc: SonobeDocument = createDemoDocument(registry), componentId = "main", flow: ActionDeps["flow"] = () => null, reveal?: ActionDeps["reveal"]) {
   session = createEditorSession({ host: null, registry, document: doc, autoplay: false, scheduler: createManualScheduler(), textMeasurer: "approximate" });
   const s = session;
   const ui = createUiStore();
-  const actions = createPatchEditorActions({ session: s, registry, componentId, ui, flow, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined });
+  const actions = createPatchEditorActions({ session: s, registry, componentId, ui, flow, pointer: () => null, openPicker: () => undefined, openInfo: () => undefined, ...(reveal ? { reveal } : {}) });
   return { s, actions, ui, main: () => s.document.getState().doc.components.main!, component: () => s.document.getState().doc.components[componentId]! };
 }
 
@@ -53,6 +53,38 @@ describe("patch editor actions", () => {
     expect(s.selection.getState().patches).toEqual([id]);
     const exact = actions.insertPatch("switch", { x: 262, y: 62 }, { placement: "exact" })!;
     expect(main().patches[exact]!.ui).toMatchObject({ x: 262, y: 62 });
+  });
+
+  it("tells the view about every patch an insert adds, so it can pan to one that landed off screen", () => {
+    const revealed: string[] = [];
+    const { actions } = setup(undefined, "main", () => null, (id) => revealed.push(id));
+    const id = actions.insertPatch("switch", { x: 262, y: 62 })!;
+    expect(revealed).toEqual([id]);
+    actions.insertPatch("no_such_patch", { x: 0, y: 0 });
+    expect(revealed).toEqual([id]);
+  });
+
+  it("explains a refused cable at the drop point, with the converter as an action, and in a toast when nothing was dropped", () => {
+    const { actions, ui, main } = setup();
+    const before = Object.keys(main().patches).length;
+    actions.explainConnection("heart_color.output", "card_shadow.start", { x: 900, y: 300 });
+    expect(ui.getState().connectHint).toBeNull();
+    actions.explainConnection("heart_color.output", "card_shadow.start", { x: 900, y: 300 }, { x: 640, y: 420 });
+    const hint = ui.getState().connectHint!;
+    expect(hint).toMatchObject({ client: { x: 640, y: 420 }, reason: expect.stringContaining("needs a number") });
+    expect(hint.converter!.label).toMatch(/^Insert /);
+    expect(Object.keys(main().patches)).toHaveLength(before);
+    hint.converter!.insert();
+    expect(Object.keys(main().patches)).toHaveLength(before + 1);
+  });
+
+  it("names patches, not ids, when a keyboard connect is refused, and anchors the hint where it says", () => {
+    const { actions, ui } = setup();
+    expect(actions.connect("like_spring.output", "like_spring.number", { x: 320, y: 240 })).toBe(false);
+    const hint = ui.getState().connectHint!;
+    expect(hint.client).toEqual({ x: 320, y: 240 });
+    expect(hint.reason).not.toMatch(/like_spring|→/);
+    expect(hint.reason).toContain("Like Spring");
   });
 
   it("replaces a patch with another type in place, in one undo step", () => {
@@ -136,6 +168,22 @@ describe("patch editor actions: components and variables", () => {
     expect(ui.getState()).toMatchObject({ editingTitle: instance, namingComponent: componentId });
     actions.renameComponent(componentId, "Heart Logic");
     expect(s.document.getState().doc.components[componentId]!.name).toBe("Heart Logic");
+    expect(main().patches[instance]!.name).toBe("Heart Logic");
+    expect(s.document.getState().undoLabel).toBe("You: Rename component “Component” to “Heart Logic” (2 ops)");
+    expect(s.document.getState().undo().ok).toBe(true);
+    expect(s.document.getState().doc.components[componentId]!.name).toBe("Component");
+    expect(main().patches[instance]!.name).toBe("Component");
+  });
+
+  it("leaves an instance the author named themselves alone when the component is renamed", () => {
+    const { s, actions, main } = setup();
+    s.selection.getState().select({ patches: ["liked", "like_spring"] });
+    actions.groupIntoComponent();
+    const instance = s.selection.getState().patches[0]!;
+    const componentId = main().patches[instance]!.component!;
+    actions.apply([{ op: "updatePatch", component: "main", id: instance, name: "Heart" }], "Rename patch");
+    actions.renameComponent(componentId, "Heart Logic");
+    expect(main().patches[instance]!.name).toBe("Heart");
     expect(s.document.getState().undoLabel).toBe("You: Rename component “Component” to “Heart Logic”");
   });
 
