@@ -25,7 +25,7 @@ describe("scripts in the player", () => {
     const runtime = createRuntime(result.doc!, { registry: withPausableScripts(registry, () => paused), platform: {} });
     runFrames(runtime, 3);
     expect(runtime.getValue("count.frames")).toBe(0);
-    expect(runtime.issues()).toEqual([expect.objectContaining({ code: "script_untrusted", severity: "warning", message: expect.stringContaining("Trust the project in Sonobe") })]);
+    expect(runtime.issues()).toEqual([expect.objectContaining({ code: "script_untrusted", severity: "warning", message: expect.stringContaining("Trust the prototype in Sonobe") })]);
     paused = false;
     runFrames(runtime, 3);
     expect(runtime.getValue("count.frames")).toBeGreaterThan(0);
