@@ -1,6 +1,7 @@
 import type { PatchCategory } from "@sonobe/core";
 import { ArrowLeft, BookOpen, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -22,7 +23,7 @@ import "./learn.css";
 import "./lessons/lessons.css";
 
 export interface LearnDrawerProps {
-  /** Shows a close button (Escape is handled by the drawer host). */
+  /** Shows a close button. The drawer host closes on Escape, except while a lesson is docked. */
   onClose?: () => void;
   /** Navigate here whenever this changes (e.g. "Learn about this patch" → { kind: "patches", type }). */
   view?: LearnView;
@@ -54,17 +55,50 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
   const items = useMemo(() => listPatchReference(session.registry), [session.registry]);
 
   const [stack, setStack] = useState<LearnView[]>(() => [view ?? defaultView ?? readLearnView() ?? { kind: "lessons" }]);
+  const stackRef = useRef(stack);
   const current = stack.at(-1)!;
   const [opened, setOpened] = useState(() => readOpenedGuides());
+  const [guideQuery, setGuideQuery] = useState("");
   const [patchQuery, setPatchQuery] = useState("");
   const [patchCategory, setPatchCategory] = useState<PatchCategory | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const onViewChangeRef = useLatest(onViewChange);
+  const docked = useStore(lessonLayout, (s) => s.active);
+  const scrollMemo = useRef(new Map<string, number>());
+  const arrival = useRef({ restoreScroll: false, focusView: false });
 
-  const navigate = useCallback((next: LearnView) => {
-    setStack((s) => (viewKey(s.at(-1)) === viewKey(next) ? s : [...s.slice(-29), next]));
+  const show = useCallback((next: LearnView[], arrive: { restoreScroll: boolean; focusView: boolean }) => {
+    const body = bodyRef.current;
+    if (body) scrollMemo.current.set(viewKey(stackRef.current.at(-1)), body.scrollTop);
+    arrival.current = arrive;
+    stackRef.current = next;
+    setStack(next);
   }, []);
-  const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : [{ kind: "lessons" }]));
+
+  const goBack = useCallback(
+    (fromContent: boolean) => {
+      const s = stackRef.current;
+      show(s.length > 1 ? s.slice(0, -1) : [{ kind: "lessons" }], { restoreScroll: true, focusView: fromContent });
+    },
+    [show],
+  );
+
+  /** Opens a view. `fromContent` is a click inside the drawer's own view, which moves focus to the new view. */
+  const navigate = useCallback(
+    (next: LearnView, fromContent = false) => {
+      const s = stackRef.current;
+      if (viewKey(s.at(-1)) === viewKey(next)) return;
+      if (s.length > 1 && viewKey(s.at(-2)) === viewKey(next)) goBack(fromContent);
+      else show([...s.slice(-29), next], { restoreScroll: false, focusView: fromContent });
+    },
+    [show, goBack],
+  );
+  const open = (next: LearnView) => navigate(next, true);
+
+  const selectSection = (next: Section) => {
+    scrollMemo.current.clear();
+    show([next === "lessons" ? { kind: "lessons" } : next === "guides" ? { kind: "home" } : { kind: "patches", type: null }], { restoreScroll: false, focusView: false });
+  };
 
   const controlledKey = viewKey(view);
   useEffect(() => {
@@ -95,29 +129,39 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
+    const { restoreScroll, focusView } = arrival.current;
+    arrival.current = { restoreScroll: false, focusView: false };
+    const remembered = restoreScroll ? scrollMemo.current.get(currentKey) : undefined;
     const anchor = current.kind === "guide" ? current.anchor : null;
-    const target = anchor ? body.ownerDocument.getElementById(`${GUIDE_ID_PREFIX}${anchor}`) : null;
+    const target = remembered === undefined && anchor ? body.ownerDocument.getElementById(`${GUIDE_ID_PREFIX}${anchor}`) : null;
     if (target && body.contains(target)) body.scrollTop = target.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12;
-    else body.scrollTop = 0;
+    else body.scrollTop = remembered ?? 0;
+    if (focusView && current.kind !== "lesson") (body.querySelector<HTMLElement>("[data-view-heading]") ?? body).focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
   const openGuide = (slug: string, anchor: string | null = null) => {
-    if (slug.toLowerCase() === "readme") navigate({ kind: "home" });
-    else navigate({ kind: "guide", slug, anchor });
+    if (slug.toLowerCase() === "readme") open({ kind: "home" });
+    else open({ kind: "guide", slug, anchor });
   };
 
   const tryExample = async (example: ExampleProject) => {
     const result = await openExample(session, example);
-    if (result.ok) toast.success(`Opened “${example.name}”`, { description: "It's a new document. Save it to keep your changes." });
+    if (result.ok) toast.success(`Opened “${example.name}”`, { description: "It's a copy. Save it to keep your changes." });
     else if (result.error) toast.error(`Couldn't open “${example.name}”`, { description: result.error });
   };
 
   const guide = current.kind === "guide" ? catalog.get(current.slug) : undefined;
   const lesson = current.kind === "lesson" ? getLesson(current.id) : undefined;
   const section = sectionOf(current);
-  const openLesson = (id: string) => navigate({ kind: "lesson", id });
-  const openLessons = () => navigate({ kind: "lessons" });
+  const openLesson = (id: string) => open({ kind: "lesson", id });
+  const openLessons = () => open({ kind: "lessons" });
+  const openHome = () => open({ kind: "home" });
+
+  // A guide or a patch page carries its own way back; the header arrow covers the views that don't and jumps in from another section.
+  const previous = stack.at(-2);
+  const hasCrumb = !!guide || (current.kind === "patches" && !!current.type);
+  const showBack = previous !== undefined && (!hasCrumb || sectionOf(previous) !== section);
 
   let body;
   if (current.kind === "patches") {
@@ -125,7 +169,7 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
       <PatchReference
         items={items}
         type={current.type ?? null}
-        onSelect={(type) => navigate({ kind: "patches", type })}
+        onSelect={(type) => open({ kind: "patches", type })}
         query={patchQuery}
         onQueryChange={setPatchQuery}
         category={patchCategory}
@@ -138,33 +182,33 @@ export function LearnDrawer({ onClose, view, defaultView, onViewChange, onConnec
   } else if (lesson) {
     body = <LessonPlayer key={lesson.id} lesson={lesson} onBack={openLessons} onOpenLesson={openLesson} onOpenGuide={(slug) => openGuide(slug)} />;
   } else if (current.kind === "lessons" || current.kind === "lesson") {
-    body = <LessonsHome onOpenLesson={openLesson} onOpenGuides={() => navigate({ kind: "home" })} />;
+    body = <LessonsHome onOpenLesson={openLesson} onOpenGuides={openHome} />;
   } else if (guide) {
-    body = <GuideReader guide={guide} catalog={catalog} examples={examples} onOpenGuide={openGuide} onHome={() => navigate({ kind: "home" })} onTryExample={(e) => void tryExample(e)} {...(onConnectClaude ? { onConnectClaude } : {})} />;
+    body = <GuideReader guide={guide} catalog={catalog} examples={examples} onOpenGuide={openGuide} onHome={openHome} onTryExample={(e) => void tryExample(e)} {...(onConnectClaude ? { onConnectClaude } : {})} />;
   } else {
-    body = <GuideHome catalog={catalog} opened={opened} examples={examples} onOpenGuide={openGuide} onOpenPatches={() => navigate({ kind: "patches", type: null })} onTryExample={(e) => void tryExample(e)} />;
+    body = <GuideHome catalog={catalog} opened={opened} examples={examples} query={guideQuery} onQueryChange={setGuideQuery} onOpenGuide={openGuide} onOpenPatches={() => open({ kind: "patches", type: null })} onTryExample={(e) => void tryExample(e)} />;
   }
 
   return (
     <div className={cx("sb-learnx", className)} data-view={current.kind}>
       <header className="sb-learnx__header">
-        {stack.length > 1 ? <IconButton size="sm" icon={<ArrowLeft size={14} />} label="Back" onClick={back} /> : <BookOpen size={14} strokeWidth={2} className="sb-learnx__header-icon" aria-hidden />}
+        {showBack ? <IconButton size="sm" icon={<ArrowLeft size={14} />} label="Back" onClick={() => goBack(true)} /> : <BookOpen size={14} strokeWidth={2} className="sb-learnx__header-icon" aria-hidden />}
         <h2 className="sb-learnx__title">Learn</h2>
         <SegmentedControl<Section>
           size="sm"
           aria-label="Learn section"
           className="sb-learnx__sections"
           value={section}
-          onChange={(next) => navigate(next === "lessons" ? { kind: "lessons" } : next === "guides" ? { kind: "home" } : { kind: "patches", type: null })}
+          onChange={selectSection}
           options={[
             { value: "lessons", label: "Lessons" },
             { value: "guides", label: "Guides" },
             { value: "patches", label: "Patches" },
           ]}
         />
-        {onClose && <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={onClose} />}
+        {onClose && <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut={docked ? undefined : "Escape"} onClick={onClose} />}
       </header>
-      <div className="sb-learnx__body sb-scroll" ref={bodyRef}>
+      <div className="sb-learnx__body sb-scroll" ref={bodyRef} tabIndex={-1}>
         {body}
       </div>
     </div>

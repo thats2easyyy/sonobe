@@ -113,23 +113,35 @@
   white-space: pre;
 }
 
-.sb-md__copy {
+.sb-md__actions {
   position: absolute;
   top: var(--space-3);
   right: var(--space-3);
+  display: flex;
+  gap: var(--space-3);
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
-.sb-md__code:hover .sb-md__copy,
-.sb-md__copy:focus-visible {
+.sb-md__actions .sb-iconbtn[data-size]::after {
+  inset: -3px;
+}
+
+.sb-md__code:hover .sb-md__actions,
+.sb-md__actions:has(:focus-visible) {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .sb-md__copy {
+  .sb-md__actions {
     opacity: 1;
   }
+}
+
+/* A scroller with more to the right fades out at that edge, so a clipped diagram reads as scrollable. */
+.sb-md__pre[data-more],
+.sb-md__table[data-more] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
 .sb-md__table {
@@ -148,7 +160,7 @@
 
 .sb-md__table th,
 .sb-md__table td {
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
   text-align: left;
   vertical-align: top;
@@ -158,7 +170,6 @@
   background: var(--bg-sunken);
   color: var(--text-secondary);
   font-weight: var(--font-weight-semibold);
-  white-space: nowrap;
 }
 
 .sb-md__table tr:last-child td {

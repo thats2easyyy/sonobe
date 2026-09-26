@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGuideCatalog, getGuideCatalog, parseGuide, parseLevelMap, resolveGuideHref, searchGuides } from "./guides.ts";
+import { createGuideCatalog, getGuideCatalog, parseGuide, parseLevelMap, resolveGuideHref, searchGuides, snippetAround, splitByTerms } from "./guides.ts";
 import { parseMarkdown } from "./markdown.ts";
 
 describe("bundled guides", () => {
@@ -80,5 +80,65 @@ describe("guide parsing", () => {
 
   it("ignores tables that aren't a level map", () => {
     expect(parseLevelMap(parseMarkdown("| Word | Meaning |\n|---|---|\n| Layer | Something |"))).toEqual([]);
+  });
+});
+
+describe("guide search snippets", () => {
+  const long = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda spring mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega alpha beta gamma delta epsilon zeta";
+
+  it("starts and ends on whole words", () => {
+    const snippet = snippetAround(long, "spring");
+    expect(snippet.startsWith("…")).toBe(true);
+    expect(snippet.endsWith("…")).toBe(true);
+    const words = snippet.replace(/…/g, "").split(" ");
+    for (const word of words) expect(long.split(" ")).toContain(word);
+    expect(snippet).toContain("spring");
+  });
+
+  it("keeps short text whole", () => {
+    expect(snippetAround("A short line about springs.", "spring")).toBe("A short line about springs.");
+  });
+
+  it("opens at the section holding the hit and skips the meta line, tables and code", () => {
+    const guide = parseGuide(
+      "01-a",
+      ["# A", "", "Level 1 · about 5 min · Next: [B](02-b.md)", "", "## First", "", "Nothing here.", "", "| Cell |", "|---|", "| tabletext |", "", "## Second", "", "Words about tabletext are not here, but zebra is.", "", "```", "codeword", "```"].join("\n"),
+    );
+    const [hit] = searchGuides([guide], "zebra");
+    expect(hit!.anchor).toBe("second");
+    expect(hit!.section?.text).toBe("Second");
+    expect(hit!.snippet).toContain("zebra");
+  });
+
+  it("still finds a guide whose only match is in code, a table or the meta line, without a snippet", () => {
+    const guide = parseGuide(
+      "01-a",
+      ["# A", "", "Level 1 · about 5 min · Next: [B](02-b.md)", "", "## First", "", "| Cell |", "|---|", "| mainImage |", "", "```", "codeword", "```"].join("\n"),
+    );
+    for (const query of ["codeword", "mainImage", "5 min"]) {
+      const [hit] = searchGuides([guide], query);
+      expect(hit?.guide.slug).toBe("01-a");
+      expect(hit?.snippet).toBeNull();
+      expect(hit?.anchor).toBeNull();
+    }
+  });
+
+  it("prefers the matching heading as the anchor", () => {
+    const guide = parseGuide("01-a", "# A\n\n## Springs\n\nSprings are springy.");
+    expect(searchGuides([guide], "springs")[0]!.anchor).toBe("springs");
+  });
+
+  it("splits text into matched and plain runs", () => {
+    expect(splitByTerms("Pick a Spring by feel", ["spring"])).toEqual([
+      { text: "Pick a ", match: false },
+      { text: "Spring", match: true },
+      { text: " by feel", match: false },
+    ]);
+    expect(splitByTerms("a.b", ["."])).toEqual([
+      { text: "a", match: false },
+      { text: ".", match: true },
+      { text: "b", match: false },
+    ]);
+    expect(splitByTerms("text", [])).toEqual([{ text: "text", match: false }]);
   });
 });

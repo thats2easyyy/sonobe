@@ -1,8 +1,10 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Maximize2 } from "lucide-react";
 import { createElement, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Dialog } from "../../ui/Dialog.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { cx } from "../../ui/lib/cx.ts";
-import { parseMarkdown, type MdBlock, type MdInline } from "./markdown.ts";
+import { parseMarkdown, type MdAlign, type MdBlock, type MdInline } from "./markdown.ts";
+import { useScrollOverflow } from "./useScrollOverflow.ts";
 import "./markdown.css";
 
 export interface MarkdownProps {
@@ -76,32 +78,7 @@ function renderBlock(block: MdBlock, ctx: RenderContext, key: number, tight: boo
       );
     }
     case "table":
-      return (
-        <div key={key} className="sb-md__table sb-scroll">
-          <table>
-            <thead>
-              <tr>
-                {block.head.map((cell, c) => (
-                  <th key={c} style={block.align[c] ? { textAlign: block.align[c]! } : undefined}>
-                    {renderInlines(cell, ctx)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, r) => (
-                <tr key={r}>
-                  {row.map((cell, c) => (
-                    <td key={c} style={block.align[c] ? { textAlign: block.align[c]! } : undefined}>
-                      {renderInlines(cell, ctx)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
+      return <TableBlock key={key} head={block.head} rows={block.rows} align={block.align} ctx={ctx} />;
     case "blockquote":
       return (
         <blockquote key={key} className="sb-md__quote">
@@ -111,6 +88,36 @@ function renderBlock(block: MdBlock, ctx: RenderContext, key: number, tight: boo
     case "hr":
       return <hr key={key} className="sb-md__hr" />;
   }
+}
+
+function TableBlock({ head, rows, align, ctx }: { head: readonly MdInline[][]; rows: readonly MdInline[][][]; align: readonly MdAlign[]; ctx: RenderContext }) {
+  const scroller = useScrollOverflow<HTMLDivElement>();
+  return (
+    <div ref={scroller.ref} className="sb-md__table sb-scroll" data-more={scroller.more || undefined}>
+      <table>
+        <thead>
+          <tr>
+            {head.map((cell, c) => (
+              <th key={c} style={align[c] ? { textAlign: align[c]! } : undefined}>
+                {renderInlines(cell, ctx)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} style={align[c] ? { textAlign: align[c]! } : undefined}>
+                  {renderInlines(cell, ctx)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function renderInlines(nodes: readonly MdInline[], ctx: RenderContext): ReactNode[] {
@@ -171,6 +178,8 @@ function LinkNode({ href, ctx, children }: { href: string | null; ctx: RenderCon
 
 function CodeBlock({ lang, text, copy }: { lang: string; text: string; copy: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [expandedWidth, setExpandedWidth] = useState<number | null>(null);
+  const scroller = useScrollOverflow<HTMLPreElement>();
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1400);
@@ -179,25 +188,46 @@ function CodeBlock({ lang, text, copy }: { lang: string; text: string; copy: boo
   const canCopy = copy && lang !== "" && lang !== "text";
   return (
     <div className="sb-md__code" data-lang={lang || undefined}>
-      <pre className="sb-md__pre sb-scroll sb-selectable">
+      <pre ref={scroller.ref} className="sb-md__pre sb-scroll sb-selectable" data-more={scroller.more || undefined}>
         <code>{text}</code>
       </pre>
-      {canCopy && (
-        <IconButton
-          size="xs"
-          variant="secondary"
-          className="sb-md__copy"
-          icon={copied ? <Check size={12} /> : <Copy size={12} />}
-          label={copied ? "Copied" : "Copy code"}
-          tooltipPlacement="left"
-          onClick={() => {
-            void navigator.clipboard?.writeText(text).then(
-              () => setCopied(true),
-              () => undefined,
-            );
-          }}
-        />
+      {(canCopy || scroller.overflowing) && (
+        <div className="sb-md__actions">
+          {scroller.overflowing && (
+            <IconButton
+              size="xs"
+              variant="secondary"
+              icon={<Maximize2 size={12} />}
+              label="Expand"
+              tooltipPlacement="left"
+              onClick={() => setExpandedWidth(scroller.node?.scrollWidth ?? 0)}
+            />
+          )}
+          {canCopy && (
+            <IconButton
+              size="xs"
+              variant="secondary"
+              icon={copied ? <Check size={12} /> : <Copy size={12} />}
+              label={copied ? "Copied" : "Copy code"}
+              tooltipPlacement="left"
+              onClick={() => {
+                void navigator.clipboard?.writeText(text).then(
+                  () => setCopied(true),
+                  () => undefined,
+                );
+              }}
+            />
+          )}
+        </div>
       )}
+      <Dialog open={expandedWidth !== null} onOpenChange={(open) => !open && setExpandedWidth(null)} width={`min(92vw, max(420px, ${(expandedWidth ?? 0) + 72}px))`}>
+        <Dialog.Header title={lang && lang !== "text" ? lang : "Full view"} onClose={() => setExpandedWidth(null)} />
+        <Dialog.Body>
+          <pre className="sb-md__pre sb-scroll sb-selectable">
+            <code>{text}</code>
+          </pre>
+        </Dialog.Body>
+      </Dialog>
     </div>
   );
 }

@@ -230,41 +230,80 @@ export interface GuideSearchResult {
   score: number;
   /** A heading that contains every term. */
   heading: GuideHeading | null;
-  /** A line of prose around the first term. */
+  /** The heading a prose hit sits under, when the hit isn't in a heading. */
+  section: GuideHeading | null;
+  /** Where to open the guide: the matching heading, else the section holding the snippet. */
+  anchor: string | null;
+  /** A line of prose around the first term, cut at word boundaries. */
   snippet: string | null;
 }
 
-function plainLine(line: string): string {
-  return line
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[`*_#>|]/g, "")
-    .replace(/^\s*(?:[-+]|\d+\.)\s+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
+interface ProseLine {
+  text: string;
+  section: GuideHeading | null;
 }
 
-function snippetFor(markdown: string, term: string): string | null {
-  let fenced = false;
-  for (const line of markdown.split("\n")) {
-    if (/^\s*(`{3,}|~{3,})/.test(line)) {
-      fenced = !fenced;
-      continue;
+const proseCache = new WeakMap<Guide, ProseLine[]>();
+
+/** Paragraphs, list items and quotes with the h2 or h3 they sit under. The meta line, code and tables aren't searched for snippets. */
+function proseLines(guide: Guide): ProseLine[] {
+  const cached = proseCache.get(guide);
+  if (cached) return cached;
+  const headings = new Map(guide.headings.map((h) => [h.id, h]));
+  const titleIndex = guide.blocks.findIndex((b) => b.type === "heading" && b.level === 1);
+  const metaIndex = guide.levelLabel !== "" ? titleIndex + 1 : -1;
+  const lines: ProseLine[] = [];
+  let section: GuideHeading | null = null;
+  const collect = (blocks: readonly MdBlock[]) => {
+    for (const block of blocks) {
+      if (block.type === "paragraph") lines.push({ text: inlineText(block.children).replace(/\s+/g, " ").trim(), section });
+      else if (block.type === "list") for (const item of block.items) collect(item);
+      else if (block.type === "blockquote") collect(block.children);
     }
-    if (fenced || /^\s*#/.test(line) || /^\s*\|?\s*:?-{3,}/.test(line)) continue;
-    const text = plainLine(line);
-    const at = text.toLowerCase().indexOf(term);
-    if (at < 0) continue;
-    const start = Math.max(0, at - 48);
-    const end = Math.min(text.length, at + term.length + 72);
-    return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
+  };
+  guide.blocks.forEach((block, i) => {
+    if (block.type === "heading") section = headings.get(block.id) ?? section;
+    else if (i !== metaIndex) collect([block]);
+  });
+  proseCache.set(guide, lines);
+  return lines;
+}
+
+/** About 120 characters around `term`, starting and ending on whole words. */
+export function snippetAround(text: string, term: string): string {
+  const at = Math.max(0, text.toLowerCase().indexOf(term));
+  const termEnd = at + term.length;
+  let start = Math.max(0, at - 48);
+  let end = Math.min(text.length, termEnd + 72);
+  if (start > 0 && text[start - 1] !== " ") {
+    const space = text.indexOf(" ", start);
+    start = space >= 0 && space < at ? space + 1 : text.lastIndexOf(" ", at) + 1;
   }
-  return null;
+  if (end < text.length && text[end] !== " ") {
+    const space = text.lastIndexOf(" ", end);
+    if (space >= termEnd) end = space;
+    else {
+      const after = text.indexOf(" ", termEnd);
+      end = after >= 0 ? after : text.length;
+    }
+  }
+  return `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
+}
+
+/** Cut `text` into runs that match any of `terms` (case-insensitive) and runs that don't. */
+export function splitByTerms(text: string, terms: readonly string[]): { text: string; match: boolean }[] {
+  const escaped = terms.filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escaped.length === 0) return [{ text, match: false }];
+  return text
+    .split(new RegExp(`(${escaped.sort((a, b) => b.length - a.length).join("|")})`, "i"))
+    .map((part, i) => ({ text: part, match: i % 2 === 1 }))
+    .filter((part) => part.text !== "");
 }
 
 /** Rank guides for a query: title matches first, then headings, then prose. */
 export function searchGuides(guides: readonly Guide[], query: string): GuideSearchResult[] {
   const q = query.trim();
-  if (!q) return guides.map((guide) => ({ guide, score: 0, heading: null, snippet: null }));
+  if (!q) return guides.map((guide) => ({ guide, score: 0, heading: null, section: null, anchor: null, snippet: null }));
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   const results: GuideSearchResult[] = [];
   for (const guide of guides) {
@@ -277,14 +316,20 @@ export function searchGuides(guides: readonly Guide[], query: string): GuideSear
     }
     const heading = guide.headings.find((h) => terms.every((t) => h.text.toLowerCase().includes(t))) ?? null;
     if (heading) score += 25;
-    const body = guide.markdown.toLowerCase();
     let snippet: string | null = null;
+    let section: GuideHeading | null = null;
+    const body = guide.markdown.toLowerCase();
     if (terms.every((t) => body.includes(t))) {
+      const lines = proseLines(guide);
+      const line = lines.find((l) => terms.every((t) => l.text.toLowerCase().includes(t))) ?? lines.find((l) => l.text.toLowerCase().includes(terms[0]!));
       const occurrences = body.split(terms[0]!).length - 1;
       score += 8 + Math.min(12, occurrences);
-      snippet = snippetFor(guide.markdown, terms[0]!);
+      if (line) {
+        snippet = snippetAround(line.text, terms.find((t) => line.text.toLowerCase().includes(t)) ?? terms[0]!);
+        section = line.section;
+      }
     }
-    if (score > 0) results.push({ guide, score, heading, snippet });
+    if (score > 0) results.push({ guide, score, heading, section: heading ?? section, anchor: (heading ?? section)?.id ?? null, snippet });
   }
   return results.sort((a, b) => b.score - a.score || (a.guide.number ?? "").localeCompare(b.guide.number ?? ""));
 }

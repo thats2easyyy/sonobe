@@ -46,10 +46,10 @@ export function GuideReader({ guide, catalog, examples, onOpenGuide, onHome, onT
           <ArrowLeft size={12} strokeWidth={2} aria-hidden />
           Learning path
         </button>
-        <h1 className="sb-reader__title" id={`${GUIDE_ID_PREFIX}title`}>
+        <h3 className="sb-reader__title" id={`${GUIDE_ID_PREFIX}title`} tabIndex={-1} data-view-heading>
           {guide.number && <span className="sb-reader__number sb-tabular">{guide.number}</span>}
           {guide.title}
-        </h1>
+        </h3>
         <div className="sb-reader__meta">
           {guide.levelLabel && (
             <Badge size="sm" tone="accent">
@@ -77,7 +77,7 @@ export function GuideReader({ guide, catalog, examples, onOpenGuide, onHome, onT
         <div className="sb-reader__callout">
           <div>
             <div className="sb-reader__callout-title">Follow along</div>
-            <div className="sb-reader__callout-text">Open a finished version as a new document and poke at it.</div>
+            <div className="sb-reader__callout-text">Opens a finished copy as a new prototype to explore.</div>
           </div>
           <div className="sb-reader__callout-actions">
             {tryIt.map((example) => (
@@ -89,7 +89,7 @@ export function GuideReader({ guide, catalog, examples, onOpenGuide, onHome, onT
         </div>
       )}
 
-      <Markdown blocks={body} idPrefix={GUIDE_ID_PREFIX} onNavigate={navigate} className="sb-reader__body" />
+      <Markdown blocks={body} idPrefix={GUIDE_ID_PREFIX} headingOffset={2} onNavigate={navigate} className="sb-reader__body" />
 
       <footer className="sb-reader__footer">
         {next.length > 0 ? (
