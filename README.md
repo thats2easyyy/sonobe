@@ -31,7 +31,7 @@ Layers                    Patches (the logic)                         Viewer
 
 The core pattern is **Interaction → Switch → Animation → Transition**. Tap something, remember the state, animate with a spring, and map the animation onto a property. Start there and add the rest when you need it: loops, components, data, and gestures.
 
-Layers and patches connect in both directions. Press a layer's Touch button to add an Interaction patch, drag a cable onto a layer property, or pick what drives a property from a list of everything in the graph.
+Layers and patches connect in both directions. Press a layer's Touch button (the pointing hand on its row) to add an Interaction patch, drag a cable onto a layer property, or pick what drives a property from a list of everything in the graph.
 
 ![Choosing what drives the Photo layer's opacity from a list of patch outputs in the patch editor, with the layer's properties in the inspector](docs/assets/drive-with-a-patch.png)
 

@@ -51,7 +51,7 @@ Add a Rectangle above it and name it Card. In the inspector, set:
 
 ### 2. Notice the tap
 
-Hover the Card row in the Layers panel and click its Touch button. Choose Tap.
+Hover the Card row in the Layers panel and click its Touch button, the pointing hand. Choose Tap.
 
 An Interaction patch appears, already pointed at Card. Tap the card in the Viewer, and a ring pops out of the patch's Tap output. That ring is a pulse: a signal that lasts one frame, at the moment your finger lifts.
 
@@ -175,5 +175,5 @@ Save it with ⌘S (Ctrl+S) to keep it as a project. Until you do, Sonobe keeps y
 - Wiring Tap straight into Pop Animation. A pulse is 1 for a single frame, so the spring sets off toward 1 and gets called back 16 milliseconds later. The card twitches, or seems to do nothing. Put a Switch in between.
 - Wiring Pop Animation straight into Scale. At rest the output is 0, so the card shrinks to nothing. Transition is there to map 0 to 1 onto real values.
 - Expecting Transition to stop at End. It extrapolates on purpose. If you need a hard limit, clamp the value with a math patch.
-- Tapping and getting nothing at all. Something may be in front of the card catching the touch. Turn on "show hit targets" in the Viewer to see what's tappable.
+- Tapping and getting nothing at all. Something may be in front of the card catching the touch. Turn on **Show Hit Targets** in the Viewer's ⋯ menu to see what's tappable.
 - Swapping Start and End. Start is the value at progress 0, which is usually how the layer looks at rest.

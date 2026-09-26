@@ -42,21 +42,21 @@ Claude in a web browser can't reach a server running on your own computer. For a
 
 Sonobe fills in the setup for your machine, so start here. Any of these opens the screen:
 
-- The **Connect Claude** button at the right end of the toolbar.
+- The plug button at the right end of the toolbar. It reads **Connect Claude** until a session connects, then **Claude**.
 - **Help → Connect Claude…** in the menu bar.
 - "Connect Claude…" in the command palette (⌘K).
 - **Build with Claude** on the welcome screen, or **Connect Claude** in the empty AI Activity panel.
 
-At the top, a status card lists the Claude sessions connected to Sonobe: which app, its project folder, when it last did something and the last tool it called. A session shows up once Claude starts Sonobe's server, and it's marked disconnected when Claude quits. "No Claude session is connected" means exactly that, even though Sonobe's server is running and ready. The toolbar's Claude button works the same way: its dot turns green only while a session is connected, and its tooltip names each one.
+At the top, one status row says whether Sonobe's server is running and lists the Claude sessions connected to it: which app, its project folder, when it last did something and the last tool it called. A session shows up once Claude starts Sonobe's server, and it's marked disconnected when Claude quits. "No Claude session is connected" means exactly that, even though Sonobe's server is running and ready. The toolbar button works the same way: its dot turns green only while a session is connected, and its tooltip names each one.
 
-Below the status card, choose **Claude Code** or **Claude Desktop**. A second switch, **How Claude starts Sonobe**, picks what the command runs:
+Below the status row, choose **Claude Code** or **Claude Desktop** and follow its steps. Under **Try asking**, choose an audience (beginners, designers or engineers) and click a prompt to copy it. Two sections start closed:
 
-- **Sonobe app** runs the CLI that ships inside the app, by its full path. Nothing has to be on your PATH, and you don't need Node installed.
-- **From source** runs the CLI straight from a Sonobe checkout with Node 22.18 or later. Fill in your Node path and your Sonobe folder, and the commands update.
+- **Advanced** has the switch **How Claude starts Sonobe**, which picks what the command runs. **Sonobe app** runs the CLI that ships inside the app, by its full path, so nothing has to be on your PATH and you don't need Node installed. **From source** runs the CLI straight from a Sonobe checkout with Node 22.18 or later: fill in your Node path and your Sonobe folder, and the commands update.
+- **What stays private** summarizes what Claude can reach and what it can't.
 
-Further down are prompts to try for beginners, designers and engineers, a summary of what stays private, and a button that opens this guide.
+The footer's **Read Working with Claude** button opens this guide.
 
-If you open the editor in a browser instead of the app, the status card says live editing needs the desktop app. The commands switch to headless mode, which works on a project folder you type in (see [Without the app](#without-the-app-headless-mode)).
+If you open the editor in a browser instead of the app, the status row says live editing needs the desktop app. The commands switch to headless mode, which works on a project folder you type in (see [Without the app](#without-the-app-headless-mode)).
 
 ## Connect Claude Code
 
@@ -208,7 +208,7 @@ Sonobe also offers four ready-made prompts: `import_screen`, `prototype_interact
 
 - While Claude works, the AI Activity tab in the bottom HUD shows what it's doing, and the items it's changing are highlighted in the editor.
 - When Claude designs a screen, it draws the page over the artboard as it writes, one part at a time (`preview_design`), then imports it as real layers. To start one from the canvas, describe it in the **Design with Claude** box and choose **Open in Claude Code** (on a Mac; [guide 12](12-importing-designs.md#design-on-the-canvas)).
-- Each batch of changes becomes one row in AI Activity with its op count, and one entry in Edit → Undo, labeled with who made it, like "Claude: added press feedback (4 ops)". One undo removes the whole batch, and each row has its own **Undo this** button.
+- Each batch of changes becomes one row in AI Activity with its op count, and one undo step (⌘Z), labeled with who made it, like "Claude: added press feedback (4 ops)". One undo removes the whole batch, and each row has its own **Undo this** button.
 - Batches are all or nothing. If any change in a batch fails validation, none of the batch is applied, so you never end up with half a feature.
 - Claude's edits are tied to the version of the document they were based on. If you changed the document in the meantime, Sonobe rejects the edit and Claude re-reads instead of overwriting your work.
 - Claude can preview a batch without applying it, to see the resulting changes and any diagnostics first.

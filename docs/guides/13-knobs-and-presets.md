@@ -69,7 +69,7 @@ When the reference behaves differently in kind rather than by amount (the shippe
 
 ## Flip while you swipe
 
-Press ⌘' to flip to the preset that ran before, and again to flip back. The viewer names the preset for a moment, so you can keep your eyes on the prototype. Flipping works everywhere except while you're typing in a field, including while you drag in the viewer.
+Press ⌘' (or choose **Flip Presets** in the Knobs tab's ⋯ menu) to flip to the preset that ran before, and again to flip back. The viewer names the preset for a moment, so you can keep your eyes on the prototype. Flipping works everywhere except while you're typing in a field, including while you drag in the viewer.
 
 A run of flips is one undo step, "Switch Presets", so undoing brings back the preset that ran before you started flipping, without undoing your tuning.
 

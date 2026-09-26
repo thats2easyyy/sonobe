@@ -35,7 +35,7 @@ In this example the Switch turned on, but the Pop Animation never moved. So the 
 - Inside a component that runs looped (a deck of cards, or a component patch fed a loop), the Live chip lists its copies. Pick "Card #2", or step with the copy arrows, to see that card's own values.
 - Watch the cables. Pulses and state changes send orbs, true booleans glow, loops carry a "×N" badge, and a small glyph marks where a value gets converted, like a boolean becoming a pulse.
 - A property driven by a cable shows that it's linked in the inspector.
-- Turn on "show hit targets" in the Viewer to see what can be tapped.
+- Turn on **Show Hit Targets** in the Viewer's ⋯ menu to see what can be tapped.
 - Press ⌘R to restart the prototype from its first frame. Plenty of "bugs" are leftover state from ten edits ago.
 
 ## Catching pulses

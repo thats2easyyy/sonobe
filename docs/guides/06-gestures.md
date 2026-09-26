@@ -22,7 +22,7 @@ Level 2 · Next: [07 Loops](07-loops.md)
 | Hover | Hover | True while the pointer is over the layer (desktop only) | State |
 | Keyboard | Keyboard | True while a key is held | State |
 
-The fastest way in is the Touch button on a layer's row in the Layers panel. It inserts the patch already pointed at that layer.
+The fastest way in is the Touch button (the pointing hand) on a layer's row in the Layers panel. It inserts the patch already pointed at that layer.
 
 ## Slop: how still is still?
 
@@ -184,7 +184,7 @@ Work down this list. Most problems turn up in the first five checks.
 2. Is the layer Enabled?
 3. Is its Opacity above 0? A layer at opacity 0 ignores touches, so use a Hit Area instead.
 4. Is Receives Touches on?
-5. Is something in front of it? Turn on "show hit targets" in the Viewer. A transparent group on top catches everything.
+5. Is something in front of it? Turn on **Show Hit Targets** in the Viewer's ⋯ menu. A transparent group on top catches everything.
 6. Did the finger move 10 points or more? Then it was a drag.
 7. Is the layer tiny? Give it Hit Slop.
 8. Is Tap wired into a state input? The tap fired, but you couldn't see it (guide 03).

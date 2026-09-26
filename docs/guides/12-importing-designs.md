@@ -93,7 +93,7 @@ Claude uses the `import_design` tool, checks the result against the original wit
 
 In the desktop app, the Assistant can design a screen right where you noticed it's missing. It uses your own Anthropic API key, or, with an experimental switch that's off by default, your Claude subscription ([guide 11](11-working-with-claude.md#experimental-the-assistant-on-your-claude-subscription)).
 
-1. Click the sparkle in the canvas header (**Design with Claude**), or choose **Redesign with Claude…** on a layer in the Layers panel.
+1. Click **Design** in the canvas header to open the Design with Claude box, or choose **Redesign with Claude…** on a layer in the Layers panel.
 2. Describe the screen, like "a checkout with Apple Pay and a promo code", and press Return. With a layer selected, describe what should change instead.
 3. Watch Claude write it: the canvas makes room, with the patch editor kept as a strip below, and the page draws over the artboard as the HTML arrives, large enough to read. When it's done, the preview fades into real layers, named from the page, in one undo step, and the new screen is selected. You've already watched it take shape, so it doesn't build in as a hologram.
 4. Keep going in the same box: "make the header bigger", "try a darker version", or "make the Pay button bounce". **Make it interactive** and **Add knobs** under the result ask Claude to wire its buttons, or to turn its colors, corner radius and spacing into knobs you can tune ([guide 13](13-knobs-and-presets.md)).
@@ -129,7 +129,7 @@ Text works the same way when the element holding it draws nothing: `<div data-na
 An imported screen is just layers, so everything in [02 ISAT](02-isat.md) applies.
 
 1. Select the imported Follow Button in the layer list.
-2. Press its **Touch** button to add an Interaction patch for it.
+2. Press its **Touch** button (the pointing hand on its row) to add an Interaction patch for it.
 3. Add a Switch, a Pop Animation and a Transition, and connect the Transition to the button's Scale, like the like button in guide 02.
 4. Tap the button in the viewer.
 

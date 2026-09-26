@@ -186,7 +186,7 @@ That leads to some practical recipes:
 - For an invisible tap target, use a Hit Area layer. A rectangle at opacity 0 ignores touches. A Hit Area is invisible in the prototype, and Sonobe draws it as a translucent overlay while you edit so you can see where it is.
 - To make a small icon easier to hit, give it Hit Slop. A 24 × 24 icon with Hit Slop `10` has a 44 × 44 touch target (24 + 10 + 10).
 - To let touches pass through a decoration, like a gradient over a photo, turn off its Receives Touches.
-- To see what's tappable, turn on "show hit targets" in the Viewer.
+- To see what's tappable, turn on **Show Hit Targets** in the Viewer's ⋯ menu.
 
 ## Try it
 
