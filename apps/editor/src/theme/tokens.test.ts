@@ -147,4 +147,41 @@ describe("text contrast (WCAG AA, 4.5:1 for small text)", () => {
   it.each(THEMES)("white numbers on the accent-pressed fill (the canvas size pill) pass in %s", (theme) => {
     expect(contrast([1, 1, 1], parseColor(THEME_TOKENS[theme]["accent-pressed"]))).toBeGreaterThanOrEqual(4.5);
   });
+
+  it.each(THEMES)("text on filled accent controls passes at rest, hover and pressed in %s", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    const onAccent = parseColor(tokens["text-on-accent"]);
+    for (const fill of ["accent", "accent-hover", "accent-pressed"] as const) {
+      expect(contrast(onAccent, parseColor(tokens[fill])), fill).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(THEMES)("status text passes on the window, toolbar and panel, and on its own tint in %s", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    const failures: string[] = [];
+    for (const status of ["danger", "warn", "success", "info", "ai"] as const) {
+      const color = parseColor(tokens[`${status}-text`]);
+      for (const surface of ["bg-window", "bg-toolbar", "bg-panel"] as const) {
+        const base = parseColor(tokens[surface]);
+        const tint = over(parseColor(tokens[`${status}-soft`]), base);
+        for (const [label, background] of [[surface, base], [`${status}-soft over ${surface}`, tint]] as const) {
+          const ratio = contrast(color, background);
+          if (ratio < 4.5) failures.push(`${status}-text on ${label}: ${ratio.toFixed(2)}`);
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it.each(THEMES)("glyphs on a solid success fill pass 3:1 in %s", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    expect(contrast(parseColor(tokens["text-on-success"]), parseColor(tokens.success))).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("stacking scale", () => {
+  it("puts popovers above modals and below the command palette", () => {
+    expect(Z_INDEX.modal).toBeLessThan(Z_INDEX.popover);
+    expect(Z_INDEX.popover).toBeLessThan(Z_INDEX.palette);
+  });
 });

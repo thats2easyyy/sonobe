@@ -7,6 +7,7 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
+  /* Node text only (patch editor); everything else uses xs or larger. */
   --font-size-2xs: 10px;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
@@ -62,8 +63,8 @@
   --z-drawer: 30;
   --z-overlay: 100;
   --z-dropdown: 200;
-  --z-popover: 300;
   --z-modal: 400;
+  --z-popover: 450;
   --z-palette: 500;
   --z-toast: 600;
   --z-tooltip: 700;
@@ -82,7 +83,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion="full"]) {
     --duration-instant: 0ms;
     --duration-fast: 0ms;
     --duration-base: 0ms;
@@ -91,6 +92,7 @@
   }
 }
 
+:root[data-motion="reduce"],
 :root[data-reduced-motion="true"] {
   --duration-instant: 0ms;
   --duration-fast: 0ms;
@@ -116,6 +118,7 @@
   --bg-selected: rgba(95, 116, 228, 0.24);
   --bg-selected-hover: rgba(95, 116, 228, 0.3);
   --bg-selected-muted: rgba(255, 255, 255, 0.08);
+  --bg-segment-selected: rgba(255, 255, 255, 0.10);
   --bg-tooltip: #303036;
 
   --text-primary: #EDEDF0;
@@ -123,6 +126,7 @@
   --text-tertiary: #8A8A93;
   --text-disabled: #55555C;
   --text-on-accent: #FFFFFF;
+  --text-on-success: #1B1B1F;
   --text-accent: #A3B1FF;
   --text-tooltip: #F4F4F6;
 
@@ -130,9 +134,9 @@
   --border-default: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  --accent: #5F74E4;
-  --accent-hover: #6E85F0;
-  --accent-pressed: #5367D4;
+  --accent: #4F62D2;
+  --accent-hover: #5A6CDA;
+  --accent-pressed: #4557C0;
   --accent-soft: rgba(95, 116, 228, 0.18);
   --accent-soft-hover: rgba(95, 116, 228, 0.26);
   --focus-ring: #7F92F7;
@@ -218,6 +222,7 @@
   --bg-selected: rgba(76, 94, 219, 0.13);
   --bg-selected-hover: rgba(76, 94, 219, 0.18);
   --bg-selected-muted: rgba(0, 0, 0, 0.06);
+  --bg-segment-selected: #FFFFFF;
   --bg-tooltip: #1F1F24;
 
   --text-primary: #1B1B1F;
@@ -225,6 +230,7 @@
   --text-tertiary: #686870;
   --text-disabled: #ADADB4;
   --text-on-accent: #FFFFFF;
+  --text-on-success: #FFFFFF;
   --text-accent: #4354C8;
   --text-tooltip: #F4F4F6;
 
@@ -241,19 +247,19 @@
 
   --danger: #CC272E;
   --danger-hover: #B81F26;
-  --danger-text: #BE222A;
+  --danger-text: #B81F26;
   --danger-soft: rgba(204, 39, 46, 0.1);
   --warn: #D98E1F;
-  --warn-text: #A46311;
+  --warn-text: #8A5210;
   --warn-soft: rgba(217, 142, 31, 0.14);
   --success: #1E9E5A;
-  --success-text: #107D48;
+  --success-text: #0E6E41;
   --success-soft: rgba(30, 158, 90, 0.12);
   --info: #1B86C4;
-  --info-text: #0573AA;
+  --info-text: #056394;
   --info-soft: rgba(27, 134, 196, 0.11);
   --ai: #D96A33;
-  --ai-text: #C5521C;
+  --ai-text: #A03C0B;
   --ai-soft: rgba(217, 106, 51, 0.12);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);

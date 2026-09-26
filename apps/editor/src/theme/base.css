@@ -58,6 +58,13 @@ h3 {
   outline-offset: 1px;
 }
 
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
 :focus:not(:focus-visible) {
   outline: none;
 }
@@ -90,6 +97,12 @@ h3 {
   scroll-behavior: auto !important;
 }
 
+/* Busy indicators keep turning, slowly, so a wait never looks frozen. */
+:root[data-motion="reduce"] [data-spinner] {
+  animation-duration: 2.4s !important;
+  animation-iteration-count: infinite !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion="full"]) *,
   :root:not([data-motion="full"]) *::before,
@@ -98,6 +111,11 @@ h3 {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  :root:not([data-motion="full"]) [data-spinner] {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
   }
 }
 
