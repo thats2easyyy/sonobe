@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { Tooltip } from "./Tooltip.tsx";
 import { cx } from "./lib/cx.ts";
 import { useLatest } from "./lib/hooks.ts";
 import { clamp, decimalsOf, roundTo, stepMultiplier } from "./lib/scrubMath.ts";
@@ -170,23 +171,24 @@ export function Slider({ value, min, max, step, onChange, onCommit, ticks = [], 
       <div ref={trackRef} className="sb-slider__track">
         <span className="sb-slider__fill" aria-hidden />
         {ticks.map((tick, i) => (
-          <button
-            key={`${i}-${tick.label}`}
-            type="button"
-            tabIndex={-1}
-            aria-hidden
-            className="sb-slider__tick"
-            aria-label={tick.label}
-            title={tick.label}
-            disabled={disabled || !tick.onSelect}
-            data-outside={tick.value < min || tick.value > max || undefined}
-            style={{ "--sb-tick-ratio": ratioOf(tick.value, min, max), ...(tick.color ? { "--sb-tick-color": tick.color } : {}) } as CSSProperties}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              tick.onSelect?.();
-            }}
-          />
+          <Tooltip key={`${i}-${tick.label}`} content={tick.label} placement="top">
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-hidden
+              className="sb-slider__tick"
+              aria-label={tick.label}
+              aria-disabled={disabled || !tick.onSelect || undefined}
+              data-outside={tick.value < min || tick.value > max || undefined}
+              style={{ "--sb-tick-ratio": ratioOf(tick.value, min, max), ...(tick.color ? { "--sb-tick-color": tick.color } : {}) } as CSSProperties}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!disabled) tick.onSelect?.();
+              }}
+            />
+          </Tooltip>
         ))}
         <span className="sb-slider__thumb" aria-hidden />
         {overflow && <span className="sb-slider__caret" aria-hidden />}

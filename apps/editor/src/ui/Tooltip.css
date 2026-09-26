@@ -40,6 +40,10 @@
   --sb-tooltip-dy: 0px;
 }
 
+.sb-tooltip__text {
+  overflow-wrap: anywhere;
+}
+
 .sb-tooltip__kbd {
   color: rgba(255, 255, 255, 0.55);
 }

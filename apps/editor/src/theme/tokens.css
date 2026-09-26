@@ -115,10 +115,10 @@
   --bg-field-hover: rgba(255, 255, 255, 0.075);
   --bg-hover: rgba(255, 255, 255, 0.055);
   --bg-pressed: rgba(255, 255, 255, 0.09);
-  --bg-selected: rgba(95, 116, 228, 0.24);
-  --bg-selected-hover: rgba(95, 116, 228, 0.3);
+  --bg-selected: rgba(79, 98, 210, 0.29);
+  --bg-selected-hover: rgba(79, 98, 210, 0.36);
   --bg-selected-muted: rgba(255, 255, 255, 0.08);
-  --bg-segment-selected: rgba(255, 255, 255, 0.10);
+  --bg-segment-selected: #4F62D2;
   --bg-tooltip: #303036;
 
   --text-primary: #EDEDF0;
@@ -137,8 +137,8 @@
   --accent: #4F62D2;
   --accent-hover: #5A6CDA;
   --accent-pressed: #4557C0;
-  --accent-soft: rgba(95, 116, 228, 0.18);
-  --accent-soft-hover: rgba(95, 116, 228, 0.26);
+  --accent-soft: rgba(79, 98, 210, 0.22);
+  --accent-soft-hover: rgba(79, 98, 210, 0.32);
   --focus-ring: #7F92F7;
 
   --danger: #E24947;
@@ -222,7 +222,7 @@
   --bg-selected: rgba(76, 94, 219, 0.13);
   --bg-selected-hover: rgba(76, 94, 219, 0.18);
   --bg-selected-muted: rgba(0, 0, 0, 0.06);
-  --bg-segment-selected: #FFFFFF;
+  --bg-segment-selected: #4C5EDB;
   --bg-tooltip: #1F1F24;
 
   --text-primary: #1B1B1F;

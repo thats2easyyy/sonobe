@@ -68,11 +68,11 @@ describe("graphToSvg", () => {
     wide.set("toggle", { ...box, width: box.width + 100 });
     const { svg } = graphToSvg(knobbed, { boxes: wide });
     const node = svg.slice(svg.indexOf('data-node="toggle"'));
-    expect(node).toContain('fill="#5F74E4" fill-opacity="0.18"');
+    expect(node).toContain('fill="#4F62D2" fill-opacity="0.22"');
     expect(node).toContain('r="1.75"');
     expect(node).toContain(">Flip</text>");
     expect(node).toContain(">on</text>");
-    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#5F74E4"/);
+    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#4F62D2"/);
     expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Flip", "sans10") + NODE_BOX.valueInnerGap + tableMeasurer("on", "mono10"), 1);
   });
 
@@ -93,7 +93,7 @@ describe("graphToSvg", () => {
     expect(node).toContain(">Tint</text>");
     expect(node).not.toContain("FF375F80</text>");
     expect(node).toMatch(/<rect x="[^"]+" y="[^"]+" width="10" height="10" rx="2" fill="#FF375F" fill-opacity="0.502"\/>/);
-    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#5F74E4"/);
+    const chip = node.match(/<rect x="[^"]+" y="[^"]+" width="([^"]+)" height="16" rx="3" fill="#4F62D2"/);
     expect(Number(chip?.[1])).toBeCloseTo(NODE_BOX.valuePaddingX + NODE_BOX.knobIcon + NODE_BOX.valueInnerGap + tableMeasurer("Tint", "sans10") + NODE_BOX.valueInnerGap + NODE_BOX.swatch, 1);
   });
 

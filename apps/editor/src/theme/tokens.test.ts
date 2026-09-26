@@ -156,6 +156,33 @@ describe("text contrast (WCAG AA, 4.5:1 for small text)", () => {
     }
   });
 
+  it.each(THEMES)("the selected segment is the accent fill and its label passes in %s", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    expect(tokens["bg-segment-selected"]).toBe(tokens.accent);
+    expect(contrast(parseColor(tokens["text-on-accent"]), parseColor(tokens["bg-segment-selected"]))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(THEMES)("primary and accent text pass on the selected tints over the panel in %s", (theme) => {
+    const tokens = THEME_TOKENS[theme];
+    const panel = parseColor(tokens["bg-panel"]);
+    const failures: string[] = [];
+    for (const tint of ["bg-selected", "bg-selected-hover", "accent-soft", "accent-soft-hover"] as const) {
+      const background = over(parseColor(tokens[tint]), panel);
+      for (const text of ["text-primary", "text-accent"] as const) {
+        const ratio = contrast(parseColor(tokens[text]), background);
+        if (ratio < 4.5) failures.push(`${text} on ${tint}: ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it("dark selection tints share the hue of the accent fill", () => {
+    const [r, g, b] = parseColor(THEME_TOKENS.dark.accent);
+    for (const tint of ["bg-selected", "bg-selected-hover", "accent-soft", "accent-soft-hover"] as const) {
+      expect(parseColor(THEME_TOKENS.dark[tint]).slice(0, 3), tint).toEqual([r, g, b]);
+    }
+  });
+
   it.each(THEMES)("status text passes on the window, toolbar and panel, and on its own tint in %s", (theme) => {
     const tokens = THEME_TOKENS[theme];
     const failures: string[] = [];

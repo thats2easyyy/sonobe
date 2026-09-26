@@ -1,3 +1,4 @@
+/* sm is 24px tall inside a panel header (the header sets the control scale) and 22px in a body. */
 .sb-segmented {
   position: relative;
   isolation: isolate;
@@ -29,15 +30,7 @@
   z-index: -1;
   border-radius: calc(var(--radius-md) - 1px);
   background: var(--bg-segment-selected);
-  box-shadow:
-    0 0 0 1px var(--border-default),
-    0 1px 2px rgba(0, 0, 0, 0.18);
-}
-
-[data-theme="light"] .sb-segmented__indicator {
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.08),
-    0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .sb-segmented[data-size="sm"] .sb-segmented__indicator {
@@ -94,13 +87,13 @@
 }
 
 @media (hover: hover) {
-  .sb-segmented__item:hover:not(:disabled) {
+  .sb-segmented__item:hover:not(:disabled):not([data-selected]) {
     color: var(--text-primary);
   }
 }
 
 .sb-segmented__item[data-selected] {
-  color: var(--text-primary);
+  color: var(--text-on-accent);
 }
 
 .sb-segmented__item:disabled {
@@ -109,6 +102,10 @@
 
 .sb-segmented__item:focus-visible {
   outline-offset: -1px;
+}
+
+.sb-segmented__item[data-selected]:focus-visible {
+  outline-color: var(--text-on-accent);
 }
 
 .sb-segmented__label {

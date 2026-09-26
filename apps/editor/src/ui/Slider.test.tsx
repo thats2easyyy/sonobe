@@ -169,6 +169,34 @@ describe("Slider", () => {
     expect(onChangeSpy).not.toHaveBeenCalled();
   });
 
+  it("names a tick with the kit tooltip, not a native title, even when it can't be clicked", () => {
+    vi.useFakeTimers();
+    try {
+      act(() => root.render(<Controlled ticks={[{ value: 40, label: "Shipped app: 40 pt" }]} />));
+      const tick = container.querySelector<HTMLButtonElement>(".sb-slider__tick")!;
+      expect(tick.hasAttribute("title")).toBe(false);
+      expect(tick.getAttribute("aria-disabled")).toBe("true");
+      act(() => {
+        tick.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+        tick.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+        vi.advanceTimersByTime(600);
+      });
+      expect(document.querySelector(".sb-tooltip")?.textContent).toBe("Shipped app: 40 pt");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps focus on the slider when a tick is pressed", () => {
+    act(() => root.render(<Controlled ticks={[{ value: 40, label: "Shipped app: 40 pt" }]} />));
+    const tick = container.querySelector<HTMLButtonElement>(".sb-slider__tick")!;
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    act(() => {
+      tick.dispatchEvent(down);
+    });
+    expect(down.defaultPrevented).toBe(true);
+  });
+
   it("hides ticks from assistive tech and forwards aria-describedby to the slider", () => {
     act(() => root.render(<Controlled aria-describedby="knob-hint" ticks={[{ value: 40, label: "Shipped app: 40 pt", onSelect: () => undefined }]} />));
     expect(slider().getAttribute("aria-describedby")).toBe("knob-hint");

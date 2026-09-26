@@ -345,7 +345,7 @@ function Selection() {
   const [mixedOn, setMixedOn] = useState(false);
   return (
     <Section title="Selection" description="Segmented controls for a few visible options, selects for many, toggles for settings that apply immediately.">
-      <Demo label="Segmented controls · md 26 (toolbar) and sm 22 (panels, dialogs, rows)">
+      <Demo label="Segmented controls · md 26, sm 22 in a body, 24 in a panel header">
         <Stack>
           <SegmentedControl aria-label="Layout" value={layout} onChange={setLayout} options={[{ value: "none", label: "None" }, { value: "row", label: "Row" }, { value: "column", label: "Column" }, { value: "grid", label: "Grid" }]} />
           <SegmentedControl aria-label="Layout (small)" size="sm" value={layout} onChange={setLayout} options={[{ value: "none", label: "None" }, { value: "row", label: "Row" }, { value: "column", label: "Column" }, { value: "grid", label: "Grid" }]} />
@@ -373,6 +373,10 @@ function Selection() {
             />
           </Row>
           <SegmentedControl aria-label="Theme" fullWidth size="sm" value="dark" onChange={() => undefined} options={[{ value: "system", label: "System" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />
+          <div className="sb-demo__header">
+            <SegmentedControl aria-label="Layout (in a panel header)" size="sm" value={layout} onChange={setLayout} options={[{ value: "none", label: "None" }, { value: "row", label: "Row" }, { value: "column", label: "Column" }, { value: "grid", label: "Grid" }]} />
+          </div>
+          <p className="sb-demo__note">sm is 24px in a panel header, 22px in a body.</p>
         </Stack>
       </Demo>
       <Demo label="Selects · searchable when long">
