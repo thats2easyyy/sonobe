@@ -58,8 +58,13 @@ test.describe("welcome screen", () => {
     const welcome = page.getByRole("dialog", { name: "Start something new" });
     await expect(welcome).toBeVisible();
     await welcome.getByLabel(/^Device for the new prototype/).click();
-    await page.getByRole("combobox", { name: /Search Device for the new prototype/ }).fill("iPhone SE");
-    await page.keyboard.press("Enter");
+    const option = page.getByRole("option", { name: /iPhone SE/ });
+    await expect(option).toBeVisible();
+    expect(await option.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return !!document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest(".sb-select-popover");
+    })).toBe(true);
+    await option.click();
     await expect(welcome.getByLabel(/^Device for the new prototype/)).toContainText("iPhone SE");
     await screenshot(page, "welcome-02-new-blank");
     await welcome.getByRole("button", { name: "Create" }).click();

@@ -1,11 +1,11 @@
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
-import { ArrowRight, Check, Clock, FilePlus, FolderOpen, GraduationCap, Monitor, Plug, Scaling, Smartphone, Sparkles, Tablet, Watch, X } from "lucide-react";
+import { ArrowRight, Check, FilePlus, FolderOpen, Monitor, Plug, Scaling, Smartphone, Tablet, Watch, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { openExample, type ExampleProject } from "../../panels/learn/examples.ts";
 import { LESSONS } from "../../panels/learn/lessons/catalog.ts";
 import { useLessons } from "../../panels/learn/lessons/lessonStore.ts";
 import { connectClaudeStore } from "../../panels/connect/connectStore.ts";
-import { SonobeMark } from "../../shell/icons.tsx";
+import { DEMO_DOCUMENT_NAME } from "../../state/demoDocument.ts";
 import { useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { useCommands } from "../../ui/commands/CommandProvider.tsx";
@@ -15,10 +15,13 @@ import { Kbd } from "../../ui/Kbd.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { learnNav } from "../learnStore.ts";
 import { settingsStore, useSettings } from "../settings.ts";
+import { recentFolder } from "./recent.ts";
 import { RecoveredDrafts } from "./RecoveredDrafts.tsx";
 import { getTemplates, thumbnailFor } from "./templates.ts";
+import { Tip, TruncatedText, useTruncated } from "./Tip.tsx";
 import type { WelcomeReason } from "./welcomeStore.ts";
 import "./welcome.css";
 
@@ -61,6 +64,7 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
   const session = useEditorSession();
   const { registry } = useCommands();
   const docName = useDocument((s) => s.doc.project.name);
+  const untouchedDemo = useDocument((s) => !s.dirty && s.projectPath === null && s.doc.project.name === DEMO_DOCUMENT_NAME);
   const defaultDevice = useSettings((s) => s.defaultDevice);
   const showOnLaunch = useSettings((s) => s.showWelcomeOnLaunch);
   const completed = useLessons((s) => s.completed);
@@ -111,8 +115,8 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
     }
   };
 
-  const openRecent = async (path: string) => {
-    setBusy(path);
+  const openProject = async (key: string, path?: string) => {
+    setBusy(key);
     try {
       const result = await session.openProject(path);
       if (result.ok) onClose();
@@ -120,11 +124,6 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
     } finally {
       setBusy(null);
     }
-  };
-
-  const openFile = () => {
-    onClose();
-    requestAnimationFrame(() => registry.run("file.open"));
   };
 
   const openLesson = (id: string) => {
@@ -139,98 +138,95 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
 
   const preset = getDevicePreset(device);
   const canKeepWorking = reason === "launch" || reason === "menu";
+  const nextLesson = LESSONS.find((lesson) => completed[lesson.id] === undefined);
+  const featured = reason === "launch" && LESSONS.every((lesson) => completed[lesson.id] === undefined) ? LESSONS[0] : undefined;
 
   return (
     <div className="sb-welcome__frame">
       <header className="sb-welcome__header">
-        <span className="sb-welcome__mark" aria-hidden>
-          <SonobeMark size={26} />
-        </span>
         <div className="sb-welcome__heading">
           <h2 className="sb-welcome__title" id={titleId}>
             {reason === "launch" ? "Welcome to Sonobe" : "Start something new"}
           </h2>
-          <p className="sb-welcome__subtitle">Make interactive prototypes by connecting patches. No code needed, and every idea teaches you how it works.</p>
+          {reason === "launch" && <p className="sb-welcome__subtitle">Make interactive prototypes by connecting patches. No code needed.</p>}
         </div>
         <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={onClose} />
       </header>
 
-      <div className="sb-welcome__body sb-scroll">
-        <aside className="sb-welcome__side" aria-label="Start">
+      <div className="sb-welcome__body">
+        <aside className="sb-welcome__side sb-scroll" aria-label="Start">
           <section className="sb-welcome__card sb-welcome__blank" aria-labelledby={`${titleId}-blank`}>
-            <div className="sb-welcome__blank-preview" data-kind={preset.kind} aria-hidden>
+            <div className="sb-welcome__blank-preview" aria-hidden>
               <span className="sb-welcome__blank-screen" style={{ aspectRatio: `${preset.size[0]} / ${preset.size[1]}` }} />
             </div>
             <h3 className="sb-welcome__card-title" id={`${titleId}-blank`}>
               New blank prototype
             </h3>
             <Select aria-label="Device for the new prototype" options={DEVICE_OPTIONS} value={device} onChange={setDevice} searchable menuWidth={272} />
-            <Button ref={createRef} variant="primary" icon={<FilePlus size={13} />} fullWidth loading={busy === "blank"} onClick={() => void newBlank()}>
-              Create
-            </Button>
-          </section>
-
-          <RecoveredDrafts titleId={titleId} onOpened={onClose} />
-
-          <section className="sb-welcome__section" aria-labelledby={`${titleId}-recent`}>
-            <div className="sb-welcome__section-head">
-              <h3 className="sb-welcome__section-title" id={`${titleId}-recent`}>
-                Recent
-              </h3>
+            <div className="sb-welcome__create">
+              <Button ref={createRef} variant="primary" size="lg" icon={<FilePlus size={14} />} loading={busy === "blank"} onClick={() => void newBlank()}>
+                Create
+              </Button>
               {canOpen && (
-                <Button size="sm" variant="ghost" icon={<FolderOpen size={12} />} onClick={openFile}>
+                <Button variant="ghost" size="lg" icon={<FolderOpen size={14} />} loading={busy === "open"} onClick={() => void openProject("open")}>
                   Open… <Kbd shortcut="Mod+O" variant="plain" />
                 </Button>
               )}
             </div>
-            {recent.length === 0 ? (
-              <p className="sb-welcome__empty">Prototypes you open or save show up here.</p>
-            ) : (
-              <ul className="sb-welcome__recent">
-                {recent.map((path) => (
-                  <li key={path}>
-                    <button type="button" className="sb-welcome__recent-item" onClick={() => void openRecent(path)} disabled={busy === path} title={path}>
-                      <Clock size={13} strokeWidth={1.75} aria-hidden />
-                      <span className="sb-welcome__recent-name">{session.host?.displayName(path) ?? path}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
 
-          <section className="sb-welcome__card sb-welcome__claude" aria-labelledby={`${titleId}-claude`}>
-            <span className="sb-welcome__claude-icon" aria-hidden>
-              <Sparkles size={15} strokeWidth={2} />
-            </span>
+          <RecoveredDrafts titleId={titleId} onOpened={onClose} />
+
+          {recent.length > 0 && (
+            <section className="sb-welcome__section" aria-labelledby={`${titleId}-recent`}>
+              <h3 className="sb-welcome__section-title" id={`${titleId}-recent`}>
+                Recent
+              </h3>
+              <ul className="sb-welcome__recent">
+                {recent.map((path) => {
+                  const folder = recentFolder(path);
+                  return (
+                    <li key={path}>
+                      <Tooltip content={<Tip>{path}</Tip>} placement="right">
+                        <button type="button" className="sb-welcome__recent-item" onClick={() => void openProject(path, path)} disabled={busy === path}>
+                          <span className="sb-welcome__recent-name">{session.host?.displayName(path) ?? path}</span>
+                          {folder && <span className="sb-welcome__recent-folder">{folder}</span>}
+                        </button>
+                      </Tooltip>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
+          <section className="sb-welcome__section sb-welcome__claude" aria-labelledby={`${titleId}-claude`}>
             <h3 className="sb-welcome__card-title" id={`${titleId}-claude`}>
               Build with Claude
             </h3>
-            <p className="sb-welcome__card-text">Use Claude Desktop or Claude Code on your own Claude plan. Describe an interaction and watch it get built, one undoable step at a time.</p>
-            <Button size="sm" variant="ai" icon={<Plug size={12} />} onClick={connect}>
+            <p className="sb-welcome__card-text">Describe an interaction and watch Claude build it, one undoable step at a time.</p>
+            <Button variant="ai" icon={<Plug size={12} />} onClick={connect}>
               Connect Claude
             </Button>
           </section>
         </aside>
 
-        <div className="sb-welcome__main">
+        <div className="sb-welcome__main sb-scroll">
           <section className="sb-welcome__section" aria-labelledby={`${titleId}-learn`}>
-            <div className="sb-welcome__section-head">
-              <h3 className="sb-welcome__section-title" id={`${titleId}-learn`}>
-                <GraduationCap size={13} strokeWidth={2} aria-hidden /> Learn Sonobe
-              </h3>
-              <span className="sb-welcome__hint">Hands-on lessons that check your work as you go</span>
-            </div>
-            <ol className="sb-welcome__path">
+            <h3 className="sb-welcome__section-title" id={`${titleId}-learn`}>
+              Learn Sonobe
+            </h3>
+            <ol className="sb-welcome__path" data-featured={featured ? "" : undefined}>
               {LESSONS.map((lesson) => {
                 const done = completed[lesson.id] !== undefined;
                 return (
-                  <li key={lesson.id} className="sb-welcome__stop" data-done={done || undefined}>
+                  <li key={lesson.id} className="sb-welcome__stop" data-done={done || undefined} data-next={lesson === nextLesson || undefined} data-featured={lesson === featured || undefined}>
                     <button type="button" className="sb-welcome__stop-button" onClick={() => openLesson(lesson.id)}>
                       <span className="sb-welcome__stop-number sb-tabular" aria-hidden>
                         {done ? <Check size={12} strokeWidth={2.75} /> : lesson.number}
                       </span>
                       <span className="sb-welcome__stop-title">{lesson.title}</span>
+                      {lesson === featured && <span className="sb-welcome__stop-summary">{lesson.summary}</span>}
                       <span className="sb-welcome__stop-meta">
                         {lesson.minutes} min{done ? " · Done" : ""}
                       </span>
@@ -249,36 +245,50 @@ function WelcomeContent({ titleId, reason, onClose, createRef }: ContentProps) {
               <span className="sb-welcome__hint">Each opens as a copy with step-by-step notes</span>
             </div>
             <ul className="sb-welcome__templates">
-              {templates.map((example) => {
-                const thumbnail = thumbnailFor(example.folder);
-                return (
-                  <li key={example.folder}>
-                    <button type="button" className="sb-template" onClick={() => void openTemplate(example)} disabled={busy === example.folder} aria-describedby={example.description ? `${titleId}-t-${example.id}` : undefined}>
-                      <span className="sb-template__thumb">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="sb-template__placeholder" />}</span>
-                      <span className="sb-template__name">{example.name}</span>
-                      {example.description && (
-                        <span className="sb-template__desc" id={`${titleId}-t-${example.id}`}>
-                          {example.description}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
+              {templates.map((example) => (
+                <li key={example.folder}>
+                  <TemplateButton example={example} describedBy={example.description ? `${titleId}-t-${example.id}` : undefined} disabled={busy === example.folder} onOpen={() => void openTemplate(example)} />
+                </li>
+              ))}
             </ul>
           </section>
         </div>
       </div>
 
       <footer className="sb-welcome__footer">
-        <Toggle size="sm" checked={showOnLaunch} onChange={(checked) => settingsStore.getState().update({ showWelcomeOnLaunch: checked })} label="Show this screen when Sonobe starts" />
+        <Toggle className="sb-welcome__toggle" size="sm" checked={showOnLaunch} onChange={(checked) => settingsStore.getState().update({ showWelcomeOnLaunch: checked })} label="Show this screen when Sonobe starts" />
         <span className="sb-welcome__spacer" />
         {canKeepWorking && (
           <Button variant="ghost" trailingIcon={<ArrowRight size={13} />} onClick={onClose}>
-            Keep working on “{docName}”
+            {untouchedDemo ? (
+              `Explore the ${DEMO_DOCUMENT_NAME} demo`
+            ) : (
+              <>
+                Keep working on “<TruncatedText text={docName} className="sb-welcome__doc-name" />”
+              </>
+            )}
           </Button>
         )}
       </footer>
     </div>
   );
+}
+
+function TemplateButton({ example, describedBy, disabled, onOpen }: { example: ExampleProject; describedBy: string | undefined; disabled: boolean; onOpen: () => void }) {
+  const thumbnail = thumbnailFor(example.folder);
+  const [descRef, clamped] = useTruncated();
+  const button = (
+    <button type="button" className="sb-template" onClick={onOpen} disabled={disabled} aria-describedby={describedBy}>
+      <span className="sb-template__thumb">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="sb-template__placeholder" />}</span>
+      <span className="sb-template__name">{example.name}</span>
+      {example.description && (
+        <span ref={descRef} className="sb-template__desc" id={describedBy}>
+          {example.description}
+        </span>
+      )}
+    </button>
+  );
+  return example.description ? <Tooltip content={<Tip>{example.description}</Tip>} disabled={!clamped}>
+      {button}
+    </Tooltip> : button;
 }
