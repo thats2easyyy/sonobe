@@ -1,13 +1,13 @@
 /**
  * The Inspector's Knobs tab: the project's knobs in one place, grouped, with the preset bar above
- * them. Tuning a row edits the running preset live (no restart), ticks and ≠ marks compare it with
- * the partner preset, and a locked preset's rows are read-only. The tab stays put as the selection
- * changes; a line at the top leads back to Properties.
+ * them (it stays in view while they scroll). Tuning a row edits the running preset live (no
+ * restart), ticks and ≠ marks compare it with the partner preset, and a locked preset's rows are
+ * read-only. The tab stays put as the selection changes; a line below the bar leads back to Properties.
  */
 
 import { knobDifferencesMarkdown, type Id, type KnobSet } from "@sonobe/core";
-import { ChevronDown, ChevronRight, Lock, Plus, SlidersHorizontal, WandSparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeftRight, ChevronRight, ClipboardCopy, CopyPlus, Lock, Plus, SlidersHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { layoutStore } from "../../shell/layoutStore.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { Button } from "../../ui/Button.tsx";
@@ -16,11 +16,12 @@ import type { MenuEntry } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Checkbox } from "../../ui/Toggle.tsx";
 import { getFocusable } from "../../ui/lib/focus.ts";
+import { observeResize } from "../../ui/lib/observeResize.ts";
 import { ConvertVariablesDialog, useVariableCandidates } from "./ConvertVariablesDialog.tsx";
 import { KnobEditPopover, type KnobEditTarget } from "./KnobEditPopover.tsx";
 import { KnobRow } from "./KnobRow.tsx";
 import { knobsUi, useKnobsUi } from "./knobsStore.ts";
-import { differenceCount, knobGroups, knobUses, partnerPreset, presetName } from "./model.ts";
+import { differenceCount, FLIP_PRESETS_SHORTCUT, knobGroups, knobUses, partnerPreset, presetColor, presetName } from "./model.ts";
 import { addPreset, PresetBar, presetEntries } from "./PresetBar.tsx";
 import { tuningKnob, useKnobEdit } from "./useKnobEdit.ts";
 import "./knobs.css";
@@ -65,6 +66,7 @@ export function KnobsPanel() {
   const [flashing, setFlashing] = useState<Id | null>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<Id, HTMLDivElement>());
 
   const openEditor = (target: KnobEditTarget, anchor: Element | null) => {
@@ -99,6 +101,17 @@ export function KnobsPanel() {
     ui.set({ flash: null });
   }, [flash, collapsed, groups, session]);
 
+  // A row scrolled into view stops below the sticky header, whatever height it has (chips wrap).
+  const hasHeader = !!set;
+  useEffect(() => {
+    const root = rootRef.current;
+    const header = headerRef.current;
+    if (!root || !header) return;
+    const sync = () => root.style.setProperty("--sb-knobs-header", `${header.offsetHeight}px`);
+    sync();
+    return observeResize([header], sync);
+  }, [hasHeader]);
+
   useEffect(() => {
     if (flashing === null) return;
     const timer = setTimeout(() => setFlashing(null), FLASH_MS);
@@ -109,9 +122,14 @@ export function KnobsPanel() {
     const running = set?.presets.find((p) => p.id === set.active);
     return [
       { id: "newKnob", label: "New Knob…", icon: <Plus size={14} />, onSelect: () => openEditor({ kind: "new" }, menuRef.current) },
-      { id: "newPreset", label: "New Preset", description: set ? `A copy of ${presetName(set, set.active)}` : undefined, onSelect: () => addPreset(session, edit, set) },
-      ...(set && partner ? [{ id: "copy", label: "Copy Differences", description: `${presetName(set, set.active)} vs ${presetName(set, partner)}, as a table`, onSelect: () => copyDifferences(set, partner) } satisfies MenuEntry] : []),
-      ...(candidates.knobs.length ? [{ id: "convert", label: "Convert Variables to Knobs…", icon: <WandSparkles size={14} />, onSelect: () => setConverting(true) } satisfies MenuEntry] : []),
+      { id: "newPreset", label: "New Preset", icon: <CopyPlus size={14} />, description: set ? `A copy of ${presetName(set, set.active)}` : undefined, onSelect: () => addPreset(session, edit, set) },
+      ...(set && partner
+        ? ([
+            { id: "flip", label: "Flip Presets", icon: <ArrowLeftRight size={14} />, shortcut: FLIP_PRESETS_SHORTCUT, description: `Run ${presetName(set, partner)}`, onSelect: () => edit.switchPreset(partner) },
+            { id: "copy", label: "Copy Differences", icon: <ClipboardCopy size={14} />, description: `${presetName(set, set.active)} vs ${presetName(set, partner)}, as a Markdown table`, onSelect: () => copyDifferences(set, partner) },
+          ] satisfies MenuEntry[])
+        : []),
+      ...(candidates.knobs.length ? [{ id: "convert", label: "Convert Variables to Knobs…", icon: <SlidersHorizontal size={14} />, onSelect: () => setConverting(true) } satisfies MenuEntry] : []),
       ...(set && running ? ([{ type: "separator" }, ...presetEntries(session, edit, set, running, true)] satisfies MenuEntry[]) : []),
     ];
   };
@@ -122,6 +140,7 @@ export function KnobsPanel() {
   const unlocked = set?.presets.find((p) => p.id !== set.active && !p.locked);
   const knobCount = set?.knobs.length ?? 0;
   const differing = set && partner ? differenceCount(set, partner) : 0;
+  const unusedCount = set ? set.knobs.filter((k) => !uses.get(k.id)?.length).length : 0;
 
   /** ↑ and ↓ move between rows, to the same kind of control. */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -142,54 +161,84 @@ export function KnobsPanel() {
     <div
       ref={rootRef}
       className="sb-knobs"
+      style={{ "--sb-partner-color": set && partner ? presetColor(set, partner) : undefined } as CSSProperties}
       onKeyDown={onKeyDown}
       onFocus={(event) => setFocusedRow((event.target as HTMLElement).closest<HTMLElement>("[data-knob-row]")?.dataset.knobRow ?? null)}
       onBlur={(event) => !event.currentTarget.contains(event.relatedTarget as Node | null) && setFocusedRow(null)}
     >
-      {selection && (
-        <div className="sb-knobs__selection">
-          <span>{selection}</span>
-          <span aria-hidden>·</span>
-          <button type="button" className="sb-knobs__link" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
-            Show Properties
-          </button>
+      {set && (
+        <div ref={headerRef} className="sb-knobs__header">
+          <PresetBar set={set} partner={partner} edit={edit} menu={menu} menuRef={menuRef} />
+          {locked && running && (
+            <div className="sb-knobs-locked" role="status">
+              <Lock size={12} strokeWidth={1.75} aria-hidden />
+              <span className="sb-knobs-locked__text">{running.name} is locked.</span>
+              <span className="sb-knobs-locked__actions">
+                {unlocked && (
+                  <Button size="sm" onClick={() => edit.switchPreset(unlocked.id)}>
+                    Switch to {unlocked.name}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => edit.apply([{ op: "updateKnobPreset", id: running.id, locked: false }], `Unlock Preset “${running.name}”`)}>
+                  Unlock
+                </Button>
+              </span>
+            </div>
+          )}
+          {partner && knobCount > 0 && (
+            <div className="sb-knobs__filter">
+              <Checkbox checked={onlyDifferences} label="Only differences" onChange={(on) => knobsUi(session).getState().set({ onlyDifferences: on })} />
+              <span className="sb-knobs__filter-count">
+                {differing} of {knobCount} differ
+              </span>
+              <span className="sb-knobs__filter-vs">
+                <span className="sb-knobs__filter-dot" aria-hidden />
+                <span>vs {presetName(set, partner)}</span>
+              </span>
+            </div>
+          )}
         </div>
       )}
-      {set && <PresetBar set={set} edit={edit} menu={menu} menuRef={menuRef} />}
-      {locked && running && (
-        <div className="sb-knobs-locked" role="status">
-          <Lock size={12} strokeWidth={2} aria-hidden />
-          <span className="sb-knobs-locked__text">{running.name} is locked, so its values stay as they are.</span>
-          <span className="sb-knobs-locked__actions">
-            {unlocked && (
-              <Button size="sm" variant="ghost" onClick={() => edit.switchPreset(unlocked.id)}>
-                Switch to {unlocked.name}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => edit.apply([{ op: "updateKnobPreset", id: running.id, locked: false }], `Unlock Preset “${running.name}”`)}>
-              Unlock
-            </Button>
-          </span>
-        </div>
-      )}
-      {set && partner && knobCount > 0 && (
-        <div className="sb-knobs__filter">
-          <Checkbox checked={onlyDifferences} label="Only differences" onChange={(on) => knobsUi(session).getState().set({ onlyDifferences: on })} />
-          <span className="sb-knobs__filter-count" title={`Compared with ${presetName(set, partner)}`}>
-            · {differing} of {knobCount} differ
-          </span>
-        </div>
+      <div className="sb-knobs__selection">
+        {selection && (
+          <>
+            <span>{selection}</span>
+            <span aria-hidden>·</span>
+            <button type="button" className="sb-knobs__link" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
+              Show Properties
+            </button>
+          </>
+        )}
+      </div>
+      {unusedCount > 0 && (
+        <p className="sb-knobs__note">
+          {unusedCount} {unusedCount === 1 ? "knob isn't" : "knobs aren't"} used yet. Right-click a field in Properties and choose Use Knob.
+        </p>
       )}
       {knobCount === 0 ? (
         <EmptyState
-          size="sm"
           className="sb-knobs__empty"
-          icon={<SlidersHorizontal size={18} />}
+          variant="inline"
           title="No knobs yet"
-          description="Right-click a number in Properties and choose Make Knob, or ask Claude to build the idea as knobs."
+          description={
+            <>
+              <p>Tune values live.</p>
+              <p>
+                Right-click a number in{" "}
+                {selection ? (
+                  "Properties"
+                ) : (
+                  <button type="button" className="sb-knobs__link" aria-label="Show Properties" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
+                    Properties
+                  </button>
+                )}
+                , then choose Make Knob.
+              </p>
+            </>
+          }
           actions={
             <div className="sb-knobs__empty-actions">
-              <Button size="sm" variant="secondary" icon={<Plus size={13} />} onClick={(event) => openEditor({ kind: "new" }, event.currentTarget)}>
+              <Button variant="ghost" icon={<Plus size={14} />} onClick={(event) => openEditor({ kind: "new" }, event.currentTarget)}>
                 New Knob…
               </Button>
               {candidates.knobs.length > 0 && (
@@ -208,12 +257,17 @@ export function KnobsPanel() {
           {groups.length === 0 && <p className="sb-knobs__note">Every knob has the same value in {set && partner ? presetName(set, partner) : "the other preset"}.</p>}
           {groups.map((group) => {
             const shut = group.name !== null && collapsed.has(group.name);
+            const differs = group.rows.filter((r) => r.differs).length;
             return (
               <section key={group.name ?? ""} className="sb-knobs-group" aria-label={group.name ?? "Knobs"}>
                 {group.name !== null && (
                   <button type="button" className="sb-knobs-group__title" aria-expanded={!shut} onClick={() => knobsUi(session).getState().toggleGroup(group.name!)}>
-                    {shut ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
-                    {group.name}
+                    <ChevronRight size={12} strokeWidth={1.75} className="sb-knobs-group__chevron" aria-hidden />
+                    <span className="sb-knobs-group__name">{group.name}</span>
+                    <span className="sb-knobs-group__count" aria-hidden>
+                      {group.rows.length}
+                    </span>
+                    {shut && differs > 0 && <span className="sb-knobs-group__differ">{differs} differ</span>}
                   </button>
                 )}
                 {!shut &&

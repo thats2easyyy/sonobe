@@ -1,12 +1,13 @@
 /**
- * One knob in the Knobs tab: its name (the description and "Used by 4" as the tooltip), a ≠ mark when
- * it differs from the partner preset, and its control. The context menu edits the knob, copies the
- * partner's value, shows what reads it, and removes it (every input keeps the running value).
+ * One knob in the Knobs tab: its name (the full name, the description and "Used by 4" as the tooltip),
+ * a ≠ mark when it differs from the partner, and its control. The description is the row's accessible
+ * description as well as part of the tooltip. The context menu edits the knob,
+ * copies the partner's value, shows what reads it, and removes it (every input keeps the running value).
  */
 
 import { findLayer, getPatchSpec, patchDisplayName, parseAddress, type KnobReader, type KnobSet } from "@sonobe/core";
 import { ArrowLeftRight, Ellipsis, ListTree, Pencil, Trash2 } from "lucide-react";
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import type { EditorSession } from "../../state/session.ts";
 import { removeKnobLabel } from "../../state/undoLabels.ts";
@@ -61,13 +62,28 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
   const { knob } = row;
   const unused = row.uses === 0;
   const partnerLabel = partner ? presetName(set, partner) : null;
+  const partnerText = partnerLabel ? `${partnerLabel}: ${knobValueText(knob, row.partnerValue)}` : null;
+  const descriptionId = useId();
+  const partnerId = useId();
+  const controlRef = useRef<HTMLDivElement>(null);
+  const [truncated, setTruncated] = useState(false);
   const tooltip: ReactNode = (
     <span className="sb-knob-row__tip">
+      {truncated && <span>{knob.name}</span>}
       {knob.description && <span>{knob.description}</span>}
       <span>{unused ? "Not used yet" : `Used by ${row.uses}`}</span>
-      {partnerLabel && row.differs && <span>{`${partnerLabel}: ${knobValueText(knob, row.partnerValue)}`}</span>}
+      {partnerText && row.differs && <span>{partnerText}</span>}
     </span>
   );
+
+  // The slider reads the partner's value as its description, and the marks on its track, a pointer
+  // shortcut for "Use Value from…", stay out of the accessibility tree.
+  useEffect(() => {
+    const slider = controlRef.current?.querySelector('[role="slider"]');
+    if (partnerText) slider?.setAttribute("aria-describedby", partnerId);
+    else slider?.removeAttribute("aria-describedby");
+    controlRef.current?.querySelectorAll(".sb-slider__tick").forEach((tick) => tick.setAttribute("aria-hidden", "true"));
+  }, [partnerText, partnerId, row.ticks.length, knob.type, locked]);
   const entries = (): MenuEntry[] => [
     { id: "edit", label: "Edit Knob…", icon: <Pencil size={14} />, onSelect: onEdit },
     ...(partnerLabel
@@ -99,24 +115,55 @@ export const KnobRow = forwardRef<HTMLDivElement, KnobRowProps>(function KnobRow
       onSelect: () => edit.apply([{ op: "removeKnob", id: knob.id }], removeKnobLabel(knob.name)),
     },
   ];
+  const diff = (
+    <span className="sb-knob-row__diff" role={row.differs ? "img" : undefined} aria-label={row.differs && partnerLabel ? `Differs from ${partnerLabel}` : undefined} data-on={row.differs || undefined}>
+      {row.differs ? "≠" : ""}
+    </span>
+  );
   return (
     <ContextMenu entries={entries}>
-      <div ref={ref} className="sb-knob-row" data-knob-row={knob.id} data-unused={unused || undefined} data-flash={flashing || undefined} data-type={knob.type} role="group" aria-label={knob.name}>
-        <div className="sb-knob-row__head">
-          <span className="sb-knob-row__diff" aria-label={row.differs && partnerLabel ? `Differs from ${partnerLabel}` : undefined} data-on={row.differs || undefined}>
-            {row.differs ? "≠" : ""}
+      <div
+        ref={ref}
+        className="sb-knob-row"
+        data-knob-row={knob.id}
+        data-unused={unused || undefined}
+        data-locked={locked || undefined}
+        data-flash={flashing || undefined}
+        data-type={knob.type}
+        role="group"
+        aria-label={knob.name}
+        aria-describedby={knob.description ? descriptionId : undefined}
+      >
+        {knob.description && (
+          <span id={descriptionId} hidden>
+            {knob.description}
           </span>
+        )}
+        {partnerText && (
+          <span id={partnerId} hidden>
+            {partnerText}
+          </span>
+        )}
+        <div className="sb-knob-row__head">
+          {row.differs && partnerText ? (
+            <Tooltip content={partnerText} placement="top" delay={120}>
+              {diff}
+            </Tooltip>
+          ) : (
+            diff
+          )}
           <Tooltip content={tooltip} placement="left" delay={500}>
-            <span className="sb-knob-row__name">{knob.name}</span>
+            <span className="sb-knob-row__name" onPointerEnter={(event) => setTruncated(event.currentTarget.scrollWidth > event.currentTarget.clientWidth)}>
+              {knob.name}
+            </span>
           </Tooltip>
           <Menu aria-label={`${knob.name} options`} placement="bottom-end" entries={entries}>
             <IconButton size="xs" className="sb-knob-row__menu" icon={<Ellipsis size={12} />} label={`${knob.name} options`} />
           </Menu>
         </div>
-        <div className="sb-knob-row__control">
+        <div ref={controlRef} className="sb-knob-row__control">
           <KnobControl knob={knob} value={row.value} edit={edit} disabled={locked} ticks={row.ticks} rowKeys />
         </div>
-        {unused && <p className="sb-knob-row__hint">Not used yet: right-click a field in Properties and choose Use Knob.</p>}
       </div>
     </ContextMenu>
   );

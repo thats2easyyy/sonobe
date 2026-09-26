@@ -118,6 +118,29 @@ describe("knobs in Properties", () => {
     expect(prop(s, "card", "opacity")).toBe(0.5);
   });
 
+  it("keeps the range under a closed disclosure, opens it for a range problem, and flags a missing name", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    openMenu(rowNamed("Opacity"));
+    click(menuItem("Make Knob…"));
+    const disclosure = buttonWithText("Range and details0 to 1");
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    const name = document.querySelector<HTMLInputElement>('input[aria-label="Knob name"]')!;
+    type(name, "");
+    click(buttonWithText("Make Knob"));
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(name);
+    expect(name.closest("label")!.querySelector(".sb-knob-form__problem")!.textContent).toContain("needs a name");
+    type(name, "Card Fade");
+    expect(name.getAttribute("aria-invalid")).toBeNull();
+    expect(name.closest("label")!.querySelector(".sb-knob-form__problem")).toBeNull();
+    type(document.querySelector<HTMLInputElement>('input[aria-label="Min"]')!, "abc");
+    click(buttonWithText("Make Knob"));
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(".sb-knob-form__problem")!.textContent).toBe("Min isn't a number.");
+    expect(s.document.getState().doc.knobs).toBeUndefined();
+  });
+
   it("says which value a knob made from a mixed selection starts at", () => {
     const s = mount(fixture());
     select(s, { layers: ["dot", "card"] });

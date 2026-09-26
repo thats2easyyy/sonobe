@@ -1,12 +1,12 @@
 /**
  * Make Knob… on an Inspector field: a name (the port's), a group (the last one used) and, for numbers
- * and points, the soft range worked out from the value, all editable. Return makes the knob with the
+ * and points, the soft range worked out from the value under "Range and details", all editable. Return makes the knob with the
  * field's value in every preset and links every selected target to it, as one undo step. On a mixed
  * selection that's the first target's value, and the popover says so.
  */
 
 import { findLayer, formatKnobValue, getPatchSpec, hasKnobRange, isLinkInput, parseAddress, patchDisplayName, type KnobType } from "@sonobe/core";
-import { useId, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import type { EditorSession } from "../../state/session.ts";
 import { makeKnobLabel } from "../../state/undoLabels.ts";
@@ -16,7 +16,7 @@ import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import type { FloatingAnchor } from "../../ui/lib/useFloating.ts";
 import type { InspectorField } from "../inspector/model.ts";
-import { FormRow, RangeFields, rangeDraft, readRange, type RangeDraft } from "./KnobEditPopover.tsx";
+import { Disclosure, FormField, NAME_PROBLEM, RangeFields, rangeDraft, rangeSummary, readRange, type RangeDraft } from "./KnobEditPopover.tsx";
 import { knobsUi, showKnobs } from "./knobsStore.ts";
 import { knobTypeForPort, knobValueFor, planMakeKnob, suggestMakeKnob } from "./model.ts";
 
@@ -61,6 +61,9 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
   const [group, setGroup] = useState(initial.group ?? "");
   const [range, setRange] = useState<RangeDraft>(rangeDraft(initial));
   const [problem, setProblem] = useState<string | null>(null);
+  const [nameMissing, setNameMissing] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   const type = knobTypeForPort(field.port);
   const [mixedNote] = useState(() => (field.mixed && type ? mixedValueNote(session, field, type) : null));
 
@@ -68,12 +71,14 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
     event?.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      setProblem("A knob needs a name, like “Commit Distance”.");
+      setNameMissing(true);
+      nameRef.current?.focus();
       return;
     }
     const r = readRange(range);
     if (!r.ok) {
       setProblem(r.message);
+      setDetailsOpen(true);
       return;
     }
     const { ok: _ok, ...bounds } = r;
@@ -101,13 +106,33 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
       <div id={titleId} className="sb-knob-form__title">
         Make Knob
       </div>
-      <FormRow label="Name">
-        <TextField size="sm" aria-label="Knob name" autoFocus value={name} onChange={(event) => setName(event.target.value)} onFocus={(event) => event.currentTarget.select()} />
-      </FormRow>
-      <FormRow label="Group">
-        <TextField size="sm" aria-label="Knob group" placeholder="None" value={group} onChange={(event) => setGroup(event.target.value)} />
-      </FormRow>
-      {type && hasKnobRange(type) && <RangeFields draft={range} onChange={setRange} />}
+      <FormField label="Name">
+        <TextField
+          ref={nameRef}
+          aria-label="Knob name"
+          autoFocus
+          invalid={nameMissing}
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value);
+            setNameMissing(false);
+          }}
+          onFocus={(event) => event.currentTarget.select()}
+        />
+        {nameMissing && (
+          <span className="sb-knob-form__problem" role="alert">
+            {NAME_PROBLEM}
+          </span>
+        )}
+      </FormField>
+      <FormField label="Group">
+        <TextField aria-label="Knob group" placeholder="None" value={group} onChange={(event) => setGroup(event.target.value)} />
+      </FormField>
+      {type && hasKnobRange(type) && (
+        <Disclosure label="Range and details" summary={rangeSummary(range)} open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <RangeFields draft={range} onChange={setRange} />
+        </Disclosure>
+      )}
       {mixedNote && <p className="sb-knob-form__note">{mixedNote}</p>}
       {problem && (
         <p className="sb-knob-form__problem" role="alert">
@@ -115,10 +140,10 @@ function MakeKnobForm({ field, onDone }: { field: InspectorField; onDone: () => 
         </p>
       )}
       <div className="sb-knob-form__actions">
-        <Button size="sm" variant="ghost" type="button" onClick={onDone}>
+        <Button variant="ghost" type="button" onClick={onDone}>
           Cancel
         </Button>
-        <Button size="sm" variant="primary" type="submit">
+        <Button variant="primary" type="submit">
           Make Knob
         </Button>
       </div>

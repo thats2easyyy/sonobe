@@ -200,6 +200,9 @@ describe("Knobs tab", () => {
       ]),
     );
     expect(container.querySelector(".sb-empty__title")!.textContent).toBe("No knobs yet");
+    click(container.querySelector<HTMLElement>('.sb-knobs__empty button[aria-label="Show Properties"]'));
+    expect(layoutStore.getState().inspectorTab).toBe("properties");
+    act(() => layoutStore.getState().setInspectorTab("knobs"));
     expect(container.querySelector(".sb-knobs__note")!.textContent).toContain("shares 1 constant through Variable Broadcasters");
     click(buttonWithText("Convert to Knobs"));
     expect(document.querySelector(".sb-knobs-convert")!.textContent).toContain("Card Radius");
@@ -208,6 +211,15 @@ describe("Knobs tab", () => {
     expect(doc.knobs!.knobs.map((k) => [k.id, k.values])).toEqual([["card_radius", { default: 16 }]]);
     expect(doc.components.main!.layers[0]!.props.cornerRadius).toEqual({ link: "$knob.card_radius" });
     expect(labels(s)[0]).toBe("Convert 1 Variable to Knobs");
+  });
+
+  it("offers one way to Properties in the empty state while something is selected", () => {
+    const s = mount(build([{ op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } }]));
+    expect(container.querySelectorAll('button[aria-label="Show Properties"]')).toHaveLength(1);
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    expect(container.querySelector(".sb-knobs__empty button[aria-label=\"Show Properties\"]")).toBeNull();
+    expect(buttonWithText("Show Properties")).not.toBeNull();
+    expect(container.querySelector(".sb-knobs__empty")!.textContent).toContain("Right-click a number in Properties");
   });
 
   it("adds a preset to compare as a running copy, in one undo step", () => {
@@ -229,6 +241,74 @@ describe("Knobs tab", () => {
     click(buttonWithText("Show Properties"));
     expect(layoutStore.getState().inspectorTab).toBe("properties");
     expect(container.querySelector(".sb-knobs")).toBeNull();
+  });
+
+  it("keeps the presets and the compare filter in one header, and names the preset the rows compare with", () => {
+    mount(deck());
+    const header = container.querySelector(".sb-knobs__header")!;
+    expect(header.querySelector('[role="radiogroup"]')).not.toBeNull();
+    expect(header.querySelector(".sb-knobs__filter")!.textContent).toContain("vs Shipped app");
+    expect(chip("Shipped app").dataset.partner).toBe("true");
+    expect(chip("Proposal").dataset.partner).toBeUndefined();
+    const mark = rowOf("Bounce").querySelector(".sb-knob-row__diff")!;
+    expect(mark.getAttribute("role")).toBe("img");
+    expect(mark.getAttribute("aria-label")).toBe("Differs from Shipped app");
+    expect(rowOf("Card Radius").querySelector(".sb-knob-row__diff")!.getAttribute("role")).toBeNull();
+  });
+
+  it("keeps New Preset and the menu out of the preset radio group, so the chips can scroll on their own", () => {
+    mount(deck());
+    const group = container.querySelector('[role="radiogroup"]')!;
+    expect(group.querySelector('[aria-label="New Preset"]')).toBeNull();
+    expect(container.querySelector('.sb-knobs-presets > [aria-label="New Preset"]')).not.toBeNull();
+  });
+
+  it("says once, above the groups, that knobs aren't used yet", () => {
+    mount(deck());
+    expect(container.querySelector(".sb-knob-row__hint")).toBeNull();
+    const notes = [...container.querySelectorAll(".sb-knobs__note")].map((n) => n.textContent);
+    expect(notes).toEqual(["2 knobs aren't used yet. Right-click a field in Properties and choose Use Knob."]);
+  });
+
+  it("counts a group's knobs and, once it is collapsed, the ones that differ", () => {
+    const s = mount(deck());
+    const title = (name: string) => container.querySelector<HTMLElement>(`section[aria-label="${name}"] .sb-knobs-group__title`)!;
+    expect(title("Throw").querySelector(".sb-knobs-group__count")!.textContent).toBe("2");
+    expect(title("Throw").querySelector(".sb-knobs-group__differ")).toBeNull();
+    act(() => knobsUi(s).getState().toggleGroup("Throw"));
+    expect(title("Throw").getAttribute("aria-expanded")).toBe("false");
+    expect(title("Throw").querySelector(".sb-knobs-group__differ")!.textContent).toBe("1 differ");
+  });
+
+  it("describes a row by its description and the slider by the partner's value, and hides the marks from assistive tech", () => {
+    mount(deck([{ op: "updateKnob", id: "bounce", description: "How much it overshoots." }]));
+    const row = rowOf("Bounce");
+    const description = document.getElementById(row.getAttribute("aria-describedby")!)!;
+    expect(description.textContent).toBe("How much it overshoots.");
+    expect(row.querySelector(".sb-knob-row__caption")).toBeNull();
+    expect(rowOf("Card Radius").getAttribute("aria-describedby")).toBeNull();
+    const slider = row.querySelector('[role="slider"]')!;
+    expect(document.getElementById(slider.getAttribute("aria-describedby")!)!.textContent).toBe("Shipped app: 5");
+    expect(row.querySelector(".sb-slider__tick")!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("marks the rows of a locked preset so their numbers stay readable", () => {
+    mount(deck([{ op: "updateKnobPreset", id: "proposal", locked: true }]));
+    expect(rowOf("Card Radius").dataset.locked).toBe("true");
+    expect(rowOf("Grab Tilt").dataset.locked).toBe("true");
+  });
+
+  it("keeps a slot for the selection line, empty until something is selected", () => {
+    const s = mount(deck());
+    expect(container.querySelector(".sb-knobs__selection")!.textContent).toBe("");
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    expect(container.querySelector(".sb-knobs__selection")!.textContent).toContain("1 layer selected");
+  });
+
+  it("moves focus to the new running chip after Add Preset to Compare", () => {
+    mount(build([{ op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } }]));
+    click(buttonWithText("Add Preset to Compare"));
+    expect(document.activeElement).toBe(chip("Preset 2"));
   });
 
   it("moves between rows with ↑ and ↓, steps with ← and →, and types a value on Return", () => {

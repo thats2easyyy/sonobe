@@ -2,14 +2,35 @@
 .sb-knobs {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5) var(--space-9);
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
+/* Presets, the compare filter and the locked note stay in view while the knobs scroll under them. */
+.sb-knobs__header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: calc(var(--space-4) * -1) calc(var(--space-5) * -1) 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-panel);
+  box-shadow: 0 1px 0 var(--border-subtle);
+}
+
+/* Tab and Shift+Tab scroll the focused control itself, so it stops below the header too. */
+.sb-knobs :is(.sb-knobs-group__title, [role="slider"], input, button, [tabindex]) {
+  scroll-margin-top: calc(var(--sb-knobs-header, 0px) + var(--space-2));
+}
+
+/* A fixed slot, so the list never moves when the selection comes and goes. */
 .sb-knobs__selection {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  height: 18px;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
 }
@@ -37,17 +58,45 @@
 
 .sb-knobs__note {
   margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
+}
+
+.sb-knobs > .sb-knobs__note {
+  margin-bottom: var(--space-3);
+}
+
+/* Empty: one left-aligned block under the header. */
+.sb-knobs .sb-knobs__empty {
+  max-width: none;
+  padding: var(--space-4) 0;
+}
+
+.sb-knobs__empty .sb-empty__description {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sb-knobs__empty .sb-empty__description p {
+  margin: 0;
+}
+
+.sb-knobs__empty .sb-empty__actions {
+  flex: 1 0 100%;
+  justify-content: flex-start;
+}
+
+.sb-knobs__empty .sb-btn {
+  margin-left: calc(var(--space-4) * -1);
 }
 
 .sb-knobs__empty-actions {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-4);
-  text-align: center;
 }
 
 /* Preset bar */
@@ -58,40 +107,63 @@
   min-height: var(--control-h-sm);
 }
 
+/* One line however many presets there are: the chips keep their names and the row scrolls. */
 .sb-knobs-presets__chips {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex: 0 1 auto;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  margin: -2px;
+  padding: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sb-knobs-presets__chips::-webkit-scrollbar {
+  display: none;
 }
 
 .sb-knobs-presets__spacer {
   flex: 1;
 }
 
+.sb-knobs-presets__item {
+  display: inline-flex;
+  flex: none;
+  max-width: 132px;
+}
+
 .sb-preset-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   max-width: 100%;
-  height: var(--control-h-xs);
+  height: var(--control-h-sm);
   padding: 0 var(--space-3);
   border-radius: var(--radius-full);
   box-shadow: inset 0 0 0 1px var(--border-default);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
   user-select: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .sb-preset-chip__dot {
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   box-shadow: inset 0 0 0 1.5px var(--sb-preset-color);
+}
+
+.sb-preset-chip > svg {
+  flex: none;
 }
 
 .sb-preset-chip__name {
@@ -101,14 +173,18 @@
 }
 
 .sb-preset-chip[data-running] {
-  background: color-mix(in srgb, var(--sb-preset-color) 20%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-preset-color) 55%, transparent);
+  background: var(--bg-selected);
+  box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--text-primary);
-  font-weight: var(--font-weight-medium);
 }
 
 .sb-preset-chip[data-running] .sb-preset-chip__dot {
   background: var(--sb-preset-color);
+}
+
+/* The preset the rows compare with: its ring gets a center. */
+.sb-preset-chip[data-partner] .sb-preset-chip__dot {
+  background: radial-gradient(circle, var(--sb-preset-color) 1.5px, transparent 2px);
 }
 
 @media (hover: hover) {
@@ -118,9 +194,25 @@
   }
 }
 
+.sb-preset-chip:not([data-running]):active {
+  background: var(--bg-pressed);
+}
+
 .sb-preset-chip:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+
+@media (forced-colors: active) {
+  .sb-preset-chip[data-running] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .sb-preset-chip__dot,
+  .sb-knobs__filter-dot {
+    forced-color-adjust: none;
+  }
 }
 
 /* A locked running preset */
@@ -128,49 +220,83 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
   border-radius: var(--radius-md);
-  background: var(--warn-soft);
-  color: var(--warn-text);
-  font-size: var(--font-size-xs);
+  background: var(--bg-field);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
 
+.sb-knobs-locked > svg {
+  flex: none;
+}
+
 .sb-knobs-locked__text {
-  flex: 1 1 140px;
+  flex: 1 1 100px;
+  min-width: 0;
+}
+
+.sb-knobs-locked .sb-btn {
+  font-size: var(--font-size-sm);
 }
 
 .sb-knobs-locked__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
+  margin-left: auto;
 }
 
 .sb-knobs__filter {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
 }
 
 .sb-knobs__filter .sb-choice {
   flex: none;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
 .sb-knobs__filter-count {
-  overflow: hidden;
   color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.sb-knobs__filter-vs {
+  display: inline-flex;
+  flex: 1 0 100%;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-tertiary);
+}
+
+.sb-knobs__filter-vs > span:last-child {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sb-knobs__filter-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sb-partner-color);
 }
 
 /* Groups and rows */
 .sb-knobs__groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .sb-knobs-group {
@@ -179,47 +305,97 @@
   gap: var(--space-1);
 }
 
+.sb-knobs-group + .sb-knobs-group {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
 .sb-knobs-group__title {
-  display: flex;
+  display: inline-flex;
+  align-self: flex-start;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) 0;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: 22px;
+  margin-left: calc(var(--space-2) * -1);
+  padding: 0 var(--space-3) 0 var(--space-2);
   border: 0;
-  background: none;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
   text-align: left;
-  text-transform: uppercase;
   cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .sb-knobs-group__title:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.sb-knobs-group__title:active {
+  background: var(--bg-pressed);
 }
 
 .sb-knobs-group__title:focus-visible {
-  border-radius: var(--radius-xs);
   outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
+.sb-knobs-group__chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-knobs-group__title[aria-expanded="true"] .sb-knobs-group__chevron {
+  transform: rotate(90deg);
+}
+
+.sb-knobs-group__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-knobs-group__count {
+  flex: none;
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-knobs-group__differ {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+/* The diff mark hangs in the panel's gutter, so names line up with the chips and group titles. */
 .sb-knob-row {
+  --sb-knob-diff: 12px;
   display: grid;
   grid-template-areas:
     "diff name menu"
-    ". control control"
-    ". hint hint";
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+    ". control control";
+  grid-template-columns: var(--sb-knob-diff) minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-1) var(--space-2);
-  padding: var(--space-1) var(--space-1) var(--space-2) 0;
+  gap: var(--space-1) 0;
+  margin-left: calc(var(--sb-knob-diff) * -1);
+  padding: var(--space-1) 0 var(--space-3);
   border-radius: var(--radius-sm);
+  scroll-margin-top: var(--sb-knobs-header, 0px);
   transition: background-color var(--duration-slow) var(--ease-standard);
 }
 
-/* Rows whose control fits next to the name. */
-.sb-knob-row:is([data-type="boolean"], [data-type="enum"]) {
-  grid-template-areas:
-    "diff name control menu"
-    ". hint hint hint";
-  grid-template-columns: 10px minmax(64px, 38%) minmax(0, 1fr) auto;
+/* A switch fits on the name's line and ends flush with the fields above and below it. */
+.sb-knob-row[data-type="boolean"] {
+  grid-template-areas: "diff name menu control";
+  grid-template-columns: var(--sb-knob-diff) minmax(0, 1fr) auto auto;
 }
 
 .sb-knob-row[data-flash] {
@@ -227,33 +403,41 @@
   transition: none;
 }
 
-.sb-knob-row[data-unused] :is(.sb-knob-row__name, .sb-knob-row__control) {
-  opacity: 0.6;
-}
-
 .sb-knob-row__head {
   display: contents;
 }
 
 .sb-knob-row__diff {
+  position: relative;
   grid-area: diff;
-  color: var(--warn-text);
+  color: var(--text-secondary);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   text-align: center;
+}
+
+.sb-knob-row__diff:not(:empty)::after {
+  content: "";
+  position: absolute;
+  inset: -3px -2px;
 }
 
 .sb-knob-row__name {
   grid-area: name;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.sb-knob-row[data-unused] .sb-knob-row__name {
+  color: var(--text-secondary);
+}
+
 .sb-knob-row__menu {
   grid-area: menu;
+  margin-left: var(--space-2);
   opacity: 0;
 }
 
@@ -267,18 +451,24 @@
   min-width: 0;
 }
 
-.sb-knob-row__hint {
-  grid-area: hint;
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  line-height: var(--line-height-normal);
+.sb-knob-row[data-type="boolean"] .sb-knob-row__control {
+  margin-left: var(--space-3);
 }
 
 .sb-knob-row__tip {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* A locked preset's values stay readable: dimmed controls, full-strength numbers. */
+.sb-knob-row[data-locked] .sb-scrub__input:disabled {
+  color: var(--text-primary);
+  -webkit-text-fill-color: var(--text-primary);
+}
+
+.sb-knob-row[data-locked] .sb-scrub[data-disabled] .sb-scrub__unit {
+  color: var(--text-secondary);
 }
 
 /* A knob's control, in a row or in the Inspector */
@@ -309,57 +499,128 @@
 
 /* New Knob, Edit Knob and Make Knob */
 .sb-knob-popover {
-  width: 272px;
+  width: 280px;
   padding: var(--space-5);
 }
 
 .sb-knob-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .sb-knob-form__title {
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
 }
 
-.sb-knob-form__row {
+.sb-knob-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-knob-form__pair {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
 }
 
 .sb-knob-form__label {
   color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-knob-form__hint {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-knob-form__disclosure {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  height: 22px;
+  margin-left: calc(var(--space-2) * -1);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .sb-knob-form__disclosure:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sb-knob-form__disclosure:active {
+  background: var(--bg-pressed);
+}
+
+.sb-knob-form__disclosure:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.sb-knob-form__disclosure[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.sb-knob-form__disclosure svg {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sb-knob-form__summary {
+  overflow: hidden;
+  color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-knob-form__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sb-knob-form__details[hidden] {
+  display: none;
 }
 
 .sb-knob-form__range {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.sb-knob-form__range-field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: var(--space-3);
 }
 
 .sb-knob-form__note {
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
 
 .sb-knob-form__problem {
   margin: 0;
   color: var(--danger-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   line-height: var(--line-height-normal);
 }
 
@@ -424,7 +685,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

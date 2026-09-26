@@ -5,12 +5,12 @@
  */
 
 import { planVariablesToKnobs } from "@sonobe/core";
-import { ArrowLeftRight, ClipboardCopy, Plus, SlidersHorizontal, WandSparkles } from "lucide-react";
+import { ArrowLeftRight, ClipboardCopy, CopyPlus, Plus, SlidersHorizontal } from "lucide-react";
 import type { EditorSession } from "../../state/session.ts";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { copyDifferences } from "./KnobsPanel.tsx";
 import { knobsUi, showKnobs } from "./knobsStore.ts";
-import { partnerPreset } from "./model.ts";
+import { FLIP_PRESETS_SHORTCUT, partnerPreset } from "./model.ts";
 import { addPreset } from "./PresetBar.tsx";
 import { knobEdit } from "./useKnobEdit.ts";
 
@@ -29,7 +29,7 @@ export function knobCommands(session: EditorSession): Command[] {
       title: "Flip Presets",
       category: "Prototype",
       description: "Run the preset that ran before, to compare",
-      shortcut: "Mod+'",
+      shortcut: FLIP_PRESETS_SHORTCUT,
       icon: ArrowLeftRight,
       keywords: ["knobs", "compare", "switch preset", "shipped", "proposal", "a/b"],
       when: () => partner() !== null,
@@ -40,7 +40,7 @@ export function knobCommands(session: EditorSession): Command[] {
       },
     },
     { id: "knobs.newKnob", title: "New Knob…", category: "Prototype", icon: Plus, keywords: ["knobs", "slider", "parameter", "tune"], run: () => showKnobs(session, undefined, { kind: "newKnob" }) },
-    { id: "knobs.newPreset", title: "New Preset", category: "Prototype", icon: Plus, keywords: ["knobs", "compare", "variant"], run: () => addPreset(session, knobEdit(session), set()) },
+    { id: "knobs.newPreset", title: "New Preset", category: "Prototype", icon: CopyPlus, keywords: ["knobs", "compare", "variant"], run: () => addPreset(session, knobEdit(session), set()) },
     {
       id: "knobs.copyDifferences",
       title: "Copy Knob Differences",
@@ -59,7 +59,7 @@ export function knobCommands(session: EditorSession): Command[] {
       id: "knobs.convertVariables",
       title: "Convert Variables to Knobs…",
       category: "Prototype",
-      icon: WandSparkles,
+      icon: SlidersHorizontal,
       keywords: ["knobs", "variable broadcaster", "receiver", "constants"],
       when: () => planVariablesToKnobs(session.document.getState().doc, session.registry).knobs.length > 0,
       disabledReason: "No Variable Broadcaster shares a constant",

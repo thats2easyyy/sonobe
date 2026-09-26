@@ -29,6 +29,9 @@ import {
   type ValueType,
 } from "@sonobe/core";
 
+/** Flip Presets' shortcut, for the command and the places that mention it. */
+export const FLIP_PRESETS_SHORTCUT = "Mod+'";
+
 /** Chip and tick colors, by preset position (the running preset's chip is filled). */
 export const PRESET_COLORS: readonly string[] = [
   "var(--category-interaction)",
