@@ -49,7 +49,7 @@ import { useInspectorEdit } from "./useInspectorEdit.ts";
 
 export interface PatchInspectorProps {
   patchIds: readonly Id[];
-  /** Open a patch type's full reference elsewhere (the Learn drawer). Without it, "Learn More" expands the docs here. */
+  /** Open a patch type's full reference elsewhere (the Learn drawer). Without it, "Learn more" expands the docs here. */
   onLearnMore?: (patchType: string) => void;
 }
 
@@ -376,7 +376,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
     <>
       <InspectorHeader
         icon={<CategoryIcon size={15} strokeWidth={1.75} />}
-        accent={sameType ? categoryColorVar(spec.category) : undefined}
+        subtitleDot={sameType ? categoryColorVar(spec.category) : undefined}
         name={single ? (single.node.name || variableName(single.node)) : `${entries.length} patches`}
         placeholder={variableKind === "broadcaster" ? "Name this variable" : variableKind === "receiver" ? "Choose a variable below" : spec.name}
         allowEmpty
@@ -390,7 +390,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
             }
           : {})}
         subtitle={
-          single && CATEGORY_LABELS[spec.category] !== spec.name
+          sameType && CATEGORY_LABELS[spec.category] !== spec.name
             ? `${CATEGORY_LABELS[spec.category]} · ${spec.name}`
             : sameType
               ? spec.name
@@ -401,7 +401,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
           ? {
               subtitleAction: (
                 <button type="button" className="sb-insp-link" aria-expanded={onLearnMore ? undefined : docsOpen} onClick={() => (onLearnMore ? onLearnMore(spec.type) : setDocsOpen((o) => !o))}>
-                  {docsOpen && !onLearnMore ? "Hide Details" : "Learn More"}
+                  {docsOpen && !onLearnMore ? "Hide details" : "Learn more"}
                 </button>
               ),
             }

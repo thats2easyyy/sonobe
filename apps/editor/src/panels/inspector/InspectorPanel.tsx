@@ -6,6 +6,7 @@ import { unpublishOps, updatePublishedOps, type PublishSide } from "../patch-edi
 import { layoutStore, useLayout, type InspectorTab } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
 import { useCurrentComponent, useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
+import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -24,7 +25,7 @@ import "./Inspector.css";
 export interface InspectorPanelProps {
   /** Collapse the panel to its rail; the shell passes this. Omit to hide the collapse button. */
   onCollapse?: () => void;
-  /** Open a patch type's full reference (e.g. in the Learn drawer). Without it, "Learn More" expands the docs inline. */
+  /** Open a patch type's full reference (e.g. in the Learn drawer). Without it, "Learn more" expands the docs inline. */
   onLearnMore?: (patchType: string) => void;
   className?: string;
 }
@@ -140,7 +141,11 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
           </InspectorSection>
         </>
       )}
-      <p className="sb-insp-tip">{commentCount ? "A comment is selected. Edit its text in the patch editor." : "Select a layer or patch to edit it. Drag a number to scrub it."}</p>
+      {commentCount ? (
+        <EmptyState size="sm" variant="inline" title="Comment selected" description="Edit its text in the patch editor." />
+      ) : (
+        <EmptyState size="sm" variant="inline" title="Nothing selected" description="Select a layer or patch to edit it. Drag a number to scrub it." />
+      )}
       {component && component.kind !== "prototype" && <PublishedPorts component={component} />}
     </>
   );

@@ -1,6 +1,6 @@
 /** The inspector's item header: icon, an editable name, a subtitle, actions, and optional detail below. */
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 
 export interface InspectorHeaderProps {
@@ -15,17 +15,17 @@ export interface InspectorHeaderProps {
   subtitle?: ReactNode;
   /** Shown when the pointer rests on the subtitle (the item's id). */
   subtitleTooltip?: string;
-  /** Sits after the subtitle ("Learn More"). */
+  /** Sits after the subtitle ("Learn more"). */
   subtitleAction?: ReactNode;
-  /** Accent color (CSS value) for the icon tile, e.g. a patch category color. */
-  accent?: string;
+  /** Color (CSS value) of a small dot before the subtitle, e.g. a patch category color. */
+  subtitleDot?: string;
   actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty = false, subtitle, subtitleTooltip, subtitleAction, accent, actions, children }: InspectorHeaderProps) {
+export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty = false, subtitle, subtitleTooltip, subtitleAction, subtitleDot, actions, children }: InspectorHeaderProps) {
   return (
-    <div className="sb-insp-header" data-accent={accent ? "" : undefined} style={accent ? ({ "--sb-insp-accent": accent } as CSSProperties) : undefined}>
+    <div className="sb-insp-header">
       <div className="sb-insp-header__main">
         <span className="sb-insp-header__icon" aria-hidden>
           {icon}
@@ -36,7 +36,10 @@ export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty 
           <div className="sb-insp-header__meta">
             {subtitle && (
               <Tooltip content={subtitleTooltip} placement="bottom-start">
-                <div className="sb-insp-header__subtitle">{subtitle}</div>
+                <div className="sb-insp-header__subtitle">
+                  {subtitleDot && <span className="sb-insp-header__dot" style={{ background: subtitleDot }} aria-hidden />}
+                  <span className="sb-insp-header__subtitle-text">{subtitle}</span>
+                </div>
               </Tooltip>
             )}
             {subtitleAction}

@@ -3,7 +3,7 @@
  *
  *   <AppShell slots={{ inspector: <InspectorPanel onCollapse={() => toggleCollapsed("inspector", true)} onLearnMore={openPatchDocs} /> }} />
  *
- * Props: `onCollapse?()` shows the collapse button; `onLearnMore?(patchType)` sends "Learn More" to
+ * Props: `onCollapse?()` shows the collapse button; `onLearnMore?(patchType)` sends "Learn more" to
  * the Learn drawer (without it the docs expand inline); `className?`. Everything else comes from the
  * session: the current component, selected layers and patches, live runtime values, and history.
  *

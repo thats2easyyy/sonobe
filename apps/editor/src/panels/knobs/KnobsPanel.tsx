@@ -157,6 +157,20 @@ export function KnobsPanel() {
     (control ? getFocusable(control)[0] : undefined)?.focus();
   };
 
+  const selectionSlot = (
+    <div className="sb-knobs__selection">
+      {selection && (
+        <>
+          <span>{selection}</span>
+          <span aria-hidden>·</span>
+          <button type="button" className="sb-knobs__link" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
+            Show Properties
+          </button>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={rootRef}
@@ -199,59 +213,52 @@ export function KnobsPanel() {
           )}
         </div>
       )}
-      <div className="sb-knobs__selection">
-        {selection && (
-          <>
-            <span>{selection}</span>
-            <span aria-hidden>·</span>
-            <button type="button" className="sb-knobs__link" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
-              Show Properties
-            </button>
-          </>
-        )}
-      </div>
+      {knobCount > 0 && selectionSlot}
       {unusedCount > 0 && (
         <p className="sb-knobs__note">
           {unusedCount} {unusedCount === 1 ? "knob isn't" : "knobs aren't"} used yet. Right-click a field in Properties and choose Use Knob.
         </p>
       )}
       {knobCount === 0 ? (
-        <EmptyState
-          className="sb-knobs__empty"
-          variant="inline"
-          title="No knobs yet"
-          description={
-            <>
-              <p>Tune values live.</p>
-              <p>
-                Right-click a number in{" "}
-                {selection ? (
-                  "Properties"
-                ) : (
-                  <button type="button" className="sb-knobs__link" aria-label="Show Properties" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
-                    Properties
-                  </button>
-                )}
-                , then choose Make Knob.
-              </p>
-            </>
-          }
-          actions={
-            <div className="sb-knobs__empty-actions">
-              <Button variant="ghost" icon={<Plus size={14} />} onClick={(event) => openEditor({ kind: "new" }, event.currentTarget)}>
-                New Knob…
-              </Button>
-              {candidates.knobs.length > 0 && (
-                <p className="sb-knobs__note">
-                  This prototype shares {candidates.knobs.length} {candidates.knobs.length === 1 ? "constant" : "constants"} through Variable Broadcasters.{" "}
-                  <button type="button" className="sb-knobs__link" onClick={() => setConverting(true)}>
-                    Convert to Knobs
-                  </button>
+        <>
+          <EmptyState
+            className="sb-knobs__empty"
+            variant="inline"
+            title="No knobs yet"
+            description={
+              <>
+                <p>Tune values live.</p>
+                <p>
+                  Right-click a number in{" "}
+                  {selection ? (
+                    "Properties"
+                  ) : (
+                    <button type="button" className="sb-knobs__link" aria-label="Show Properties" onClick={() => layoutStore.getState().setInspectorTab("properties")}>
+                      Properties
+                    </button>
+                  )}
+                  , then choose Make Knob.
                 </p>
-              )}
-            </div>
-          }
-        />
+              </>
+            }
+            actions={
+              <div className="sb-knobs__empty-actions">
+                <Button variant="ghost" icon={<Plus size={14} />} onClick={(event) => openEditor({ kind: "new" }, event.currentTarget)}>
+                  New Knob…
+                </Button>
+                {candidates.knobs.length > 0 && (
+                  <p className="sb-knobs__note">
+                    This prototype shares {candidates.knobs.length} {candidates.knobs.length === 1 ? "constant" : "constants"} through Variable Broadcasters.{" "}
+                    <button type="button" className="sb-knobs__link" onClick={() => setConverting(true)}>
+                      Convert to Knobs
+                    </button>
+                  </p>
+                )}
+              </div>
+            }
+          />
+          {selectionSlot}
+        </>
       ) : (
         <div className="sb-knobs__groups">
           {groups.length === 0 && <p className="sb-knobs__note">Every knob has the same value in {set && partner ? presetName(set, partner) : "the other preset"}.</p>}

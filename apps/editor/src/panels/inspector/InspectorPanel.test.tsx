@@ -123,6 +123,7 @@ async function eventually(check: () => void) {
 describe("InspectorPanel", () => {
   it("shows a friendly empty state with the component's notes", () => {
     const s = mount(fixture());
+    expect(container.querySelector(".sb-empty__title")!.textContent).toBe("Nothing selected");
     expect(container.textContent).toContain("Select a layer or patch to edit it.");
     expect(container.textContent).toContain("3 layers · 3 patches");
     const notes = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Component notes"]')!;
@@ -495,13 +496,27 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain(getPatchSpec(registry, "transition")!.summary);
     expect(button("Value type: Number")).not.toBeNull();
     expect(container.textContent).toContain("← pop.output");
-    click(buttonWithText("Learn More"));
+    const dot = container.querySelector<HTMLElement>(".sb-insp-header__dot")!;
+    expect(dot.style.background).toBe("var(--category-animation)");
+    expect(container.querySelector(".sb-insp-header__icon")!.getAttribute("style")).toBeNull();
+    click(buttonWithText("Learn more"));
     expect(container.querySelector(".sb-insp-docs")).not.toBeNull();
+    expect(buttonWithText("Hide details")).not.toBeNull();
 
     select(s, { patches: ["sum"] });
     click(button("Add a value"));
     expect(main(s).patches.sum!.inputCount).toBe(3);
     expect(input("Value 3")).not.toBeNull();
+  });
+
+  it("names the category beside the dot for one patch and for several of the same type", () => {
+    const s = mount(build([{ op: "addPatch", patch: { id: "grow2", type: "transition", typeParam: "number", ui: { x: 0, y: 600 } } }], fixture()));
+    const subtitle = () => container.querySelector(".sb-insp-header__subtitle-text")!.textContent;
+    select(s, { patches: ["grow"] });
+    const single = subtitle();
+    expect(single).toContain(" · ");
+    select(s, { patches: ["grow", "grow2"] });
+    expect(subtitle()).toBe(single);
   });
 
   it("asks before a Type change disconnects cables, and inserts a converter in the same undo step", () => {
@@ -569,11 +584,11 @@ describe("InspectorPanel", () => {
     expect(main(s).patches.sum!.inputCount).toBe(2);
   });
 
-  it("sends Learn More to the host when asked", () => {
+  it("sends Learn more to the host when asked", () => {
     const onLearnMore = vi.fn();
     const s = mount(fixture(), { onLearnMore });
     select(s, { patches: ["pop"] });
-    click(buttonWithText("Learn More"));
+    click(buttonWithText("Learn more"));
     expect(onLearnMore).toHaveBeenCalledWith("popAnimation");
   });
 

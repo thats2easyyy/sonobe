@@ -40,9 +40,11 @@
 }
 
 .sb-pe__canvas {
+  --sb-pe-credit-h: var(--space-7);
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  padding-bottom: var(--sb-pe-credit-h);
 }
 
 .sb-pe .react-flow {
@@ -64,9 +66,21 @@
   cursor: default;
 }
 
-/* The React Flow credit its maintainers ask for: small and quiet, in the corner the canvas chrome doesn't use. */
+/* The React Flow credit its maintainers ask for lives in a strip under the graph, so no node or frame can cover it. The inline overflow on .react-flow would clip it, so the graph layer clips itself instead. */
+.sb-pe .react-flow {
+  overflow: visible !important;
+}
+
+.sb-pe .react-flow__renderer {
+  clip-path: inset(0);
+}
+
 .sb-pe .react-flow__attribution {
-  margin: 0 0 var(--space-3) var(--space-4);
+  bottom: calc(-1 * var(--sb-pe-credit-h));
+  display: flex;
+  align-items: center;
+  height: var(--sb-pe-credit-h);
+  margin: 0 0 0 var(--space-5);
   padding: 0;
   background: transparent;
   font-size: var(--font-size-xs);
@@ -80,6 +94,12 @@
 
 .sb-pe .react-flow__attribution a:hover {
   color: var(--text-secondary);
+}
+
+.sb-pe .react-flow__attribution a:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* A graph that runs past the pane fades out at that edge, so it reads as continuing. Opacity only. */
@@ -96,15 +116,15 @@
 .sb-pe__canvas::after {
   top: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--sb-pe-credit-h);
   width: 28px;
   background: linear-gradient(to left, var(--canvas-bg), transparent);
 }
 
 .sb-pe__canvas::before {
   right: 0;
-  bottom: 0;
-  left: 104px;
+  bottom: var(--sb-pe-credit-h);
+  left: 0;
   height: 24px;
   background: linear-gradient(to top, var(--canvas-bg), transparent);
 }
@@ -1922,7 +1942,7 @@ textarea.sb-pe-title-input {
 .sb-pe-zoom {
   position: absolute;
   right: var(--space-5);
-  bottom: var(--space-5);
+  bottom: calc(var(--space-5) + var(--sb-pe-credit-h));
 }
 
 .sb-pe-zoom__divider {
@@ -2010,7 +2030,7 @@ textarea.sb-pe-title-input {
 
 .sb-pe-hint {
   position: absolute;
-  bottom: calc(var(--space-5) + 30px);
+  bottom: calc(var(--space-5) + 30px + var(--sb-pe-credit-h));
   left: 50%;
   z-index: 5;
   display: flex;

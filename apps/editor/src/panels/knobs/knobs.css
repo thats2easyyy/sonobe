@@ -36,12 +36,19 @@
 }
 
 .sb-knobs__link {
+  position: relative;
   padding: 0;
   border: 0;
   background: none;
   color: var(--text-accent);
   font: inherit;
   cursor: pointer;
+}
+
+.sb-knobs__link::after {
+  content: "";
+  position: absolute;
+  inset: -4px -2px;
 }
 
 @media (hover: hover) {
@@ -70,7 +77,11 @@
 /* Empty: one left-aligned block under the header. */
 .sb-knobs .sb-knobs__empty {
   max-width: none;
-  padding: var(--space-4) 0;
+  padding: 0 0 var(--space-4);
+}
+
+.sb-knobs__header + .sb-knobs__empty {
+  margin-top: var(--space-2);
 }
 
 .sb-knobs__empty .sb-empty__description {

@@ -227,6 +227,15 @@ describe("Knobs tab", () => {
     expect(container.querySelector(".sb-knobs__empty")!.textContent).toContain("Right-click a number in Properties");
   });
 
+  it("puts the empty state first and the selection line after it, so the title sits under the header", () => {
+    const s = mount(build([{ op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card" } }]));
+    const root = container.querySelector(".sb-knobs")!;
+    expect(root.firstElementChild!.classList.contains("sb-knobs__empty")).toBe(true);
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    expect(root.firstElementChild!.classList.contains("sb-knobs__empty")).toBe(true);
+    expect(root.querySelector(".sb-knobs__selection")!.textContent).toContain("1 layer selected");
+  });
+
   it("adds a preset to compare as a running copy, in one undo step", () => {
     const s = mount(build([{ op: "addKnob", knob: { id: "gap", name: "Gap", type: "number", value: 8 } }]));
     click(buttonWithText("Add Preset to Compare"));
