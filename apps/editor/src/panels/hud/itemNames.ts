@@ -26,3 +26,8 @@ export function summarizeNames(names: readonly string[], max = 3): string {
   if (names.length <= max) return names.join(", ");
   return `${names.slice(0, max).join(", ")} +${names.length - max}`;
 }
+
+/** Names for chips in one row; two that read the same also show their ids: "Add (cyc_a)". */
+export function disambiguateNames(names: readonly string[], ids: readonly string[]): string[] {
+  return names.map((name, i) => (names.indexOf(name) !== names.lastIndexOf(name) ? `${name} (${ids[i]})` : name));
+}

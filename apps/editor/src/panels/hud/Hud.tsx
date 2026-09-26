@@ -1,12 +1,13 @@
-import { getDevicePreset } from "@sonobe/core";
 import { ChevronDown, ChevronUp, Gauge, Sparkles, SquareTerminal, TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
-import { useDocument, useRuntimeState } from "../../state/EditorProvider.tsx";
+import { useState, type MouseEvent, type ReactNode } from "react";
+import { useRuntimeState } from "../../state/EditorProvider.tsx";
 import { Badge } from "../../ui/Badge.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { useControllableState } from "../../ui/lib/hooks.ts";
+import { ALL_SEVERITIES, type SeverityFilter } from "./diagnosticsModel.ts";
 import { AiActivityView } from "./AiActivityView.tsx";
 import { ConsoleView } from "./ConsoleView.tsx";
 import { DiagnosticsView } from "./DiagnosticsView.tsx";
@@ -35,6 +36,8 @@ export interface HudProps {
 
 const ID_BASE = "sb-hudx";
 
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
 const TAB_ICONS: Record<HudTabId, ReactNode> = {
   console: <SquareTerminal size={13} />,
   diagnostics: <TriangleAlert size={13} />,
@@ -52,23 +55,24 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
   const fps = useRuntimeState((s) => s.fps);
   const playing = useRuntimeState((s) => s.playing);
   const frameMs = useRuntimeState((s) => s.frameMs);
-  const devicePreset = useDocument((s) => s.doc.project.device.preset);
+  const [severities, setSeverities] = useState<SeverityFilter>(ALL_SEVERITIES);
   const status = smoothness(fps, playing);
+  const readout = playing ? `${status.label}, ${Math.round(fps)} fps, ${formatMs(frameMs)} to evaluate a frame` : "Paused";
 
   const consoleBadge =
     counts.consoleErrors > 0 ? (
-      <Badge size="sm" tone="danger" aria-label={`${counts.consoleErrors} errors`}>
+      <Badge size="sm" tone="danger" aria-label={plural(counts.consoleErrors, "error")}>
         {counts.consoleErrors}
       </Badge>
     ) : counts.consoleWarnings > 0 ? (
-      <Badge size="sm" tone="warn" aria-label={`${counts.consoleWarnings} warnings`}>
+      <Badge size="sm" tone="warn" aria-label={plural(counts.consoleWarnings, "warning")}>
         {counts.consoleWarnings}
       </Badge>
     ) : undefined;
   const problems = counts.diagnostics.error + counts.diagnostics.warning;
   const diagnosticsBadge =
     problems > 0 ? (
-      <Badge size="sm" tone={counts.diagnostics.error > 0 ? "danger" : "warn"} aria-label={`${problems} problems`}>
+      <Badge size="sm" tone={counts.diagnostics.error > 0 ? "danger" : "warn"} aria-label={plural(problems, "problem")}>
         {problems}
       </Badge>
     ) : undefined;
@@ -79,24 +83,28 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
     ai: counts.working > 0 ? <span className="sb-hudx__live" role="status" aria-label="Claude is working" /> : undefined,
   };
 
+  const onBarDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) onToggleCollapse?.();
+  };
+
   return (
-    <section className={cx("sb-hudx", className)} aria-label="Console and diagnostics" data-collapsed={collapsed || undefined} data-shortcut-scope="hud">
-      <div className="sb-hudx__bar">
+    <section className={cx("sb-hudx", className)} aria-label="Bottom panel" data-collapsed={collapsed || undefined} data-shortcut-scope="hud">
+      <div className="sb-hudx__bar" onDoubleClick={onBarDoubleClick}>
         <Tabs<HudTabId>
           idBase={ID_BASE}
-          aria-label="HUD panels"
+          aria-label="Bottom panel tabs"
           value={current}
           onChange={setCurrent}
           items={HUD_TABS.map(({ value, label }) => ({ value, label, icon: TAB_ICONS[value], badge: badges[value] }))}
         />
         <div className="sb-hudx__status">
-          <button type="button" className="sb-hudx__stat" data-link onClick={() => setCurrent("performance")} aria-label={`${status.label}: ${playing ? `${Math.round(fps)} frames per second` : "paused"}. Show performance`}>
-            <span className="sb-hudx__dot" data-tone={status.tone} aria-hidden />
-            <span className="sb-tabular">{playing ? `${Math.round(fps)} fps` : "Paused"}</span>
-          </button>
-          {playing && <span className="sb-hudx__stat sb-tabular">{formatMs(frameMs)}</span>}
-          <span className="sb-hudx__stat sb-hudx__device">{getDevicePreset(devicePreset).name}</span>
-          {onToggleCollapse && <IconButton size="sm" icon={collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />} label={collapsed ? "Show console" : "Hide console"} shortcut="Mod+J" tooltipPlacement="top" onClick={onToggleCollapse} />}
+          <Tooltip content={`${readout}. Show performance`} placement="top">
+            <button type="button" className="sb-hudx__stat" data-link onClick={() => setCurrent("performance")} aria-label={`${readout}. Show performance`}>
+              <span className="sb-hudx__dot" data-tone={status.tone} aria-hidden />
+              <span className="sb-tabular">{playing ? `${Math.round(fps)} fps` : "Paused"}</span>
+            </button>
+          </Tooltip>
+          {onToggleCollapse && <IconButton size="sm" icon={collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />} label={collapsed ? "Show bottom panel" : "Hide bottom panel"} shortcut="Mod+J" tooltipPlacement="top" onClick={onToggleCollapse} />}
         </div>
       </div>
       {!collapsed && (
@@ -105,13 +113,13 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
             <ConsoleView />
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="diagnostics" active={current === "diagnostics"} className="sb-hudx__panel">
-            <DiagnosticsView />
+            <DiagnosticsView filter={severities} onFilterChange={setSeverities} />
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="ai" active={current === "ai"} className="sb-hudx__panel">
             <AiActivityView {...(onConnectClaude ? { onConnectClaude } : {})} />
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="performance" active={current === "performance"} keepMounted className="sb-hudx__panel">
-            <PerformanceView />
+            <PerformanceView active={current === "performance"} />
           </TabPanel>
         </div>
       )}

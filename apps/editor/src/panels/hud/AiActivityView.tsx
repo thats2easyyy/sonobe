@@ -1,7 +1,6 @@
-import { CircleCheck, LoaderCircle, LocateFixed, Plug, Redo2, Sparkles, Undo2 } from "lucide-react";
+import { CircleCheck, LoaderCircle, LocateFixed, Plug, Redo2, Undo2 } from "lucide-react";
 import type { SonobeDocument } from "@sonobe/core";
 import { useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
-import { Badge } from "../../ui/Badge.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -67,9 +66,9 @@ export function AiActivityView({ onConnectClaude }: AiActivityViewProps) {
         <div className="sb-hudview__empty">
           <EmptyState
             size="sm"
-            icon={<Sparkles size={16} />}
-            title="No AI activity yet"
-            description="When Claude edits this prototype, you'll see what it's working on, and each change lands here as one undoable entry."
+            variant="inline"
+            title="Claude hasn't edited this prototype"
+            description="Its changes appear here, one undo step each."
             actions={
               onConnectClaude && (
                 <Button size="sm" variant="ai" icon={<Plug size={12} />} onClick={onConnectClaude}>
@@ -83,15 +82,12 @@ export function AiActivityView({ onConnectClaude }: AiActivityViewProps) {
     );
   }
 
-  const changes = feed.filter((i) => i.kind === "change").length;
-
   return (
     <div className="sb-hudview">
       <div className="sb-hudview__scroll sb-scroll" role="list" aria-label="AI activity">
         {feed.map((item) => (
           <ActivityRow key={item.key} item={item} doc={doc} now={now} onReveal={reveal} onUndo={undo} onRedo={redo} />
         ))}
-        {changes > 0 && <div className="sb-feed__footer">Each change is one entry in Edit → Undo, labeled with who made it.</div>}
       </div>
     </div>
   );
@@ -111,8 +107,8 @@ function ActivityRow({ item, doc, now, onReveal, onUndo, onRedo }: ActivityRowPr
     const names = namesFor(doc, item);
     return (
       <div className="sb-feed__row" data-kind="working" role="listitem">
-        <span className="sb-feed__avatar" data-agent aria-hidden>
-          <LoaderCircle size={13} strokeWidth={2} className="sb-feed__spin" />
+        <span className="sb-feed__glyph" data-agent aria-hidden>
+          <LoaderCircle size={14} strokeWidth={2} className="sb-feed__spin" />
         </span>
         <div className="sb-feed__text">
           <div className="sb-feed__label">
@@ -120,11 +116,8 @@ function ActivityRow({ item, doc, now, onReveal, onUndo, onRedo }: ActivityRowPr
           </div>
           {names && <div className="sb-feed__detail">working on {names}</div>}
         </div>
-        <Badge tone="ai" dot>
-          Working
-        </Badge>
+        <span className="sb-feed__actions">{item.ids.length > 0 && <IconButton size="sm" icon={<LocateFixed size={14} />} label={`Reveal ${names}`} tooltipPlacement="top" onClick={() => onReveal(item.component, item.ids)} />}</span>
         <span className="sb-feed__time sb-tabular">{formatRelativeTime(item.startedAt, now)}</span>
-        <span className="sb-feed__actions">{item.ids.length > 0 && <IconButton size="sm" icon={<LocateFixed size={13} />} label="Reveal" tooltipPlacement="top" onClick={() => onReveal(item.component, item.ids)} />}</span>
       </div>
     );
   }
@@ -133,8 +126,8 @@ function ActivityRow({ item, doc, now, onReveal, onUndo, onRedo }: ActivityRowPr
     const names = namesFor(doc, item);
     return (
       <div className="sb-feed__row" data-kind="note" role="listitem">
-        <span className="sb-feed__avatar" data-agent aria-hidden>
-          {item.verb === "finish" ? <CircleCheck size={12} strokeWidth={2} /> : item.verb === "undo" ? <Undo2 size={12} strokeWidth={2} /> : <Redo2 size={12} strokeWidth={2} />}
+        <span className="sb-feed__glyph" aria-hidden>
+          {item.verb === "finish" ? <CircleCheck size={14} strokeWidth={2} /> : item.verb === "undo" ? <Undo2 size={14} strokeWidth={2} /> : <Redo2 size={14} strokeWidth={2} />}
         </span>
         <div className="sb-feed__text">
           <div className="sb-feed__label">
@@ -142,39 +135,35 @@ function ActivityRow({ item, doc, now, onReveal, onUndo, onRedo }: ActivityRowPr
           </div>
           {names && <div className="sb-feed__detail">{names}</div>}
         </div>
+        <span className="sb-feed__actions">{item.ids.length > 0 && <IconButton size="sm" icon={<LocateFixed size={14} />} label={`Reveal ${names}`} tooltipPlacement="top" onClick={() => onReveal(item.components[0], item.ids)} />}</span>
         <span className="sb-feed__time sb-tabular">{formatRelativeTime(item.timestamp, now)}</span>
-        <span className="sb-feed__actions">{item.ids.length > 0 && <IconButton size="sm" icon={<LocateFixed size={13} />} label="Reveal" tooltipPlacement="top" onClick={() => onReveal(item.components[0], item.ids)} />}</span>
       </div>
     );
   }
 
   const names = namesFor(doc, item);
+  const edits = `${item.opCount} ${item.opCount === 1 ? "edit" : "edits"}`;
   return (
     <div className="sb-feed__row" data-kind="change" data-status={item.status} role="listitem">
-      <span className="sb-feed__avatar" data-agent aria-hidden>
-        <Sparkles size={12} strokeWidth={2} />
-      </span>
+      {item.status === "undone" ? (
+        <span className="sb-feed__glyph" role="img" aria-label="Undone">
+          <Undo2 size={14} strokeWidth={2} />
+        </span>
+      ) : (
+        <span className="sb-feed__glyph" aria-hidden />
+      )}
       <div className="sb-feed__text">
         <div className="sb-feed__label">
           <strong>{item.author.name}</strong> {lowerFirst(item.label)}
         </div>
-        {names && <div className="sb-feed__detail">{names}</div>}
+        <div className="sb-feed__detail">{names ? `${names} · ${edits}` : edits}</div>
       </div>
-      {item.status === "undone" && (
-        <Badge size="sm" tone="neutral" variant="outline">
-          Undone
-        </Badge>
-      )}
-      {item.status === "past" && (
-        <Tooltip content="From before the document was replaced, so it can't be undone here." placement="top">
-          <span className="sb-feed__past">Earlier document</span>
-        </Tooltip>
-      )}
-      <Badge size="sm" className="sb-tabular">
-        {item.opCount} {item.opCount === 1 ? "op" : "ops"}
-      </Badge>
-      <span className="sb-feed__time sb-tabular">{formatRelativeTime(item.timestamp, now)}</span>
       <span className="sb-feed__actions">
+        {item.status === "past" && (
+          <Tooltip content="From before the document was replaced, so it can't be undone here." placement="top">
+            <span className="sb-feed__past">Can't undo (older document)</span>
+          </Tooltip>
+        )}
         {item.canUndo && (
           <Tooltip content={item.newer > 0 ? `Also undoes ${item.newer} newer ${item.newer === 1 ? "change" : "changes"}` : "Undo just this change"} placement="top">
             <Button size="sm" variant="ghost" icon={<Undo2 size={12} />} onClick={() => onUndo(item)}>
@@ -187,8 +176,9 @@ function ActivityRow({ item, doc, now, onReveal, onUndo, onRedo }: ActivityRowPr
             Redo
           </Button>
         )}
-        {item.ids.length > 0 && item.status !== "past" && <IconButton size="sm" icon={<LocateFixed size={13} />} label="Reveal" tooltipPlacement="top" onClick={() => onReveal(item.components[0], item.ids)} />}
+        {item.ids.length > 0 && item.status !== "past" && <IconButton size="sm" icon={<LocateFixed size={14} />} label={`Reveal ${names}`} tooltipPlacement="top" onClick={() => onReveal(item.components[0], item.ids)} />}
       </span>
+      <span className="sb-feed__time sb-tabular">{formatRelativeTime(item.timestamp, now)}</span>
     </div>
   );
 }

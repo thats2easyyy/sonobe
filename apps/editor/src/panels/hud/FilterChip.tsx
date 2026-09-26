@@ -15,7 +15,7 @@ export interface FilterChipProps {
 /** A toggle pill for HUD filters (levels, severities). */
 export function FilterChip({ pressed, onToggle, icon, label, count, tone = "neutral", hint }: FilterChipProps) {
   const chip = (
-    <button type="button" className="sb-hudchip" aria-pressed={pressed} data-tone={tone} onClick={onToggle}>
+    <button type="button" className="sb-hudchip" aria-pressed={pressed} data-tone={tone} data-empty={count === 0 || undefined} onClick={onToggle}>
       {icon && (
         <span className="sb-hudchip__icon" aria-hidden>
           {icon}

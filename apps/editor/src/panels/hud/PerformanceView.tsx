@@ -1,4 +1,4 @@
-import { Pause, Play, RotateCcw, TriangleAlert } from "lucide-react";
+import { Eraser, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useDocument, useEditorSession, useRuntimeState } from "../../state/EditorProvider.tsx";
 import { isPatchImplemented } from "../../state/registry.ts";
@@ -13,22 +13,28 @@ import { SampleChart } from "./SampleChart.tsx";
 const CAPACITY = 120;
 const SAMPLE_MS = 500;
 
+export interface PerformanceViewProps {
+  /** False while another tab is showing: patch timings and the scene poll stop, the chart history keeps filling. */
+  active?: boolean;
+}
+
 /** Performance tab: frame rate and frame time over the last minute, document and scene counts, and slow patches when the runtime reports them. */
-export function PerformanceView() {
+export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
   const session = useEditorSession();
   const { samples, reset } = usePerfSamples({ capacity: CAPACITY, intervalMs: SAMPLE_MS });
   const playing = useRuntimeState((s) => s.playing);
   const frame = useRuntimeState((s) => s.frame);
   const time = useRuntimeState((s) => s.time);
   const doc = useDocument((s) => s.doc);
-  const stats = useMemo(() => documentStats(doc, (type) => isPatchImplemented(session.registry, type), session.registry), [doc, session.registry]);
+  const stats = useMemo(() => (active ? documentStats(doc, (type) => isPatchImplemented(session.registry, type), session.registry) : null), [active, doc, session.registry]);
   const [scene, setScene] = useState<SceneStats>(() => sceneStats(session.runtime.scene()));
   const [timings, setTimings] = useState<PatchTiming[] | null>(() => patchTimingsOf(session.runtime.runtime));
 
   // Patch timings are only collected while this tab is showing.
-  useEffect(() => (typeof session.runtime.profilePatches === "function" ? session.runtime.profilePatches() : undefined), [session]);
+  useEffect(() => (active && typeof session.runtime.profilePatches === "function" ? session.runtime.profilePatches() : undefined), [session, active]);
 
   useEffect(() => {
+    if (!active) return;
     const read = () => {
       setScene(sceneStats(session.runtime.scene()));
       setTimings(patchTimingsOf(session.runtime.runtime));
@@ -36,14 +42,18 @@ export function PerformanceView() {
     read();
     const timer = setInterval(read, 1000);
     return () => clearInterval(timer);
-  }, [session]);
+  }, [session, active]);
 
   const summary = summarizeSamples(samples);
   const status = smoothness(summary.fps.latest, playing);
   const fpsValues = useMemo(() => samples.map((s) => (s.playing && s.fps > 0 ? s.fps : null)), [samples]);
   const msValues = useMemo(() => samples.map((s) => (s.playing ? s.frameMs : null)), [samples]);
   const msMax = Math.max(16.7, ...samples.map((s) => s.frameMs));
+  const budgetMs = 1000 / (doc.project.fps ?? 60);
   const budget = frameBudgetShare(summary.frameMs.avg, doc.project.fps ?? 60);
+  const fpsMin = Math.max(0, Math.min(30, Math.floor(Math.min(...fpsValues.map((v) => v ?? Infinity)) - 5)));
+
+  if (!active || !stats) return null;
 
   return (
     <div className="sb-hudview">
@@ -57,11 +67,8 @@ export function PerformanceView() {
                 {status.label}
               </Badge>
               <span className="sb-hudview__spacer" />
-              <Button size="sm" variant="ghost" icon={playing ? <Pause size={12} /> : <Play size={12} />} onClick={() => session.runtime.togglePlay()}>
-                {playing ? "Pause" : "Play"}
-              </Button>
-              <Button size="sm" variant="ghost" icon={<RotateCcw size={12} />} onClick={reset}>
-                Reset
+              <Button size="sm" variant="ghost" icon={<Eraser size={12} />} onClick={reset}>
+                Clear chart
               </Button>
             </div>
             <div className="sb-perfx__chart">
@@ -69,34 +76,36 @@ export function PerformanceView() {
               <SampleChart
                 values={fpsValues}
                 capacity={CAPACITY}
-                min={0}
+                min={fpsMin}
                 max={Math.max(62, ...fpsValues.map((v) => v ?? 0))}
                 target={{ value: 60, label: "60" }}
                 format={(v) => `${Math.round(v)} fps`}
                 label={summary.playingSamples ? `Frame rate over the last minute: average ${Math.round(summary.fps.avg)} fps, lowest ${Math.round(summary.fps.min)} fps` : "Frame rate: the prototype is paused"}
                 sampleMs={SAMPLE_MS}
                 height={64}
+                {...(status.tone === "warn" || status.tone === "danger" ? { tone: status.tone } : {})}
               />
             </div>
             <div className="sb-perfx__chart">
-              <div className="sb-perfx__chart-title">Evaluate time per frame</div>
+              <div className="sb-perfx__chart-title">Frame time</div>
               <SampleChart
                 values={msValues}
                 capacity={CAPACITY}
                 min={0}
                 max={msMax}
-                target={{ value: 1000 / (doc.project.fps ?? 60), label: "budget" }}
+                target={{ value: budgetMs, label: `budget ${formatMs(budgetMs)}` }}
                 format={formatMs}
-                label={`Evaluate time per frame: average ${formatMs(summary.frameMs.avg)}, slowest ${formatMs(summary.frameMs.max)}`}
+                label={`Frame time: average ${formatMs(summary.frameMs.avg)}, slowest ${formatMs(summary.frameMs.max)}`}
                 sampleMs={SAMPLE_MS}
                 height={40}
+                {...(budget > 1 ? { tone: "danger" as const } : budget > 0.8 ? { tone: "warn" as const } : {})}
               />
             </div>
           </section>
 
           <dl className="sb-perfx__stats">
             <div className="sb-perfx__stat">
-              <dt>Frame time</dt>
+              <dt>Latest frame</dt>
               <dd className="sb-tabular">
                 {formatMs(summary.frameMs.latest)}
                 <span className="sb-perfx__sub">
@@ -108,7 +117,7 @@ export function PerformanceView() {
               <dt>Frame budget used</dt>
               <dd className="sb-tabular" data-tone={budget > 0.8 ? "warn" : undefined}>
                 {Math.round(budget * 100)}%
-                <span className="sb-perfx__sub">of {formatMs(1000 / (doc.project.fps ?? 60))}</span>
+                <span className="sb-perfx__sub">of {formatMs(budgetMs)}</span>
               </dd>
             </div>
             <div className="sb-perfx__stat">
@@ -134,13 +143,15 @@ export function PerformanceView() {
                 <span className="sb-perfx__sub">of {scene.nodes} in the scene</span>
               </dd>
             </div>
-            <div className="sb-perfx__stat">
-              <dt>Loop instances</dt>
-              <dd className="sb-tabular">
-                {scene.loopInstances}
-                {scene.replicated.length > 0 && <span className="sb-perfx__sub">{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId, session.registry)} ×${r.count}`).join(" · ")}</span>}
-              </dd>
-            </div>
+            {scene.loopInstances > 0 && (
+              <div className="sb-perfx__stat">
+                <dt>Loop instances</dt>
+                <dd className="sb-tabular">
+                  {scene.loopInstances}
+                  {scene.replicated.length > 0 && <span className="sb-perfx__sub">{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId, session.registry)} ×${r.count}`).join(" · ")}</span>}
+                </dd>
+              </div>
+            )}
             <div className="sb-perfx__stat">
               <dt>Running</dt>
               <dd className="sb-tabular">

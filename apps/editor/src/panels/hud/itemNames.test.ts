@@ -1,7 +1,7 @@
 import { applyOps, createEmptyDocument } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
 import { getRegistry } from "../../state/registry.ts";
-import { itemDisplayName } from "./itemNames.ts";
+import { disambiguateNames, itemDisplayName } from "./itemNames.ts";
 
 const registry = getRegistry();
 
@@ -21,5 +21,11 @@ describe("itemDisplayName", () => {
     expect(itemDisplayName(doc, "main", "photo_scale", registry)).toBe("Photo Scale");
     expect(itemDisplayName(doc, "main", "variableReceiver")).toBe("variableReceiver");
     expect(itemDisplayName(doc, "main", "nothing", registry)).toBe("nothing");
+  });
+});
+
+describe("disambiguateNames", () => {
+  it("adds ids only to names that repeat", () => {
+    expect(disambiguateNames(["Add", "Add", "Dots"], ["cyc_a", "cyc_b", "dots"])).toEqual(["Add (cyc_a)", "Add (cyc_b)", "Dots"]);
   });
 });

@@ -1,5 +1,5 @@
-import { ArrowDown, ChevronRight, CircleX, Info, Search, SquareTerminal, Trash2, TriangleAlert } from "lucide-react";
-import { memo, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, CircleX, Info, Search, Terminal, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SonobeDocument } from "@sonobe/core";
 import type { ConsoleEntry, ConsoleLevel } from "../../state/console.ts";
 import { useConsole, useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
@@ -9,16 +9,18 @@ import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
-import { ALL_CONSOLE_LEVELS, CONSOLE_LEVELS, consoleEntryTarget, filterConsoleEntries, formatConsoleTime, scriptLocation, type ConsoleLevelFilter, type ConsoleSourceTarget } from "./consoleModel.ts";
+import { ALL_CONSOLE_LEVELS, CONSOLE_LEVELS, consoleEntryTarget, filterConsoleEntries, formatConsoleTime, type ConsoleLevelFilter, type ConsoleSourceTarget } from "./consoleModel.ts";
 import { FilterChip } from "./FilterChip.tsx";
+import { focusSelectedTab } from "./focusTab.ts";
 import { isFiltered, toggleFilter } from "./filters.ts";
+import { LogMessage } from "./LogMessage.tsx";
 import { revealItems } from "./reveal.ts";
 
-const LEVELS: Record<ConsoleLevel, { label: string; icon: ReactNode; tone: "danger" | "warn" | "info" | "neutral" }> = {
-  error: { label: "Errors", icon: <CircleX size={12} strokeWidth={2} />, tone: "danger" },
-  warn: { label: "Warnings", icon: <TriangleAlert size={12} strokeWidth={2} />, tone: "warn" },
-  info: { label: "Info", icon: <Info size={12} strokeWidth={2} />, tone: "info" },
-  log: { label: "Logs", icon: <ChevronRight size={12} strokeWidth={2} />, tone: "neutral" },
+const LEVELS: Record<ConsoleLevel, { label: string; Icon: LucideIcon; tone: "danger" | "warn" | "info" | "neutral" }> = {
+  error: { label: "Errors", Icon: CircleX, tone: "danger" },
+  warn: { label: "Warnings", Icon: TriangleAlert, tone: "warn" },
+  info: { label: "Info", Icon: Info, tone: "info" },
+  log: { label: "Logs", Icon: Terminal, tone: "neutral" },
 };
 
 const SOURCE_LABELS: Record<string, string> = { prototype: "Prototype", editor: "Editor", claude: "Claude" };
@@ -26,18 +28,24 @@ const SOURCE_LABELS: Record<string, string> = { prototype: "Prototype", editor: 
 interface RowProps {
   entry: ConsoleEntry;
   target: ConsoleSourceTarget | null;
+  expanded: boolean;
   onReveal: (target: ConsoleSourceTarget) => void;
+  onToggleExpanded: (id: string) => void;
 }
 
-const ConsoleRow = memo(function ConsoleRow({ entry, target, onReveal }: RowProps) {
-  const location = entry.level === "error" || entry.level === "warn" ? scriptLocation(entry.message) : null;
+const ConsoleRow = memo(function ConsoleRow({ entry, target, expanded, onReveal, onToggleExpanded }: RowProps) {
+  const { Icon, label } = LEVELS[entry.level];
   return (
-    <div className="sb-logrow" data-level={entry.level} role="listitem">
-      <span className="sb-logrow__icon" aria-label={LEVELS[entry.level].label.replace(/s$/, "")}>
-        {LEVELS[entry.level].icon}
-      </span>
-      <time className="sb-logrow__time sb-tabular" dateTime={new Date(entry.timestamp).toISOString()}>
-        {formatConsoleTime(entry.timestamp)}
+    <div className="sb-logrow" data-level={entry.level} data-expanded={expanded || undefined} role="listitem">
+      {entry.level === "log" ? (
+        <span className="sb-logrow__icon" aria-hidden />
+      ) : (
+        <span className="sb-logrow__icon" role="img" aria-label={label.replace(/s$/, "")}>
+          <Icon size={14} strokeWidth={2} />
+        </span>
+      )}
+      <time className="sb-logrow__time sb-tabular" dateTime={new Date(entry.timestamp).toISOString()} title={formatConsoleTime(entry.timestamp)}>
+        {formatConsoleTime(entry.timestamp).slice(0, 8)}
       </time>
       {target ? (
         <button type="button" className="sb-logrow__source" data-link onClick={() => onReveal(target)} title={`Reveal ${target.name} (${target.id})`} aria-label={`Reveal ${target.name}`}>
@@ -46,28 +54,18 @@ const ConsoleRow = memo(function ConsoleRow({ entry, target, onReveal }: RowProp
       ) : (
         <span className="sb-logrow__source">{SOURCE_LABELS[entry.source] ?? entry.source}</span>
       )}
-      <span className="sb-logrow__message">{entry.message}</span>
-      {(location || entry.count > 1) && (
-        <span className="sb-logrow__badges">
-          {location &&
-            (target ? (
-              <button type="button" className="sb-logrow__line" onClick={() => onReveal(target)} title={`Reveal ${target.name}`}>
-                line {location.line}
-                {location.column !== undefined ? `:${location.column}` : ""}
-              </button>
-            ) : (
-              <span className="sb-logrow__line">
-                line {location.line}
-                {location.column !== undefined ? `:${location.column}` : ""}
-              </span>
-            ))}
-          {entry.count > 1 && (
+      <LogMessage
+        text={entry.message}
+        expanded={expanded}
+        onToggle={() => onToggleExpanded(entry.id)}
+        trailing={
+          entry.count > 1 && (
             <Badge size="sm" className="sb-tabular" aria-label={`Repeated ${entry.count} times`}>
               ×{entry.count}
             </Badge>
-          )}
-        </span>
-      )}
+          )
+        }
+      />
     </div>
   );
 });
@@ -88,6 +86,7 @@ export function ConsoleView() {
   const doc = useDocument((s) => s.doc);
   const [levels, setLevels] = useState<ConsoleLevelFilter>(ALL_CONSOLE_LEVELS);
   const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const visible = useMemo(() => filterConsoleEntries(entries, { levels, query }), [entries, levels, query]);
   const targets = useMemo(() => targetsFor(doc, entries), [doc, entries]);
   const levelCounts = useMemo(() => {
@@ -97,7 +96,9 @@ export function ConsoleView() {
   }, [entries]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const hasRows = visible.length > 0;
   const [behind, setBehind] = useState(false);
 
   useLayoutEffect(() => {
@@ -107,6 +108,18 @@ export function ConsoleView() {
     else setBehind(true);
   }, [visible]);
 
+  // A row that grows after it renders (its Show all button appears) shouldn't push the newest line out of view.
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    const list = listRef.current;
+    if (!scroll || !list) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current) scroll.scrollTop = scroll.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [hasRows]);
+
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -114,6 +127,11 @@ export function ConsoleView() {
     stickToBottom.current = atBottom;
     if (atBottom) setBehind(false);
   };
+
+  // Opening a row moves the bottom away, closing it can bring it back; follow the tail only while it is in view.
+  useLayoutEffect(() => {
+    onScroll();
+  }, [expanded]);
 
   const jumpToLatest = () => {
     const el = scrollRef.current;
@@ -123,52 +141,70 @@ export function ConsoleView() {
     setBehind(false);
   };
 
-  const reveal = (target: ConsoleSourceTarget) => {
-    if (!revealItems(session, target.component, [target.id])) toast({ title: `“${target.name}” isn't in the document anymore`, tone: "neutral" });
-  };
+  const reveal = useCallback(
+    (target: ConsoleSourceTarget) => {
+      if (!revealItems(session, target.component, [target.id])) toast({ title: `“${target.name}” isn't in the document anymore`, tone: "neutral" });
+    },
+    [session],
+  );
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
 
   const filtered = isFiltered(levels) || query.trim() !== "";
+  const nothingToFilter = entries.length === 0;
 
   return (
     <div className="sb-hudview">
-      <div className="sb-hudview__toolbar">
-        <div className="sb-hudview__chips" role="group" aria-label="Show levels">
-          {CONSOLE_LEVELS.map((level) => (
-            <FilterChip
-              key={level}
-              pressed={levels[level]}
-              tone={LEVELS[level].tone}
-              icon={LEVELS[level].icon}
-              label={LEVELS[level].label}
-              count={levelCounts[level]}
-              hint="Option-click to show only this level"
-              onToggle={(event) => setLevels((current) => toggleFilter(current, level, event.altKey))}
-            />
-          ))}
+      {!nothingToFilter && (
+        <div className="sb-hudview__toolbar">
+          <div className="sb-hudview__chips" role="group" aria-label="Show levels">
+            {CONSOLE_LEVELS.map((level) => (
+              <FilterChip
+                key={level}
+                pressed={levels[level]}
+                tone={LEVELS[level].tone}
+                icon={<LevelIcon level={level} />}
+                label={LEVELS[level].label}
+                count={levelCounts[level]}
+                hint="Option-click to show only this level"
+                onToggle={(event) => setLevels((current) => toggleFilter(current, level, event.altKey))}
+              />
+            ))}
+          </div>
+          <span className="sb-hudview__spacer" />
+          <TextField
+            size="sm"
+            containerClassName="sb-hudview__search"
+            aria-label="Filter console"
+            placeholder="Filter"
+            leading={<Search size={12} strokeWidth={2} />}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onCancel={() => setQuery("")}
+          />
+          <IconButton size="sm" icon={<Trash2 size={14} />} label="Clear console" tooltipPlacement="top" onClick={(event) => {
+              focusSelectedTab(event.currentTarget);
+              session.console.getState().clear();
+            }}
+          />
         </div>
-        <span className="sb-hudview__spacer" />
-        <TextField
-          size="sm"
-          containerClassName="sb-hudview__search"
-          aria-label="Filter console"
-          placeholder="Filter"
-          leading={<Search size={12} strokeWidth={2} />}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onCancel={() => setQuery("")}
-        />
-        <IconButton size="sm" icon={<Trash2 size={13} />} label="Clear console" tooltipPlacement="top" disabled={entries.length === 0} onClick={() => session.console.getState().clear()} />
-      </div>
+      )}
 
-      {entries.length === 0 ? (
+      {nothingToFilter ? (
         <div className="sb-hudview__empty">
-          <EmptyState size="sm" icon={<SquareTerminal size={16} />} title="Console is clear" description="Logs from JavaScript patches, runtime warnings, and restarts show up here." />
+          <EmptyState size="sm" variant="inline" title="Nothing logged yet" description="console.log output and runtime warnings show up here." />
         </div>
       ) : visible.length === 0 ? (
         <div className="sb-hudview__empty">
           <EmptyState
             size="sm"
-            icon={<Search size={16} />}
+            variant="inline"
             title="No messages match"
             description={`${entries.length} ${entries.length === 1 ? "message is" : "messages are"} hidden by filters.`}
             actions={
@@ -176,7 +212,8 @@ export function ConsoleView() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => {
+                  onClick={(event) => {
+                    focusSelectedTab(event.currentTarget);
                     setLevels(ALL_CONSOLE_LEVELS);
                     setQuery("");
                   }}
@@ -189,19 +226,24 @@ export function ConsoleView() {
         </div>
       ) : (
         <div className="sb-hudview__scroll sb-scroll sb-selectable" ref={scrollRef} onScroll={onScroll}>
-          <div role="list" aria-label="Console output" aria-live="polite" aria-relevant="additions">
+          <div role="list" aria-label="Console output" aria-live="polite" aria-relevant="additions" ref={listRef}>
             {visible.map((entry) => (
-              <ConsoleRow key={entry.id} entry={entry} target={targets.get(`${entry.componentPath ?? ""}|${entry.source}`) ?? null} onReveal={reveal} />
+              <ConsoleRow key={entry.id} entry={entry} target={targets.get(`${entry.componentPath ?? ""}|${entry.source}`) ?? null} expanded={expanded.has(entry.id)} onReveal={reveal} onToggleExpanded={toggleExpanded} />
             ))}
           </div>
         </div>
       )}
 
-      {behind && visible.length > 0 && (
+      {behind && hasRows && (
         <Button size="sm" variant="secondary" className="sb-hudview__jump" icon={<ArrowDown size={12} />} onClick={jumpToLatest}>
           New messages
         </Button>
       )}
     </div>
   );
+}
+
+function LevelIcon({ level }: { level: ConsoleLevel }) {
+  const { Icon } = LEVELS[level];
+  return <Icon size={12} strokeWidth={2} />;
 }

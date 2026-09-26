@@ -14,12 +14,14 @@ export interface SampleChartProps {
   label: string;
   sampleMs: number;
   height?: number;
+  /** Colors the line: neutral by default. */
+  tone?: "warn" | "danger";
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** One-series sparkline with a reference line and a crosshair tooltip. */
-export function SampleChart({ values, capacity, min, max, target, format, label, sampleMs, height = 64 }: SampleChartProps) {
+export function SampleChart({ values, capacity, min, max, target, format, label, sampleMs, height = 64, tone }: SampleChartProps) {
   const [hover, setHover] = useState<number | null>(null);
   const width = 100;
   const offset = Math.max(0, capacity - values.length);
@@ -58,25 +60,31 @@ export function SampleChart({ values, capacity, min, max, target, format, label,
   const secondsAgo = hover !== null ? ((values.length - 1 - hover) * sampleMs) / 1000 : 0;
 
   return (
-    <div className="sb-perfchart" style={{ height }} role="img" aria-label={label} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)}>
-      <svg className="sb-perfchart__svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden>
-        {target && <line className="sb-perfchart__target" x1={0} x2={width} y1={y(target.value)} y2={y(target.value)} vectorEffect="non-scaling-stroke" />}
-        {area && <path className="sb-perfchart__area" d={area} />}
-        {line && <path className="sb-perfchart__line" d={line} vectorEffect="non-scaling-stroke" />}
-        {hover !== null && <line className="sb-perfchart__crosshair" x1={x(hover)} x2={x(hover)} y1={0} y2={height} vectorEffect="non-scaling-stroke" />}
-      </svg>
-      {target && (
-        <span className="sb-perfchart__target-label" style={{ top: y(target.value) }}>
-          {target.label}
-        </span>
-      )}
-      {hover !== null && hovered !== undefined && hovered !== null && <span className="sb-perfchart__dot" style={{ left: `${left}%`, top: y(hovered) }} />}
-      {hover !== null && hovered !== undefined && (
-        <span className="sb-perfchart__tip" data-side={left > 70 ? "left" : "right"} style={{ left: `${left}%` }}>
-          <strong className="sb-tabular">{hovered === null ? "Paused" : format(hovered)}</strong>
-          <span>{secondsAgo < 0.5 ? "now" : `${secondsAgo.toFixed(secondsAgo < 10 ? 1 : 0)}s ago`}</span>
-        </span>
-      )}
+    <div className="sb-perfchart" data-tone={tone}>
+      <div className="sb-perfchart__plot" style={{ height }} role="img" aria-label={label} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)}>
+        <svg className="sb-perfchart__svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden>
+          {target && <line className="sb-perfchart__target" x1={0} x2={width} y1={y(target.value)} y2={y(target.value)} vectorEffect="non-scaling-stroke" />}
+          {area && <path className="sb-perfchart__area" d={area} />}
+          {line && <path className="sb-perfchart__line" d={line} vectorEffect="non-scaling-stroke" />}
+          {hover !== null && <line className="sb-perfchart__crosshair" x1={x(hover)} x2={x(hover)} y1={0} y2={height} vectorEffect="non-scaling-stroke" />}
+        </svg>
+        {target && (
+          <span className="sb-perfchart__target-label" style={{ top: y(target.value) }}>
+            {target.label}
+          </span>
+        )}
+        {hover !== null && hovered !== undefined && hovered !== null && <span className="sb-perfchart__dot" style={{ left: `${left}%`, top: y(hovered) }} />}
+        {hover !== null && hovered !== undefined && (
+          <span className="sb-perfchart__tip" data-side={left > 70 ? "left" : "right"} style={{ left: `${left}%` }}>
+            <strong className="sb-tabular">{hovered === null ? "Paused" : format(hovered)}</strong>
+            <span>{secondsAgo < 0.5 ? "now" : `${secondsAgo.toFixed(secondsAgo < 10 ? 1 : 0)}s ago`}</span>
+          </span>
+        )}
+      </div>
+      <div className="sb-perfchart__axis" aria-hidden>
+        <span>{Math.round((capacity * sampleMs) / 1000)} s ago</span>
+        <span>now</span>
+      </div>
     </div>
   );
 }
