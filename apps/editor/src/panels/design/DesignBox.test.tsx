@@ -104,7 +104,8 @@ const chip = () => container.querySelector(".sb-design-box__chip-label")?.textCo
 const statusText = () => container.querySelector('.sb-design-box [role="status"]')?.textContent;
 /** The status line as it shows, with its detail. */
 const statusShown = () => container.querySelector(".sb-design-box__status-body")?.textContent;
-const chipLabels = () => [...container.querySelectorAll(".sb-design-box__chips button")].map((b) => b.textContent);
+const chipLabels = () => [...container.querySelectorAll(".sb-design-box__status button, .sb-design-box__chips button")].map((b) => b.textContent);
+const followUpLabels = () => [...container.querySelectorAll('.sb-design-box [role="group"][aria-label="Next steps"] button')].map((b) => b.textContent);
 const buttonNamed = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name || b.getAttribute("aria-label") === name) ?? null;
 
 function click(target: Element | null) {
@@ -261,12 +262,15 @@ describe("DesignBox", () => {
     );
     await reply.end();
     // The new screen is in front of the demo's layers (none of them a screen), and it's selected for follow-ups.
-    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
+    expect(statusText()).toBe("Added “Checkout”. It covers “Main” in the viewer.");
     expect(session.selection.getState().layers).toEqual([screen.id]);
     expect(chip()).toBe("Change “Checkout”");
     expect(container.querySelector(".sb-design-box__reply")?.textContent).toBe("Added a checkout with Apple Pay and a promo code field.");
     expect(buttonNamed("Stop")).toBeNull();
     expect(chipLabels()).toEqual(["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]);
+    // Undo and Send to Back sit beside the status line, quietly; the follow-ups are their own group.
+    expect([...container.querySelectorAll(".sb-design-box__status button")].map((b) => [b.textContent, (b as HTMLElement).dataset.variant])).toEqual([["Undo", "ghost"], ["Send to Back", "ghost"]]);
+    expect(followUpLabels()).toEqual(["Make it interactive", "Add knobs", "Try a darker version"]);
 
     click(buttonNamed("Add knobs"));
     await settle();
@@ -292,7 +296,7 @@ describe("DesignBox", () => {
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
   });
 
-  it("asks before a replace with the confirmation's own labels, focused on keeping the person's work, and says it's waiting", async () => {
+  it("asks before a replace with the confirmation's own labels, leaves the person typing in the field, and says it's waiting", async () => {
     const fake = fakeAssistantHost({ key: KEY });
     const reply = heldReply(fake, "r1");
     await mount(fake);
@@ -318,7 +322,8 @@ describe("DesignBox", () => {
     expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Replace “Home”?");
     expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("Claude wants to rebuild “Home”, which you didn't ask it to change. You can undo it afterwards.");
     expect([...card.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Keep “Home”", "Replace"]);
-    expect(document.activeElement?.textContent).toBe("Keep “Home”");
+    // The person's focus is in the field: a card arriving mid-sentence doesn't take it, so a typed space can't answer it.
+    expect(document.activeElement).toBe(field());
     // Nothing is being added while the person decides.
     expect(statusText()).toBe("Waiting for your answer…");
     await act(async () => {
@@ -333,6 +338,20 @@ describe("DesignBox", () => {
     press("Escape", document.activeElement!);
     await settle();
     expect(host!.stops).toBe(1);
+    await reply.end();
+  });
+
+  it("focuses the safe button of a replace confirmation when the person isn't typing", async () => {
+    const fake = fakeAssistantHost({ key: KEY });
+    const reply = heldReply(fake, "r1");
+    await mount(fake);
+    type("a new home screen");
+    press("Enter");
+    const page = "<main data-name='Home'>Home</main>";
+    emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" }, { type: "design_draft", runId: "r1", turn: 1, toolUseId: "t1", offset: 0, append: page, fields: { name: "Home", replace: "home" }, done: true, html: page });
+    act(() => field().blur());
+    emit({ type: "confirm_required", runId: "r1", confirmationId: "c1", toolUseId: "t1", title: "Replace “Home”?", message: "Claude wants to rebuild “Home”.", count: 1, kind: "replace", approveLabel: "Replace", declineLabel: "Keep “Home”" });
+    expect(document.activeElement?.textContent).toBe("Keep “Home”");
     await reply.end();
   });
 
@@ -370,6 +389,36 @@ describe("DesignBox", () => {
     });
     expect(statusText()).toBe("“Checkout” isn't on the canvas anymore.");
     expect(container.querySelector(".sb-design-box__chips")).toBeNull();
+  });
+
+  it("keeps Enter on a button in the box, so the canvas's Enter doesn't also run", async () => {
+    await mount();
+    const screen = addScreen("Checkout");
+    showResult({ layerId: screen.id, txnId: screen.txnId });
+    const reached = vi.fn();
+    window.addEventListener("keydown", reached);
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    act(() => {
+      buttonNamed("Undo")!.dispatchEvent(event);
+    });
+    expect(reached).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    press("Enter", field());
+    expect(reached).toHaveBeenCalled();
+    window.removeEventListener("keydown", reached);
+  });
+
+  it("keeps the status row hidden when a send is held for a missing key, whatever the last result offers", async () => {
+    await mount(fakeAssistantHost({}));
+    const screen = addScreen("Checkout");
+    showResult({ layerId: screen.id, txnId: screen.txnId });
+    expect(container.querySelector(".sb-design-box__status")!.hasAttribute("data-empty")).toBe(false);
+    type("a checkout screen");
+    press("Enter");
+    const status = container.querySelector(".sb-design-box__status")!;
+    expect(status.hasAttribute("data-empty")).toBe(true);
+    expect(status.querySelectorAll("button")).toHaveLength(0);
+    expect(statusText()).toMatch(/^Nothing was sent\./);
   });
 
   it("keeps an undone redesign undone through the next edit, and the layer Undo brought back isn't Claude's", async () => {
@@ -421,12 +470,12 @@ describe("DesignBox", () => {
     await mount();
     const screen = addScreen("Checkout");
     showResult({ layerId: screen.id, txnId: screen.txnId });
-    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
+    expect(statusText()).toBe("Added “Checkout”. It covers “Main” in the viewer.");
     click(buttonNamed("Send to Back"));
     expect(session.selection.getState().layers).toEqual([screen.id]);
     expect(session.document.getState().doc.components.main!.layers[0]!.id).toBe(screen.id);
     expect(buttonNamed("Send to Back")).toBeNull();
-    expect(statusText()).toBe("Added “Checkout”. It's behind the other layers in “Main” now, so they cover it in the viewer.");
+    expect(statusText()).toBe("Added “Checkout”. It's behind the other layers, so they cover it in the viewer.");
     // It reads the document, so reopening the box doesn't bring the chip back.
     act(() => designStore.getState().closeBox());
     act(() => designStore.getState().openBox());
@@ -447,7 +496,7 @@ describe("DesignBox", () => {
     const screen = addScreen("Checkout");
     showResult({ layerId: screen.id, txnId: screen.txnId });
     expect(findLayer(session.document.getState().doc.components.main!.layers, home.id)).toBeDefined();
-    expect(statusText()).toBe("Added “Checkout”. It's in front of “Home”, so it covers it in the viewer too.");
+    expect(statusText()).toBe("Added “Checkout”. It covers “Home” in the viewer.");
   });
 
   it("keeps the other follow-ups after one that only wired the screen", async () => {
@@ -510,11 +559,11 @@ describe("DesignBox", () => {
     await mount(fake);
     const footer = () => [...container.querySelectorAll(".sb-design-box__footer button")].map((b) => b.textContent || b.getAttribute("aria-label"));
     // Before Return, plan users find it in the footer.
-    expect(footer()).toEqual(["Match my code…", "Open in Claude Code", "Open chat", "Close"]);
+    expect(footer()).toEqual(["Match my code…", "Open in Claude Code", "Open chat"]);
     type("a checkout screen");
     press("Enter");
     const notice = container.querySelector(".sb-design-box__notice")!;
-    expect(notice.textContent).toContain("Designing on the canvas uses your own Anthropic API key, kept in your keychain. With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes.");
+    expect(notice.querySelector("p")?.textContent).toBe("Designing on the canvas uses your own Anthropic API key, kept in your keychain.");
     expect([...notice.querySelectorAll("button")].map((b) => [b.textContent, b.dataset.variant])).toEqual([
       ["Open in Claude Code", "ai"],
       ["Add API key…", "secondary"],
@@ -650,7 +699,10 @@ describe("DesignBox", () => {
 
   it("in the browser, copies the browser prompt and offers Import Design", async () => {
     await mount(null);
-    expect(box()!.textContent).toContain("Claude designs on the canvas in the Sonobe desktop app, with your own API key or Claude Code. Here, copy a prompt for Claude, then paste the HTML it writes.");
+    expect(box()!.textContent).toContain("In the browser, copy a prompt for Claude, then paste the HTML it writes.");
+    // The target and Close share the first row; there is no footer.
+    expect(container.querySelector(".sb-design-box__footer")).toBeNull();
+    expect(container.querySelector(".sb-design-box__target button[aria-label='Close']")).not.toBeNull();
     expect(buttonNamed("Open chat")).toBeNull();
     expect(buttonNamed("Match my code…")).toBeNull();
     // The field's button copies too, and says so.
@@ -847,7 +899,7 @@ describe("DesignBox on the Claude subscription (experimental)", () => {
       { type: "text_delta", runId: "r1", turn: 2, delta: "Added a checkout screen with Apple Pay and a promo code." },
     );
     await reply.end();
-    expect(statusText()).toBe("Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.");
+    expect(statusText()).toBe("Added “Checkout”. It covers “Main” in the viewer.");
     expect(chipLabels()).toEqual(["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]);
   });
 

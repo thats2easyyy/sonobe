@@ -127,9 +127,9 @@ function doneLine(result: DesignResult, placement: ResultPlacement | undefined):
   if (placement?.state === "gone") return { text: `“${result.name}” isn't on the canvas anymore.`, tone: "info" };
   if (result.kind === "added") {
     const added = `Added “${result.name}”.`;
-    if (placement?.stack === "back") return { text: `${added} It's behind the other layers in “${placement.component}” now, so they cover it in the viewer.`, tone: "done" };
+    if (placement?.stack === "back") return { text: `${added} It's behind the other layers, so they cover it in the viewer.`, tone: "done" };
     if (placement?.stack !== "front") return { text: added, tone: "done" };
-    return { text: placement.covers ? `${added} It's in front of “${placement.covers}”, so it covers it in the viewer too.` : `${added} It's in front of the other layers in “${placement.component}”, so it covers them in the viewer too.`, tone: "done" };
+    return { text: `${added} It covers “${placement.covers ?? placement.component}” in the viewer.`, tone: "done" };
   }
   const n = result.droppedCount;
   if (n <= 0) return { text: `Updated “${result.name}”.`, tone: "done" };

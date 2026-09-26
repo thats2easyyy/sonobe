@@ -169,7 +169,7 @@ test.describe("Design with Claude", () => {
     expect((await hook(page, (s) => s.selection().layers)) as string[]).toEqual([added!.id]);
     await expect(box.getByText("Change “Profile”")).toBeVisible();
     // The demo's own layers (none of them a screen) are behind it, so the line says the new screen covers them, and Send to Back is offered.
-    await expect(statusLine(box, "Added “Profile”.")).toContainText("It's in front of the other layers in “Main”, so it covers them in the viewer too.");
+    await expect(statusLine(box, "Added “Profile”.")).toContainText("It covers “Main” in the viewer.");
     for (const chip of ["Undo", "Send to Back", "Make it interactive", "Add knobs", "Try a darker version"]) await expect(box.getByRole("button", { name: chip, exact: true }), chip).toBeVisible();
     await expect(box.getByText("Added a profile screen.")).toBeVisible();
     expect(await sawHologram(page)).toBe(false);
@@ -266,7 +266,6 @@ test.describe("Design with Claude", () => {
     await expect(designField(page)).toHaveValue("a profile screen");
     // With a Claude plan instead of a key, Open in Claude Code comes first.
     const notice = page.locator(".sb-design-box__notice");
-    await expect(notice).toContainText("With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes.");
     await expect(notice.getByRole("button")).toHaveText(["Open in Claude Code", "Add API key…", "Copy for Claude Code"]);
     await expect(preview(page)).toHaveCount(0);
     await screenshot(page, "design-03-no-key");
@@ -347,7 +346,7 @@ test.describe("Design with Claude", () => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await openEditor(page);
     await page.locator(".sb-cv__design").click();
-    await expect(page.getByText("Claude designs on the canvas in the Sonobe desktop app, with your own API key or Claude Code. Here, copy a prompt for Claude, then paste the HTML it writes.")).toBeVisible();
+    await expect(page.getByText("In the browser, copy a prompt for Claude, then paste the HTML it writes.")).toBeVisible();
     // The box may still take a description to put in the prompt.
     const field = designField(page);
     if (await field.isVisible()) await field.fill("a profile screen");

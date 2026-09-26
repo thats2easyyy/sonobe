@@ -121,9 +121,9 @@ describe("designStatusLine when the reply is done", () => {
     const at = (placement: Partial<ResultPlacement>) => line(design({ request: done(), result: result() }), idle(), 10_000, { ...here, ...placement });
     expect(line(design({ request: done(), result: result() }), idle())).toEqual({ text: "Added “Checkout”.", tone: "done" });
     expect(at({})).toEqual({ text: "Added “Checkout”.", tone: "done" });
-    expect(at({ stack: "front", covers: "Home" })).toEqual({ text: "Added “Checkout”. It's in front of “Home”, so it covers it in the viewer too.", tone: "done" });
-    expect(at({ stack: "front" })).toEqual({ text: "Added “Checkout”. It's in front of the other layers in “Main”, so it covers them in the viewer too.", tone: "done" });
-    expect(at({ stack: "back" })).toEqual({ text: "Added “Checkout”. It's behind the other layers in “Main” now, so they cover it in the viewer.", tone: "done" });
+    expect(at({ stack: "front", covers: "Home" })).toEqual({ text: "Added “Checkout”. It covers “Home” in the viewer.", tone: "done" });
+    expect(at({ stack: "front" })).toEqual({ text: "Added “Checkout”. It covers “Main” in the viewer.", tone: "done" });
+    expect(at({ stack: "back" })).toEqual({ text: "Added “Checkout”. It's behind the other layers, so they cover it in the viewer.", tone: "done" });
   });
 
   it("says when the result was undone or deleted, while the reply runs too", () => {

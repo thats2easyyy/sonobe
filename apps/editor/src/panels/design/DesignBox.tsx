@@ -20,6 +20,7 @@ import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
+import { detectPlatform, formatShortcutLabel } from "../../ui/commands/shortcutManager.ts";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import { observeResize } from "../../ui/lib/observeResize.ts";
@@ -148,13 +149,13 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const boxRun = runState === "running";
   const busy = runState === "busy";
   const now = Date.now();
-  // Where the result is now: the line and chips follow Undo (the chip, ⌘Z or History; attachDesign marks it), Send to Back and deletes.
+  // Where the result is now: the line and chips follow Undo (the chip or ⌘Z; attachDesign marks it), Send to Back and deletes.
   const placement = design.result ? resultPlacement(doc, design.result) : undefined;
   const subscription = provider === "subscription" ? assistant.status?.subscription : undefined;
   const noKeyText =
     provider === "subscription"
       ? (subscription?.message ?? "Claude isn't ready on this computer. Set it up in the Assistant.")
-      : `Designing on the canvas uses your own Anthropic API key, kept in your keychain.${controller.canOpenInClaudeCode ? " With a Claude plan, open it in Claude Code instead: it draws on this canvas as it writes." : ""}`;
+      : "Designing on the canvas uses your own Anthropic API key, kept in your keychain.";
   // A reply without an import (a question, or wiring patches) is the status line itself. Without a key, the
   // notice below shows why nothing was sent, and the (hidden) live region says so to screen readers.
   const line: DesignStatusLine | null = checking
@@ -170,6 +171,8 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   // The chips follow the box's own finished request; a result that's undone or gone has nothing left to follow up on.
   const result = design.result && placement?.state === "here" ? design.result : null;
   const chips = result ? designResultChips(design, topTxn, placement) : [];
+  const resultActions = chips.filter((chip) => !chip.message);
+  const followUps = chips.filter((chip) => chip.message);
   // An MCP client (Claude Code) drawing on the canvas: the person can take its preview off.
   const remote = liveMcpDraft(design, now);
   const codeFolder: AssistantCodeFolderStatus | undefined = assistant.status?.codeFolder;
@@ -301,7 +304,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   const undo = (r: DesignResult) => {
     if (!r.txnId) return;
     const undone = session.document.getState().undoTo(r.txnId);
-    if (!undone.ok) toast({ title: "Couldn't undo the import", description: "Something changed on top of it. Use Edit → Undo, or History, to step back.", tone: "warn" });
+    if (!undone.ok) toast({ title: "Couldn't undo the import", description: `Something changed on top of it. Press ${formatShortcutLabel("Mod+Z", detectPlatform())} to step back.`, tone: "warn" });
   };
 
   const sendToBack = (r: DesignResult) => {
@@ -333,12 +336,19 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    // Enter on a button presses it; the canvas's Enter (enter the group) must not also run.
+    if (event.key === "Enter" && (event.target as HTMLElement).closest("button, [role=button]")) {
+      event.stopPropagation();
+      return;
+    }
     if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
     event.preventDefault();
     event.stopPropagation();
     if (boxRun) void controller.stop();
     else close();
   };
+
+  const closeButton = <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={close} />;
 
   const codeTooltip = (status: AssistantCodeFolderStatus) => {
     const linked = status.linked!;
@@ -366,6 +376,15 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
             {ACTION_LABELS[line.action]}
           </Button>
         ) : null}
+        {line && result && resultActions.length ? (
+          <div className="sb-design-box__result-actions">
+            {resultActions.map((chip) => (
+              <Button key={chip.id} size="sm" variant="ghost" icon={CHIP_ICONS[chip.id]} onClick={() => runChip(chip, result)}>
+                {chip.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {remote ? (
@@ -382,13 +401,15 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         <>
           {/* After a follow-up that didn't import, the status line is that reply. */}
           {result.reply && design.request?.imported ? <p className="sb-design-box__reply">{result.reply}</p> : null}
-          <div className="sb-design-box__chips" role="group" aria-label="Next steps">
-            {chips.map((chip) => (
-              <Button key={chip.id} size="sm" variant={chip.message ? "ai" : undefined} icon={CHIP_ICONS[chip.id]} onClick={() => runChip(chip, result)}>
-                {chip.label}
-              </Button>
-            ))}
-          </div>
+          {followUps.length ? (
+            <div className="sb-design-box__chips" role="group" aria-label="Next steps">
+              {followUps.map((chip) => (
+                <Button key={chip.id} size="sm" onClick={() => runChip(chip, result)}>
+                  {chip.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -404,19 +425,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         />
       ))}
 
-      {!controller.available ? (
-        <div className="sb-design-box__notice">
-          <p id={noticeId}>Claude designs on the canvas in the Sonobe desktop app, with your own API key or Claude Code. Here, copy a prompt for Claude, then paste the HTML it writes.</p>
-          <div className="sb-design-box__actions">
-            <Button size="sm" variant="ai" icon={<Copy size={13} />} onClick={() => void copyPrompt(true)}>
-              Copy prompt
-            </Button>
-            <Button size="sm" icon={<ScanLine size={13} />} onClick={() => appPanels.getState().show("importDesign")}>
-              Import Design…
-            </Button>
-          </div>
-        </div>
-      ) : noKey && provider === "subscription" ? (
+      {noKey && provider === "subscription" ? (
         <div className="sb-design-box__notice">
           <p id={noticeId}>{noKeyText}</p>
           <div className="sb-design-box__actions">
@@ -461,6 +470,7 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
           <span className="sb-design-box__chip-label">{copy.chip}</span>
           {target ? <IconButton size="xs" icon={<X size={11} />} label="Design a new screen instead" className="sb-design-box__chip-clear" onClick={() => designStore.getState().setNewScreen(true)} /> : null}
         </span>
+        {closeButton}
       </div>
 
       <Composer
@@ -479,42 +489,54 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
         usageThreshold={0.5}
       />
 
-      <footer className="sb-design-box__footer">
-        {controller.available && codeFolder ? (
-          codeFolder.linked ? (
-            <>
-              <span className="sb-design-box__code" data-missing={codeFolder.missing || undefined}>
-                <Tooltip content={<span className="sb-design-box__tooltip">{codeTooltip(codeFolder)}</span>}>
-                  <span className="sb-design-box__code-label" tabIndex={0}>
-                    <FolderCode size={12} aria-hidden />
-                    Code: {codeFolder.linked.name}
-                    {codeFolder.missing ? " (missing)" : ""}
-                  </span>
-                </Tooltip>
-                <IconButton size="xs" icon={<X size={11} />} label="Unlink code folder" onClick={() => void unlinkCodeFolder()} />
-              </span>
-              {codeFolder.missing ? (
-                <Button size="sm" variant="ghost" onClick={() => void linkCodeFolder()}>
-                  Link again…
-                </Button>
-              ) : null}
-            </>
-          ) : (
-            <Button size="sm" variant="ghost" icon={<FolderCode size={13} />} onClick={() => void linkCodeFolder()}>
-              Match my code…
-            </Button>
-          )
-        ) : null}
-        <span className="sb-design-box__spacer" />
-        {/* The no-key notice offers it first; otherwise it's here, for plan users with or without a key. */}
-        {controller.canOpenInClaudeCode && !noKey ? openButton("ghost") : null}
-        {controller.available ? (
+      {controller.available ? (
+        <footer className="sb-design-box__footer">
+          {codeFolder ? (
+            codeFolder.linked ? (
+              <>
+                <span className="sb-design-box__code" data-missing={codeFolder.missing || undefined}>
+                  <Tooltip content={<span className="sb-design-box__tooltip">{codeTooltip(codeFolder)}</span>}>
+                    <span className="sb-design-box__code-label" tabIndex={0}>
+                      <FolderCode size={12} aria-hidden />
+                      Code: {codeFolder.linked.name}
+                      {codeFolder.missing ? " (missing)" : ""}
+                    </span>
+                  </Tooltip>
+                  <IconButton size="xs" icon={<X size={11} />} label="Unlink code folder" onClick={() => void unlinkCodeFolder()} />
+                </span>
+                {codeFolder.missing ? (
+                  <Button size="sm" variant="ghost" onClick={() => void linkCodeFolder()}>
+                    Link again…
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" icon={<FolderCode size={13} />} onClick={() => void linkCodeFolder()}>
+                Match my code…
+              </Button>
+            )
+          ) : null}
+          <span className="sb-design-box__spacer" />
+          {/* The no-key notice offers it first; otherwise it's here, for plan users with or without a key. */}
+          {controller.canOpenInClaudeCode && !noKey ? openButton("ghost") : null}
           <Button size="sm" variant="ghost" icon={<MessageSquare size={13} />} onClick={() => assistantStore.getState().show()}>
             Open chat
           </Button>
-        ) : null}
-        <IconButton size="sm" icon={<X size={14} />} label="Close" shortcut="Escape" onClick={close} />
-      </footer>
+        </footer>
+      ) : (
+        <div className="sb-design-box__notice">
+          <p id={noticeId}>In the browser, copy a prompt for Claude, then paste the HTML it writes.</p>
+          <div className="sb-design-box__actions">
+            <Button size="sm" icon={<Copy size={13} />} onClick={() => void copyPrompt(true)}>
+              Copy prompt
+            </Button>
+            <Button size="sm" icon={<ScanLine size={13} />} onClick={() => appPanels.getState().show("importDesign")}>
+              Import Design…
+            </Button>
+          </div>
+        </div>
+      )}
+
       {codeError ? (
         <p className="sb-design-box__code-error" role="alert">
           {codeError}

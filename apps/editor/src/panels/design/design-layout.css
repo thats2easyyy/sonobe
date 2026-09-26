@@ -21,7 +21,7 @@
 
 .sb-panel__body > .sb-design-box > .sb-design-box__reply {
   flex-shrink: 1;
-  min-height: 3em;
+  min-height: 1.5em;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
