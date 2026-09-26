@@ -19,14 +19,14 @@ import {
   type ValueType,
   type VariableInfo,
 } from "@sonobe/core";
-import { ArrowRight, BookOpen, Copy, Ellipsis, Minus, Plus, Radio, ScanSearch, Shapes, TriangleAlert } from "lucide-react";
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { ArrowRight, Copy, Ellipsis, Minus, Plus, Radio, ScanSearch, RouteOff, Shapes, TriangleAlert } from "lucide-react";
+import { useId, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { CATEGORY_ICONS } from "../../shell/icons.tsx";
 import { revealBroadcaster } from "../../state/editActions.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { isPatchImplemented } from "../../state/registry.ts";
 import { currentComponentId } from "../../state/selection.ts";
-import { CATEGORY_LABELS, categoryColorVar } from "../../theme/tokens.ts";
+import { CATEGORY_LABELS, categoryColorVar, portColorVar } from "../../theme/tokens.ts";
 import { Badge } from "../../ui/Badge.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
@@ -35,16 +35,15 @@ import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { toast } from "../../ui/Toast.tsx";
-import { Toggle } from "../../ui/Toggle.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { ValueControl, type FieldActions } from "./controls.tsx";
 import { DocsText } from "./DocsText.tsx";
 import { FieldRow, LiveValue } from "./FieldRow.tsx";
 import { InspectorHeader } from "./Header.tsx";
-import { intersectFields, patchSources, sameInputValue, splitAdvanced, subjectLabel, summarizeField, type FieldPort, type InspectorField } from "./model.ts";
+import { changedCount, intersectFields, patchSources, sameInputValue, splitAdvanced, subjectLabel, summarizeField, type FieldPort, type InspectorField } from "./model.ts";
 import { planPortChange, type LostCable, type PortChangePlan } from "./portChange.ts";
 import { InspectorSection } from "./Section.tsx";
-import { isSpringPatch } from "./spring.ts";
+import { isSpringPatch, SPRING_INPUTS } from "./spring.ts";
 import { SpringSection } from "./SpringSection.tsx";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
@@ -158,14 +157,14 @@ export function PortChangeCard({ pending, onConfirm, onCancel }: { pending: Pend
       )}
       <div className="sb-insp-conflict__actions">
         {converters > 0 && (
-          <Button size="sm" variant="primary" autoFocus onClick={() => onConfirm(true)}>
+          <Button size="sm" variant="primary" autoFocus fullWidth className="sb-insp-conflict__primary" onClick={() => onConfirm(true)}>
             {converters === 1 && firstConverter ? `Insert ${firstConverter.patchName}` : `Insert ${converters} Converters`}
           </Button>
         )}
-        <Button size="sm" variant={converters > 0 ? "secondary" : "primary"} autoFocus={converters === 0} onClick={() => onConfirm(false)}>
+        <Button size="sm" variant={converters > 0 ? "secondary" : "primary"} autoFocus={converters === 0} fullWidth onClick={() => onConfirm(false)}>
           {pending.kind === "type" ? "Change Anyway" : "Remove Anyway"}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="ghost" fullWidth onClick={onCancel}>
           Cancel
         </Button>
       </div>
@@ -276,7 +275,10 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
   const updateAll = (build: (e: Entry) => Op | undefined, label: string) => edit.apply(entries.flatMap((e) => build(e) ?? []), label);
   const CategoryIcon = CATEGORY_ICONS[spec.category];
   const implemented = spec.type === "component" || isPatchImplemented(registry, spec.type);
-  const { primary, more } = splitAdvanced(fields);
+  const springKeys: ReadonlySet<string> = single && isSpringPatch(single.node.type) ? new Set(SPRING_INPUTS[single.node.type]) : new Set();
+  const springFields = fields.filter((f) => springKeys.has(f.key));
+  const inputFields = fields.filter((f) => !springKeys.has(f.key));
+  const { primary, more } = splitAdvanced(inputFields);
   const renderRow = (field: InspectorField) => <FieldRow key={field.key} field={field} subject={subject} {...(single && field.link ? { liveAddress: field.link } : {})} />;
   /** A broadcaster's name is its variable's name; a receiver shows the variable it reads (chosen under Options). */
   const variableKind = single?.node.type === VARIABLE_BROADCASTER_TYPE ? "broadcaster" : single?.node.type === VARIABLE_RECEIVER_TYPE ? "receiver" : null;
@@ -388,45 +390,65 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
             }
           : {})}
         subtitle={
-          single ? (
-            <>
-              {CATEGORY_LABELS[spec.category]} · {spec.name}
-              {single.ports.typeParam ? ` (${VALUE_TYPE_LABELS[single.ports.typeParam]})` : ""} · <span className="sb-mono">{single.id}</span>
-            </>
-          ) : sameType ? (
-            `${spec.name} · ${entries.map((e) => e.id).join(", ")}`
-          ) : (
-            [...new Set(entries.map((e) => e.ports.spec.name))].join(", ")
-          )
+          single && CATEGORY_LABELS[spec.category] !== spec.name
+            ? `${CATEGORY_LABELS[spec.category]} · ${spec.name}`
+            : sameType
+              ? spec.name
+              : [...new Set(entries.map((e) => e.ports.spec.name))].join(", ")
         }
+        {...(single ? { subtitleTooltip: `Id: ${single.id}` } : {})}
+        {...(sameType
+          ? {
+              subtitleAction: (
+                <button type="button" className="sb-insp-link" aria-expanded={onLearnMore ? undefined : docsOpen} onClick={() => (onLearnMore ? onLearnMore(spec.type) : setDocsOpen((o) => !o))}>
+                  {docsOpen && !onLearnMore ? "Hide Details" : "Learn More"}
+                </button>
+              ),
+            }
+          : {})}
         actions={
-          <Menu aria-label="Patch options" placement="bottom-end" entries={overflow}>
-            <IconButton size="sm" icon={<Ellipsis size={14} />} label="Patch options" />
-          </Menu>
+          <>
+            {single && (
+              <Tooltip content="Matching inputs pass straight through to the outputs." placement="bottom">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<RouteOff size={13} />}
+                  className="sb-insp-bypass"
+                  aria-pressed={!!single.node.muted}
+                  onClick={() => edit.apply([{ op: "updatePatch", component: componentId, id: single.id, muted: !single.node.muted }], `${single.node.muted ? "Unbypass" : "Bypass"} ${subject}`)}
+                >
+                  Bypass
+                </Button>
+              </Tooltip>
+            )}
+            <Menu aria-label="Patch options" placement="bottom-end" entries={overflow}>
+              <IconButton size="sm" icon={<Ellipsis size={14} />} label="Patch options" />
+            </Menu>
+          </>
         }
       >
         {sameType && (
           <div className="sb-insp-patchdocs">
             <p className="sb-insp-summary">{spec.summary}</p>
-            <div className="sb-insp-patchdocs__actions">
-              <Button size="sm" variant="ghost" icon={<BookOpen size={13} />} aria-expanded={onLearnMore ? undefined : docsOpen} onClick={() => (onLearnMore ? onLearnMore(spec.type) : setDocsOpen((o) => !o))}>
-                {docsOpen && !onLearnMore ? "Hide Details" : "Learn More"}
-              </Button>
-              {!implemented && (
-                <Tooltip content="This patch isn't simulated yet, so the viewer uses default output values for it.">
-                  <Badge size="sm" tone="warn" tabIndex={0}>
-                    Preview only
-                  </Badge>
-                </Tooltip>
-              )}
-              {spec.status && spec.status !== "supported" && (
-                <Tooltip content={spec.statusReason ?? "Limited on some platforms."}>
-                  <Badge size="sm" tone="info" tabIndex={0}>
-                    {spec.status === "web-limited" ? "Limited on web" : "Desktop and mobile only"}
-                  </Badge>
-                </Tooltip>
-              )}
-            </div>
+            {(!implemented || (spec.status && spec.status !== "supported")) && (
+              <div className="sb-insp-patchdocs__actions">
+                {!implemented && (
+                  <Tooltip content="This patch isn't simulated yet, so the viewer uses default output values for it.">
+                    <Badge size="sm" tone="warn" tabIndex={0}>
+                      Preview only
+                    </Badge>
+                  </Tooltip>
+                )}
+                {spec.status && spec.status !== "supported" && (
+                  <Tooltip content={spec.statusReason ?? "Limited on some platforms."}>
+                    <Badge size="sm" tone="info" tabIndex={0}>
+                      {spec.status === "web-limited" ? "Limited on web" : "Desktop and mobile only"}
+                    </Badge>
+                  </Tooltip>
+                )}
+              </div>
+            )}
             {docsOpen && !onLearnMore && (
               <div className="sb-insp-patchdocs__body">
                 {spec.docs ? <DocsText markdown={spec.docs} /> : <p className="sb-insp-note">No extra details for this patch yet.</p>}
@@ -454,7 +476,7 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
         )}
       </InspectorHeader>
 
-      {(hasOptions || single) && (
+      {hasOptions && (
         <InspectorSection id="patch.options" title="Options">
           {sameType && spec.variants?.length ? (
             <>
@@ -527,29 +549,32 @@ export function PatchInspector({ patchIds, onLearnMore }: PatchInspectorProps) {
                 </OptionRow>
               );
             })}
-          {single && (
-            <OptionRow label="Bypass" description="Mute the patch: matching inputs pass straight through to its outputs.">
-              <Toggle size="sm" aria-label="Bypass" checked={!!single.node.muted} onChange={(muted) => edit.apply([{ op: "updatePatch", component: componentId, id: single.id, muted }], `${muted ? "Bypass" : "Unbypass"} ${subject}`)} />
-            </OptionRow>
-          )}
         </InspectorSection>
       )}
 
-      {single && isSpringPatch(single.node.type) && <SpringSection patchId={single.id} node={single.node} spec={spec} subject={subject} />}
+      {single && isSpringPatch(single.node.type) && (
+        <SpringSection patchId={single.id} node={single.node} spec={spec} subject={subject}>
+          {springFields.map(renderRow)}
+        </SpringSection>
+      )}
 
-      <InspectorSection id="patch.inputs" title="Inputs" moreCount={more.length} more={more.map(renderRow)}>
-        {fields.length === 0 ? <p className="sb-insp-note">{entries.length > 1 && !sameType ? "These patches don't share any inputs." : "This patch has no inputs to set."}</p> : primary.map(renderRow)}
-      </InspectorSection>
+      {(inputFields.length > 0 || springFields.length === 0) && (
+        <InspectorSection id="patch.inputs" title="Inputs" changed={changedCount(inputFields)} moreCount={more.length} moreNames={more.map((f) => f.port.name)} more={more.map(renderRow)}>
+          {fields.length === 0 ? <p className="sb-insp-note">{entries.length > 1 && !sameType ? "These patches don't share any inputs." : "This patch has no inputs to set."}</p> : primary.map(renderRow)}
+        </InspectorSection>
+      )}
 
       {single && single.ports.outputs.length > 0 && (
         <InspectorSection id="patch.outputs" title="Outputs">
           <ul className="sb-insp-outputs">
             {single.ports.outputs.map((port) => (
               <li key={port.key} className="sb-insp-output">
-                <PortGlyph type={port.type} size={8} />
-                <Tooltip content={port.description} placement="left" delay={700}>
-                  <span className="sb-insp-output__name">{port.name}</span>
-                </Tooltip>
+                <span className="sb-insp-output__label">
+                  <PortGlyph type={port.type} size={8} style={{ "--sb-glyph-type": portColorVar(port.type), "--sb-port-color": "var(--sb-glyph-now)" } as CSSProperties} />
+                  <Tooltip content={port.description} placement="left" delay={700}>
+                    <span className="sb-insp-output__name">{port.name}</span>
+                  </Tooltip>
+                </span>
                 <LiveValue address={`${single.id}.${port.key}`} type={port.type} />
               </li>
             ))}

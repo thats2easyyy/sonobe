@@ -6,7 +6,7 @@
 
 import { findLayer, getKnob, type Id, type ValueType } from "@sonobe/core";
 import { Cable, Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
@@ -93,6 +93,24 @@ export interface FieldRowProps {
   cable?: FieldRowCable;
 }
 
+/** A number field that doesn't fit its text, in full ("Position X: -1234.567"), or null. */
+function clippedNumber(target: EventTarget): string | null {
+  const input = target instanceof HTMLInputElement ? target : null;
+  if (!input?.classList.contains("sb-scrub__input") || input.scrollWidth <= input.clientWidth) return null;
+  return `${input.getAttribute("aria-label") ?? "Value"}: ${input.value}`;
+}
+
+/** The address ends in the property, so a long source name elides before it, not after. */
+function ChipText({ text }: { text: string }) {
+  const split = text.lastIndexOf(".");
+  return (
+    <span className="sb-insp-chip__text sb-mono">
+      <span className="sb-insp-chip__head">{split > 0 ? text.slice(0, split) : text}</span>
+      {split > 0 && <span className="sb-insp-chip__tail">{text.slice(split)}</span>}
+    </span>
+  );
+}
+
 const chipText = (link: string) => (link.startsWith("$in.") ? link.slice(1) : link);
 
 export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, cable }: FieldRowProps) {
@@ -102,6 +120,8 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
   const actions = useFieldActions(field, subject);
   const { importing, importFile } = useAssetFieldImport(field, actions);
   const [fileOver, setFileOver] = useState(false);
+  const [nameClipped, setNameClipped] = useState(false);
+  const [clippedValue, setClippedValue] = useState<string | null>(null);
   const linked = field.linkedCount > 0;
   const kind = controlKind(field);
   // A knob-driven field shows the knob's chip and control under the label.
@@ -125,6 +145,11 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
 
   const reveal = () => {
     if (source?.id) session.selection.getState().requestReveal(componentId, [source.id]);
+  };
+
+  const reset = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0) rowRef.current?.querySelector<HTMLElement>(".sb-insp-row__control :is(input, select, textarea, button, [tabindex='0']):not(:disabled)")?.focus();
+    actions.reset();
   };
 
   const driveWithPatch = () => {
@@ -231,43 +256,61 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
         onPointerEnter={() => setHovered(true, "row")}
         onPointerLeave={() => setHovered(false, "row")}
       >
-        <Tooltip content={field.port.description} placement="left" delay={700}>
-          <span className="sb-insp-row__label">
-            <span className="sb-insp-row__name">{name}</span>
-            {field.isSet && !linked && <span className="sb-insp-row__dot" aria-label="Changed from default" />}
-          </span>
-        </Tooltip>
-        <div className="sb-insp-row__control">
-          {knobId !== undefined ? (
-            <KnobField field={field} knobId={knobId} label={name} />
-          ) : linked ? (
-            <div className="sb-insp-linked">
-              <Tooltip content={field.link ? `Driven by ${sourceName ?? chipText(field.link)}. Click to show it in the patch editor.` : `${field.linkedCount} of ${field.targets.length} selected are connected to patches.`}>
-                <button
-                  type="button"
-                  className="sb-insp-chip"
-                  disabled={!source?.id}
-                  onClick={reveal}
-                  onPointerEnter={() => setHovered(true, "source")}
-                  onPointerLeave={() => setHovered(true, "row")}
-                >
-                  <Link2 size={11} strokeWidth={2} aria-hidden />
-                  <span className="sb-insp-chip__text sb-mono">{field.link ? `← ${chipText(field.link)}` : "Mixed connections"}</span>
-                </button>
-              </Tooltip>
-              {field.link && liveAddress && <LiveValue address={liveAddress} type={field.type} {...(field.port.subtype === "count" ? { copies: true } : {})} />}
-              <IconButton size="xs" icon={<Link2Off size={12} />} label={`Disconnect ${name}`} tooltip="Disconnect" className="sb-insp-linked__unlink" onClick={actions.disconnect} />
-            </div>
-          ) : (
-            <ValueControl field={field} actions={actions} label={name} {...(excludeLayers ? { excludeLayers } : {})} />
+        <span className="sb-insp-row__label">
+          <Tooltip content={nameClipped ? `${name}. ${field.port.description}` : field.port.description} placement="left" delay={nameClipped ? 400 : 700}>
+            <span className="sb-insp-row__name" onPointerEnter={(event) => setNameClipped(event.currentTarget.scrollWidth > event.currentTarget.clientWidth)}>
+              {name}
+            </span>
+          </Tooltip>
+          {field.isSet && !linked && (
+            <Tooltip content="Reset to default" placement="top">
+              <button type="button" className="sb-insp-row__dot" aria-label={`Reset ${name} to default`} onClick={reset}>
+                <RotateCcw size={12} strokeWidth={1.75} aria-hidden />
+              </button>
+            </Tooltip>
           )}
-        </div>
+        </span>
+        <Tooltip content={clippedValue} placement="top" delay={600}>
+          <div
+            className="sb-insp-row__control"
+            onPointerOver={(event) => setClippedValue(clippedNumber(event.target))}
+            onPointerLeave={() => setClippedValue(null)}
+            onFocus={(event) => setClippedValue(clippedNumber(event.target))}
+            onBlur={() => setClippedValue(null)}
+          >
+            {knobId !== undefined ? (
+              <KnobField field={field} knobId={knobId} label={name} />
+            ) : linked ? (
+              <div className="sb-insp-linked" data-live={(field.link && liveAddress) || undefined}>
+                <Tooltip content={field.link ? `Driven by ${sourceName ?? chipText(field.link)}. Click to show it in the patch editor.` : `${field.linkedCount} of ${field.targets.length} selected are connected to patches.`}>
+                  <button
+                    type="button"
+                    className="sb-insp-chip"
+                    disabled={!source?.id}
+                    onClick={reveal}
+                    onPointerEnter={() => setHovered(true, "source")}
+                    onPointerLeave={() => setHovered(true, "row")}
+                  >
+                    <Link2 size={11} strokeWidth={2} aria-hidden />
+                    <ChipText text={field.link ? `← ${chipText(field.link)}` : "Mixed connections"} />
+                  </button>
+                </Tooltip>
+                <div className="sb-insp-linked__meta">
+                  {field.link && liveAddress && <LiveValue address={liveAddress} type={field.type} {...(field.port.subtype === "count" ? { copies: true } : {})} />}
+                  <IconButton size="xs" icon={<Link2Off size={12} />} label={`Disconnect ${name}`} tooltip="Disconnect" className="sb-insp-linked__unlink" onClick={actions.disconnect} />
+                </div>
+              </div>
+            ) : (
+              <ValueControl field={field} actions={actions} label={name} {...(excludeLayers ? { excludeLayers } : {})} />
+            )}
+          </div>
+        </Tooltip>
         {drive !== undefined && (
           <span className="sb-insp-row__port">
             {drive && (
-              <Tooltip content={linked ? `Driven by ${driver}. ${knobId !== undefined ? "Click to drive it with a patch instead." : "Click to choose another."}` : "Drive with a patch…"} placement="left" delay={400}>
+              <Tooltip content={linked ? `Driven by ${driver}. ${knobId !== undefined ? "Click to drive it with a patch instead." : "Click to choose another."}` : "Drive with a patch…"} placement="left" delay={150}>
                 <button type="button" className="sb-insp-port" aria-label={linked ? `Change what drives ${name}` : `Drive ${name} with a patch`} data-linked={linked || undefined} onClick={driveWithPatch}>
-                  <PortGlyph type={field.type} size={8} />
+                  <PortGlyph type={field.type} size={8} {...(linked ? { style: { "--sb-port-color": "var(--accent)" } as CSSProperties } : {})} />
                 </button>
               </Tooltip>
             )}

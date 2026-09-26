@@ -178,6 +178,16 @@ export function layerSections(fields: readonly InspectorField[]): InspectorSecti
   return sections;
 }
 
+const OPEN_SECTIONS: ReadonlySet<string> = new Set(["component", "basics", "content", "text", "fill"]);
+
+/** Rows changed from their default or driven by a patch. */
+export const changedCount = (fields: readonly InspectorField[]): number => fields.filter((f) => f.isSet || f.linkedCount > 0).length;
+
+/** A layer section starts open when it holds the main properties, a layout choice, or anything set or driven. */
+export function sectionStartsOpen(section: InspectorSection): boolean {
+  return OPEN_SECTIONS.has(section.id) || section.fields.some((f) => f.key === "layout") || changedCount(section.fields) > 0;
+}
+
 /** Fields shown before "More": everything that isn't advanced, plus advanced fields someone has set. */
 export function splitAdvanced(fields: readonly InspectorField[]): { primary: InspectorField[]; more: InspectorField[] } {
   const primary: InspectorField[] = [];
@@ -237,6 +247,9 @@ export function updateVectorComponent(index: number, value: number, delta: numbe
     return next;
   };
 }
+
+/** "1 layer", "3 layers". */
+export const countLabel = (count: number, singular: string, plural = `${singular}s`): string => `${count} ${count === 1 ? singular : plural}`;
 
 /** "Event Card", or "3 layers". */
 export function subjectLabel(names: readonly string[], noun: "layer" | "patch"): string {

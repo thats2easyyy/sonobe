@@ -1,6 +1,7 @@
 /** The inspector's item header: icon, an editable name, a subtitle, actions, and optional detail below. */
 
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 
 export interface InspectorHeaderProps {
   icon: ReactNode;
@@ -12,24 +13,35 @@ export interface InspectorHeaderProps {
   /** Allow an empty name (patches fall back to their type name). */
   allowEmpty?: boolean;
   subtitle?: ReactNode;
-  /** Accent color (CSS value) for the icon tile and top edge, e.g. a patch category color. */
+  /** Shown when the pointer rests on the subtitle (the item's id). */
+  subtitleTooltip?: string;
+  /** Sits after the subtitle ("Learn More"). */
+  subtitleAction?: ReactNode;
+  /** Accent color (CSS value) for the icon tile, e.g. a patch category color. */
   accent?: string;
   actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty = false, subtitle, accent, actions, children }: InspectorHeaderProps) {
+export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty = false, subtitle, subtitleTooltip, subtitleAction, accent, actions, children }: InspectorHeaderProps) {
   return (
     <div className="sb-insp-header" data-accent={accent ? "" : undefined} style={accent ? ({ "--sb-insp-accent": accent } as CSSProperties) : undefined}>
       <div className="sb-insp-header__main">
         <span className="sb-insp-header__icon" aria-hidden>
           {icon}
         </span>
-        <div className="sb-insp-header__text">
-          {onRename ? <NameInput value={name} placeholder={placeholder} allowEmpty={allowEmpty} onRename={onRename} /> : <div className="sb-insp-header__name">{name || placeholder}</div>}
-          {subtitle && <div className="sb-insp-header__subtitle">{subtitle}</div>}
-        </div>
+        {onRename ? <NameInput value={name} placeholder={placeholder} allowEmpty={allowEmpty} onRename={onRename} /> : <div className="sb-insp-header__name">{name || placeholder}</div>}
         {actions && <div className="sb-insp-header__actions">{actions}</div>}
+        {(subtitle || subtitleAction) && (
+          <div className="sb-insp-header__meta">
+            {subtitle && (
+              <Tooltip content={subtitleTooltip} placement="bottom-start">
+                <div className="sb-insp-header__subtitle">{subtitle}</div>
+              </Tooltip>
+            )}
+            {subtitleAction}
+          </div>
+        )}
       </div>
       {children}
     </div>

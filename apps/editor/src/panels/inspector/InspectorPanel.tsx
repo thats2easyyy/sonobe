@@ -1,12 +1,11 @@
 import { allLayers, isJsonLiteral, zeroLiteral, type Component as SonobeComponent, type InputValue, type InterfacePort, type Op } from "@sonobe/core";
-import { Component, MousePointerClick, PanelRightClose, StickyNote, X } from "lucide-react";
+import { Component, PanelRightClose, X } from "lucide-react";
 import { useState } from "react";
 import { KnobsPanel } from "../knobs/KnobsPanel.tsx";
 import { unpublishOps, updatePublishedOps, type PublishSide } from "../patch-editor/model/publish.ts";
 import { layoutStore, useLayout, type InspectorTab } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
 import { useCurrentComponent, useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
-import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -14,9 +13,11 @@ import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
 import { TextArea, TextField } from "../../ui/TextField.tsx";
 import { cx } from "../../ui/lib/cx.ts";
 import { ValueControl, type FieldActions } from "./controls.tsx";
+import { InspectorHeader } from "./Header.tsx";
 import { LayerInspector } from "./LayerInspector.tsx";
-import { sameInputValue, summarizeField, type FieldPort } from "./model.ts";
+import { countLabel, sameInputValue, summarizeField, type FieldPort } from "./model.ts";
 import { PatchInspector } from "./PatchInspector.tsx";
+import { InspectorSection } from "./Section.tsx";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 import "./Inspector.css";
 
@@ -116,32 +117,16 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
     edit.apply([op], next ? `Edit notes on ${component.name}` : `Clear notes on ${component.name}`);
   };
   return (
-    <div className="sb-insp-empty">
-      <EmptyState
-        icon={commentCount ? <StickyNote size={18} /> : <MousePointerClick size={18} />}
-        title={commentCount ? "A comment is selected" : "Nothing selected"}
-        description={
-          commentCount
-            ? "Edit the comment's text right in the patch editor."
-            : "Select a layer or a patch to see its properties here. Drag a number's field to scrub it; hold Shift for bigger steps."
-        }
-      />
+    <>
       {component && (
-        <div className="sb-insp-card sb-insp-component">
-          <div className="sb-insp-component__head">
-            <span className="sb-insp-card__icon" aria-hidden>
-              <Component size={14} strokeWidth={1.75} />
-            </span>
-            <div className="sb-insp-card__text">
-              <div className="sb-insp-card__title">{component.name}</div>
-              <div className="sb-insp-card__meta">
-                {KIND_LABELS[component.kind]} · {allLayers(component.layers).length} layers · {Object.keys(component.patches).length} patches
-                {component.size ? ` · ${component.size[0]}×${component.size[1]}` : ""}
-              </div>
-            </div>
-          </div>
-          <label className="sb-insp-component__notes">
-            <span className="sb-insp-component__label">Notes</span>
+        <>
+          <InspectorHeader
+            icon={<Component size={15} strokeWidth={1.75} />}
+            name={component.name}
+            subtitle={`${KIND_LABELS[component.kind]} · ${countLabel(allLayers(component.layers).length, "layer")} · ${countLabel(Object.keys(component.patches).length, "patch", "patches")}`}
+            {...(component.size ? { subtitleTooltip: `Size ${component.size[0]}×${component.size[1]}` } : {})}
+          />
+          <InspectorSection id="empty.notes" title="Notes">
             <TextArea
               aria-label="Component notes"
               rows={3}
@@ -152,11 +137,12 @@ function EmptyInspector({ commentCount }: { commentCount: number }) {
               onBlur={commitNotes}
               onCommit={commitNotes}
             />
-          </label>
-        </div>
+          </InspectorSection>
+        </>
       )}
+      <p className="sb-insp-tip">{commentCount ? "A comment is selected. Edit its text in the patch editor." : "Nothing selected. Drag any number to scrub it; hold Shift for ×10."}</p>
       {component && component.kind !== "prototype" && <PublishedPorts component={component} />}
-    </div>
+    </>
   );
 }
 

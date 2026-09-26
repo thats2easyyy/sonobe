@@ -7,10 +7,11 @@ import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
-import { Button } from "../../ui/Button.tsx";
+import { Button, type ButtonProps } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { propHoverKey, useCableHover } from "../layers/cableHover.ts";
 import { relatedPatchIds } from "../layers/layerTree.ts";
 import { touchMenuEntries } from "../layers/touchActions.tsx";
@@ -19,12 +20,23 @@ import { assetKindsFor, importAssetForField } from "./assetImport.ts";
 import { controlKind } from "./controls.tsx";
 import { FieldRow, type FieldRowCable } from "./FieldRow.tsx";
 import { InspectorHeader } from "./Header.tsx";
-import { editLabel, intersectFields, layerSections, layerSources, planFieldSet, splitAdvanced, subjectLabel, type InspectorField } from "./model.ts";
+import { changedCount, editLabel, intersectFields, layerSections, layerSources, planFieldSet, sectionStartsOpen, splitAdvanced, subjectLabel, type InspectorField } from "./model.ts";
 import { InspectorSection } from "./Section.tsx";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
 export interface LayerInspectorProps {
   layerIds: readonly Id[];
+}
+
+/** The Touch menu's trigger: a Menu hands its trigger a ref and handlers, so the tooltip lives inside. */
+function TouchButton(props: ButtonProps) {
+  return (
+    <Tooltip content="Add an interaction. Or hover a row and click its dot to drive it." placement="bottom">
+      <Button size="sm" variant="ghost" icon={<Pointer size={13} />} {...props}>
+        Touch
+      </Button>
+    </Tooltip>
+  );
 }
 
 export function LayerInspector({ layerIds }: LayerInspectorProps) {
@@ -144,22 +156,13 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
         icon={single ? <LayerTypeIcon type={single.type} size={15} /> : <Layers size={15} strokeWidth={1.75} />}
         name={single ? single.name : `${layers.length} layers`}
         {...(single ? { onRename: (name: string) => edit.apply([{ op: "rename", component: componentId, id: single.id, name }], `Rename ${single.name} to ${name}`) } : {})}
-        subtitle={
-          single ? (
-            <>
-              {spec?.name ?? single.type} · <span className="sb-mono">{single.id}</span>
-            </>
-          ) : (
-            typeNames.join(", ")
-          )
-        }
+        subtitle={single ? (spec?.name ?? single.type) : typeNames.join(", ")}
+        {...(single ? { subtitleTooltip: `Id: ${single.id}` } : {})}
         actions={
           <>
             {single && (
               <Menu aria-label={`Add an interaction to ${single.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, single.id)}>
-                <Button size="sm" variant="secondary" icon={<Pointer size={13} />}>
-                  Touch
-                </Button>
+                <TouchButton />
               </Menu>
             )}
             <Menu aria-label="Layer options" placement="bottom-end" entries={overflow}>
@@ -196,7 +199,17 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
       {sections.map((section) => {
         const { primary, more } = splitAdvanced(section.fields);
         return (
-          <InspectorSection key={section.id} id={`layer.${section.id}`} title={section.title} moreCount={more.length} more={more.map(renderRow)}>
+          <InspectorSection
+            key={section.id}
+            id={`layer.${section.id}`}
+            title={section.title}
+            defaultOpen={sectionStartsOpen(section)}
+            changed={changedCount(section.fields)}
+            forceOpen={drag !== null}
+            moreCount={more.length}
+            moreNames={more.map((f) => f.port.name)}
+            more={more.map(renderRow)}
+          >
             {primary.map(renderRow)}
           </InspectorSection>
         );

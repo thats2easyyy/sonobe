@@ -2,6 +2,8 @@ import { applyOps, createEmptyDocument, type Op, type SonobeDocument } from "@so
 import { describe, expect, it } from "vitest";
 import { getRegistry } from "../../state/registry.ts";
 import {
+  changedCount,
+  countLabel,
   editLabel,
   encodeDefault,
   formatCopies,
@@ -15,6 +17,7 @@ import {
   planFieldDisconnect,
   planFieldReset,
   planFieldSet,
+  sectionStartsOpen,
   splitAdvanced,
   subjectLabel,
   updateVectorComponent,
@@ -43,6 +46,19 @@ const fixture = () =>
 const field = (fields: InspectorField[], key: string) => fields.find((f) => f.key === key)!;
 
 describe("inspector fields", () => {
+  it("opens the main sections, layout choices and anything set or driven", () => {
+    const sections = layerSections(intersectFields(layerSources(fixture(), "main", ["card"], registry)));
+    const opens = Object.fromEntries(sections.map((s) => [s.id, sectionStartsOpen(s)]));
+    expect(opens).toEqual({ basics: true, fill: true, stroke: false, shadow: false, layout: false, transform: true, filters: false, interaction: false });
+    expect(changedCount(sections.find((s) => s.id === "transform")!.fields)).toBe(1);
+    const group = layerSections(intersectFields(layerSources(apply(createEmptyDocument(), [{ op: "addLayer", layer: { id: "box", type: "group", name: "Box" } }]), "main", ["box"], registry)));
+    expect(sectionStartsOpen(group.find((s) => s.id === "layout")!)).toBe(true);
+  });
+
+  it("counts in the singular and plural", () => {
+    expect([countLabel(1, "layer"), countLabel(3, "layer"), countLabel(1, "patch", "patches"), countLabel(0, "patch", "patches")]).toEqual(["1 layer", "3 layers", "1 patch", "0 patches"]);
+  });
+
   it("builds a single layer's fields with defaults, links, and sections", () => {
     const doc = fixture();
     const fields = intersectFields(layerSources(doc, "main", ["card"], registry));

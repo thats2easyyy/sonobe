@@ -10,6 +10,7 @@ import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { completeConnectionToLayerProp, dropTargetAt, instanceChoiceKey, patchEditorBridge } from "../patch-editor/index.ts";
+import { enumFitsSegments } from "./controls.tsx";
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { activePreset } from "./spring.ts";
 
@@ -577,7 +578,7 @@ describe("InspectorPanel", () => {
   it("toggles bypass and renames a patch", () => {
     const s = mount(fixture());
     select(s, { patches: ["grow"] });
-    click(container.querySelector('button[aria-label="Bypass"]'));
+    click(buttonWithText("Bypass"));
     expect(main(s).patches.grow!.muted).toBe(true);
     const name = input("Name");
     act(() => name.focus());
@@ -664,3 +665,176 @@ describe("InspectorPanel: variables and published ports", () => {
   });
 });
 
+
+describe("InspectorPanel: rows, sections and controls", () => {
+  const sectionOf = (title: string) => [...container.querySelectorAll<HTMLElement>("section")].find((el) => el.getAttribute("aria-label") === title)!;
+  const toggleOf = (title: string) => sectionOf(title).querySelector<HTMLButtonElement>(".sb-insp-section__toggle")!;
+
+  it("starts sections with nothing set closed, and marks a closed one that holds changes", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    expect(toggleOf("Basics").getAttribute("aria-expanded")).toBe("true");
+    expect(toggleOf("Transform").getAttribute("aria-expanded")).toBe("true");
+    expect(toggleOf("Stroke").getAttribute("aria-expanded")).toBe("false");
+    expect(sectionOf("Stroke").querySelector(".sb-insp-section__changed")).toBeNull();
+    click(toggleOf("Transform"));
+    expect(toggleOf("Transform").getAttribute("aria-expanded")).toBe("false");
+    expect(sectionOf("Transform").querySelector('[role="img"][aria-label="1 changed"]')).not.toBeNull();
+    click(toggleOf("Stroke"));
+    expect(sectionOf("Stroke").querySelector(".sb-insp-row")).not.toBeNull();
+  });
+
+  it("opens Layout on a container, where it holds the layout choice", () => {
+    const s = mount(build([{ op: "addLayer", layer: { id: "box", type: "group", name: "Box" } }]));
+    select(s, { layers: ["box"] });
+    expect(toggleOf("Layout").getAttribute("aria-expanded")).toBe("true");
+    expect(toggleOf("Shadow").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("resets a changed property from its dot", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    click(button("Reset Opacity to default"));
+    expect(findLayer(main(s).layers, "card")!.layer.props.opacity).toBeUndefined();
+    expect(s.document.getState().undoLabel).toBe("You: Reset Opacity on Card");
+    expect(button("Reset Opacity to default")).toBeNull();
+  });
+
+  it("shows a linked row as the chip, then the live value and Disconnect", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    const linked = rowNamed("Scale").querySelector(".sb-insp-linked")!;
+    expect(linked.firstElementChild?.classList.contains("sb-insp-chip")).toBe(true);
+    expect(linked.querySelector(".sb-insp-linked__meta .sb-insp-live")).not.toBeNull();
+    expect(linked.querySelector(".sb-insp-linked__meta button")?.getAttribute("aria-label")).toBe("Disconnect Scale");
+  });
+
+  it("keeps a text layer's alignment as icon segments named by their options", () => {
+    const s = mount(build([{ op: "addLayer", layer: { id: "words", type: "text", name: "Words" } }]));
+    select(s, { layers: ["words"] });
+    const group = container.querySelector('[role="radiogroup"][aria-label="Alignment"]')!;
+    expect([...group.querySelectorAll('[role="radio"]')].map((el) => el.getAttribute("aria-label"))).toEqual(["Left", "Center", "Right", "Justify"]);
+    click(group.querySelector('[aria-label="Center"]'));
+    expect(findLayer(main(s).layers, "words")!.layer.props.textAlignment).toBe("center");
+  });
+
+  it("chooses segments only for short option names", () => {
+    expect(enumFitsSegments(["Relative", "Absolute"])).toBe(true);
+    expect(enumFitsSegments(["Top", "Center", "Bottom"])).toBe(true);
+    expect(enumFitsSegments(["Left", "Center", "Right", "Justify"])).toBe(false);
+    expect(enumFitsSegments(["Fixed", "Hug", "Fill"])).toBe(true);
+    expect(enumFitsSegments(["A", "B", "C", "D", "E"])).toBe(false);
+  });
+
+  it("shows a mixed boolean as a mixed switch that turns everything on", () => {
+    const s = mount(fixture());
+    act(() => void s.document.getState().apply([{ op: "setInput", target: "@dot.enabled", value: false }], { label: "Hide" }));
+    select(s, { layers: ["card", "dot"] });
+    const mixed = button("Enabled");
+    expect(mixed.getAttribute("aria-checked")).toBe("mixed");
+    click(mixed);
+    expect(button("Enabled").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps the spring's handoff code behind a disclosure, closed until opened", () => {
+    const s = mount(fixture());
+    select(s, { patches: ["pop"] });
+    const disclosure = buttonWithText("Handoff code");
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    const body = container.querySelector<HTMLElement>(".sb-insp-handoff__body")!;
+    expect(body.hidden).toBe(true);
+    click(disclosure);
+    expect(body.hidden).toBe(false);
+    expect(localStorage.getItem("sonobe.inspector.sections")).toContain('"patch.spring.handoff":true');
+  });
+
+  it("puts Bounciness and Speed under the spring curve, not in Inputs", () => {
+    const s = mount(fixture());
+    select(s, { patches: ["pop"] });
+    const inSpring = (name: string) => [...sectionOf("Spring").querySelectorAll(".sb-insp-row__name")].some((el) => el.textContent === name);
+    expect(inSpring("Bounciness")).toBe(true);
+    expect(inSpring("Speed")).toBe(true);
+    expect([...sectionOf("Inputs").querySelectorAll(".sb-insp-row__name")].map((el) => el.textContent)).not.toContain("Bounciness");
+  });
+
+  it("shows Options only for a patch that has options, and Bypass in the header", () => {
+    const s = mount(build([{ op: "addPatch", patch: { id: "tap", type: "interaction", ui: { x: 0, y: 0 } } }, { op: "addPatch", patch: { id: "sum", type: "add", typeParam: "number", ui: { x: 0, y: 100 } } }]));
+    select(s, { patches: ["tap"] });
+    expect(sectionOf("Options")).toBeUndefined();
+    select(s, { patches: ["sum"] });
+    expect(sectionOf("Options")).toBeDefined();
+    click(buttonWithText("Bypass"));
+    expect(main(s).patches.sum!.muted).toBe(true);
+    expect(buttonWithText("Bypass").getAttribute("aria-pressed")).toBe("true");
+    select(s, { patches: ["tap"] });
+    expect(buttonWithText("Bypass").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("names the counts of an empty selection in the singular", () => {
+    mount(build([{ op: "addLayer", layer: { id: "only", type: "rectangle", name: "Only" } }], createEmptyDocument()));
+    expect(container.textContent).toContain("1 layer · 0 patches");
+  });
+
+  it("opens every section while a cable is dragged so any property can take the drop, then restores them", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["dot"] });
+    expect(sectionOf("Shadow").querySelector(".sb-insp-row")).toBeNull();
+    act(() => patchEditorBridge(s).getState().setCableDrag({ component: "main", from: "pop.output", type: "number" }));
+    const shadowRow = sectionOf("Shadow").querySelector(".sb-insp-row")!;
+    expect(shadowRow).not.toBeNull();
+    expect(dropTargetAt(shadowRow.querySelector("input"))).toMatchObject({ kind: "prop" });
+    expect(toggleOf("Shadow").getAttribute("aria-expanded")).toBe("true");
+    act(() => patchEditorBridge(s).getState().setCableDrag(null));
+    expect(sectionOf("Shadow").querySelector(".sb-insp-row")).toBeNull();
+    expect(localStorage.getItem("sonobe.inspector.sections") ?? "").not.toContain("layer.shadow");
+  });
+
+  it("draws a row layout with side-by-side columns and a column layout with stacked rows", () => {
+    const s = mount(build([{ op: "addLayer", layer: { id: "box", type: "group", name: "Box" } }]));
+    select(s, { layers: ["box"] });
+    const group = container.querySelector('[role="radiogroup"][aria-label="Layout"]')!;
+    const glyph = (name: string) => group.querySelector(`[aria-label="${name}"] svg`)!.getAttribute("class") ?? "";
+    expect(glyph("Row")).toContain("lucide-columns-3");
+    expect(glyph("Column")).toContain("lucide-rows-3");
+  });
+
+  it("moves focus to the row's control when a keyboard reset removes the dot", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    const dot = button("Reset Opacity to default");
+    act(() => dot.focus());
+    click(dot);
+    expect(findLayer(main(s).layers, "card")!.layer.props.opacity).toBeUndefined();
+    expect(document.activeElement).toBe(input("Opacity"));
+  });
+
+  it("shows the full number of a clipped field in a tooltip, and only for that field", () => {
+    vi.useFakeTimers();
+    try {
+      const s = mount(fixture());
+      select(s, { layers: ["card"] });
+      const field = input("Opacity");
+      Object.defineProperty(field, "scrollWidth", { value: 90 });
+      Object.defineProperty(field, "clientWidth", { value: 40 });
+      act(() => {
+        field.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+        vi.advanceTimersByTime(700);
+      });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(`Opacity: ${field.value}`);
+      act(() => {
+        field.closest(".sb-insp-row__control")!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }));
+      });
+      expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the property at the end of a long linked address when the source name elides", () => {
+    const s = mount(fixture());
+    select(s, { layers: ["card"] });
+    const chip = rowNamed("Scale").querySelector(".sb-insp-chip__text")!;
+    expect(chip.textContent).toBe("← grow.output");
+    expect(chip.querySelector(".sb-insp-chip__tail")?.textContent).toBe(".output");
+  });
+});

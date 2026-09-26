@@ -19,8 +19,25 @@ import {
   type InputValue,
   type ValueType,
 } from "@sonobe/core";
-import { Image as ImageIcon, Plus, Trash, Upload, Zap } from "lucide-react";
-import { useCallback, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
+  Ban,
+  Columns3,
+  Image as ImageIcon,
+  LayoutGrid,
+  Plus,
+  Rows3,
+  Trash,
+  Upload,
+  Zap,
+} from "lucide-react";
+import { useCallback, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { useCurrentComponent, useDocument, useEditorSession } from "../../state/EditorProvider.tsx";
 import { Badge } from "../../ui/Badge.tsx";
@@ -32,7 +49,7 @@ import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { TextArea, TextField } from "../../ui/TextField.tsx";
 import { toast } from "../../ui/Toast.tsx";
-import { Checkbox, Toggle } from "../../ui/Toggle.tsx";
+import { Toggle } from "../../ui/Toggle.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { VectorField } from "../../ui/VectorField.tsx";
 import { clamp01, parseHexColor, toCssColor, toHex8 } from "../../ui/lib/colorMath.ts";
@@ -244,8 +261,7 @@ function CountControl({ field, actions, label }: ValueControlProps) {
 }
 
 function BooleanControl({ field, actions, label }: ValueControlProps) {
-  if (field.mixed) return <Checkbox aria-label={`${label} (mixed)`} checked={false} indeterminate onChange={() => actions.set(true)} />;
-  return <Toggle size="sm" aria-label={label} checked={field.value === true} onChange={(checked) => actions.set(checked)} />;
+  return <Toggle size="sm" aria-label={label} checked={field.value === true} mixed={field.mixed} onChange={(checked) => actions.set(checked)} />;
 }
 
 function TextControl({ field, actions, label, variant }: ValueControlProps & { variant: "text" | "multiline" | "code" }) {
@@ -392,11 +408,37 @@ function AnchorControl(props: ValueControlProps) {
   );
 }
 
+/** Options of these properties read as glyphs; the name and description go in the tooltip. */
+const ENUM_ICONS: Readonly<Record<string, Readonly<Record<string, ReactNode>>>> = {
+  textAlignment: { left: <AlignLeft size={13} />, center: <AlignCenter size={13} />, right: <AlignRight size={13} />, justify: <AlignJustify size={13} /> },
+  verticalAlignment: { top: <AlignVerticalJustifyStart size={13} />, center: <AlignVerticalJustifyCenter size={13} />, bottom: <AlignVerticalJustifyEnd size={13} /> },
+  layout: { none: <Ban size={13} />, row: <Columns3 size={13} />, column: <Rows3 size={13} />, grid: <LayoutGrid size={13} /> },
+};
+
+/** Whether an enum's option names fit side by side in the 130px control column. */
+export function enumFitsSegments(names: readonly string[]): boolean {
+  const length = names.reduce((n, name) => n + name.length, 0);
+  const room = { 2: 18, 3: 15, 4: 13 }[names.length];
+  return room !== undefined && length <= room;
+}
+
 function EnumControl({ field, actions, label }: ValueControlProps) {
   const options = field.port.enumOptions ?? [];
   const value = typeof field.value === "string" ? field.value : "";
-  const compact = options.length <= 4 && options.reduce((n, o) => n + o.name.length, 0) <= 22;
-  if (compact) {
+  const icons = ENUM_ICONS[field.key];
+  if (icons && options.every((o) => icons[o.key])) {
+    return (
+      <SegmentedControl
+        size="sm"
+        fullWidth
+        aria-label={label}
+        value={field.mixed ? "" : value}
+        options={options.map((o) => ({ value: o.key, icon: icons[o.key], tooltip: o.name, "aria-label": o.name }))}
+        onChange={(next) => actions.set(next)}
+      />
+    );
+  }
+  if (enumFitsSegments(options.map((o) => o.name))) {
     return (
       <SegmentedControl
         size="sm"
@@ -702,6 +744,7 @@ function GradientControl({ field, actions, label }: ValueControlProps) {
         <ScrubNumberField
           size="sm"
           aria-label={`${label} stop ${index + 1} position`}
+          label="Pos"
           value={stop[0]}
           min={0}
           max={1}
@@ -840,17 +883,26 @@ function JsonControl({ field, actions, label }: ValueControlProps) {
 
 /** A read-only value (a linked property's current value, or a patch output); `copy` shows that copy of a loop. */
 export function LiveReadout({ value, type, copies = false, copy = null }: { value: unknown; type: ValueType; copies?: boolean; copy?: number | null }) {
+  const [clipped, setClipped] = useState(false);
   const shown = copy === null ? value : pickCopy(value, copy).value;
   const color = type === "color" && isColor(shown) ? toCssColor(shown) : undefined;
   const text = copies ? formatCopies(value) : formatLiveValue(value, type, copy);
   return (
-    <span className="sb-insp-live sb-mono" title={text}>
-      {color && (
-        <span className="sb-insp-live__swatch sb-checker" aria-hidden>
-          <span style={{ background: color }} />
-        </span>
-      )}
-      <span className="sb-insp-live__text">{text}</span>
-    </span>
+    <Tooltip content={clipped ? text : null} placement="top">
+      <span
+        className="sb-insp-live sb-mono"
+        onPointerEnter={(event) => {
+          const label = event.currentTarget.querySelector(".sb-insp-live__text");
+          setClipped(!!label && label.scrollWidth > label.clientWidth);
+        }}
+      >
+        {color && (
+          <span className="sb-insp-live__swatch sb-checker" aria-hidden>
+            <span style={{ background: color }} />
+          </span>
+        )}
+        <span className="sb-insp-live__text">{text}</span>
+      </span>
+    </Tooltip>
   );
 }

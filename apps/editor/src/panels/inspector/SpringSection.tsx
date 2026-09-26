@@ -2,15 +2,16 @@
 
 import { effectiveKnobLiteral, type Id, type PatchNode, type PatchSpec } from "@sonobe/core";
 import { springPreset, toDurationBounce, type SpringConfig, type SpringPresetKey } from "@sonobe/engine";
-import { Copy, Play } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { ChevronRight, Copy, Play } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDocument, useSelection } from "../../state/EditorProvider.tsx";
 import { knobIdOf } from "../knobs/model.ts";
 import { currentComponentId } from "../../state/selection.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
 import { toast } from "../../ui/Toast.tsx";
-import { InspectorSection } from "./Section.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
+import { InspectorSection, readOpen, writeOpen } from "./Section.tsx";
 import { activePreset, handoffSnippets, planPreset, SPRING_INPUTS, SPRING_PRESETS, springConfigForNode, springCurveGeometry, type HandoffTarget } from "./spring.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
@@ -20,6 +21,8 @@ export interface SpringSectionProps {
   spec: PatchSpec;
   /** For undo labels. */
   subject: string;
+  /** The rows that define the spring (Bounciness, Speed), shown under the curve. */
+  children?: ReactNode;
 }
 
 const glyphs = new Map<SpringPresetKey, string>();
@@ -33,7 +36,7 @@ function presetGlyph(key: SpringPresetKey): string {
   return path;
 }
 
-export function SpringSection({ patchId, node, spec, subject }: SpringSectionProps) {
+export function SpringSection({ patchId, node, spec, subject, children }: SpringSectionProps) {
   const edit = useInspectorEdit();
   const componentId = useSelection(currentComponentId);
   // Inputs a knob drives preview, match presets and hand off with the knob's running value.
@@ -47,7 +50,7 @@ export function SpringSection({ patchId, node, spec, subject }: SpringSectionPro
   const [preview, setPreview] = useState<SpringPresetKey | null>(null);
   const buttons = useRef(new Map<SpringPresetKey, HTMLButtonElement>());
   if (!reading) return null;
-  const described = SPRING_PRESETS.find((p) => p.key === (preview ?? active));
+  const described = active === null ? undefined : SPRING_PRESETS.find((p) => p.key === (preview ?? active));
   const apply = (key: SpringPresetKey) => {
     const preset = SPRING_PRESETS.find((p) => p.key === key)!;
     edit.apply(planPreset(componentId, patchId, node.type, key, (port) => knobIdOf(node.inputs[port])), `Apply ${preset.name} spring to ${subject}`);
@@ -97,13 +100,14 @@ export function SpringSection({ patchId, node, spec, subject }: SpringSectionPro
           );
         })}
       </div>
-      <p className="sb-insp-hint">{described ? described.description : "A custom spring. Pick a feel to start from a named preset."}</p>
+      {described && <p className="sb-insp-hint">{described.description}</p>}
       {linkedNames.length > 0 && (
         <p className="sb-insp-hint" data-tone="warn">
           {linkedNames.join(" and ")} {linkedNames.length === 1 ? "is" : "are"} driven by a patch, so the preview uses the default.
         </p>
       )}
       <SpringCurve config={reading.config} />
+      {children}
       <HandoffCode config={reading.config} />
     </InspectorSection>
   );
@@ -158,25 +162,26 @@ export function SpringCurve({ config }: { config: SpringConfig }) {
         <path className="sb-spring__curve" d={geometry.path} vectorEffect="non-scaling-stroke" />
         {frame !== null && <circle className="sb-spring__dot" cx={geometry.x(frame / 60)} cy={geometry.y(value)} r={3} />}
       </svg>
-      <div className="sb-spring__track" aria-hidden>
-        <span className="sb-spring__runner" style={{ transform: `translateX(${value * 100}%)` } as CSSProperties}>
-          <span className="sb-spring__ball" />
-        </span>
-      </div>
       <div className="sb-spring__meta">
-        <span className="sb-spring__stats sb-tabular" title={`Duration ${duration.toFixed(2)} s · Bounce ${bounce.toFixed(2)}`}>
-          {settle[0]!.toUpperCase() + settle.slice(1)} · {overshoot}% overshoot
-        </span>
-        <IconButton size="xs" icon={<Play size={12} />} label="Preview the motion" onClick={play} />
+        <Tooltip content={`Duration ${duration.toFixed(2)} s, bounce ${bounce.toFixed(2)}`} placement="bottom-start">
+          <span className="sb-spring__stats sb-tabular">
+            {settle[0]!.toUpperCase() + settle.slice(1)} · {overshoot}% overshoot
+          </span>
+        </Tooltip>
+        <IconButton size="sm" icon={<Play size={12} fill="currentColor" strokeWidth={0} />} label="Preview the motion" onClick={play} />
       </div>
     </div>
   );
 }
 
-/** Copyable spring code for SwiftUI, Android, CSS linear(), and motion. */
+const HANDOFF_SECTION = "patch.spring.handoff";
+
+/** Copyable spring code for SwiftUI, Android, CSS linear(), and motion, behind a disclosure that starts closed. */
 export function HandoffCode({ config }: { config: SpringConfig }) {
   const idBase = useId();
+  const bodyId = useId();
   const [tab, setTab] = useState<HandoffTarget>("swiftui");
+  const [open, setOpen] = useState(() => readOpen(HANDOFF_SECTION, false));
   const snippets = useMemo(() => handoffSnippets(config), [config.mass, config.stiffness, config.damping]); // eslint-disable-line react-hooks/exhaustive-deps
   const copy = (code: string) => {
     const clipboard = globalThis.navigator?.clipboard;
@@ -186,15 +191,25 @@ export function HandoffCode({ config }: { config: SpringConfig }) {
       () => toast({ id: "handoff-copied", title: "Couldn't copy to the clipboard", tone: "warn" }),
     );
   };
+  const toggle = () => {
+    writeOpen(HANDOFF_SECTION, !open);
+    setOpen(!open);
+  };
   return (
-    <div className="sb-insp-handoff">
-      <Tabs size="sm" variant="pill" aria-label="Handoff code" idBase={idBase} value={tab} onChange={setTab} items={snippets.map((s) => ({ value: s.id, label: s.label }))} />
-      {snippets.map((snippet) => (
-        <TabPanel key={snippet.id} idBase={idBase} value={snippet.id} active={tab === snippet.id} className="sb-insp-code">
-          <pre className="sb-insp-code__pre sb-mono sb-selectable">{snippet.code}</pre>
-          <IconButton size="xs" icon={<Copy size={12} />} label={`Copy ${snippet.label} code`} className="sb-insp-code__copy" onClick={() => copy(snippet.code)} />
-        </TabPanel>
-      ))}
+    <div className="sb-insp-handoff" data-open={open || undefined}>
+      <button type="button" className="sb-insp-handoff__toggle" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+        <ChevronRight size={12} strokeWidth={2} aria-hidden />
+        Handoff code
+      </button>
+      <div id={bodyId} className="sb-insp-handoff__body" hidden={!open}>
+        <Tabs size="sm" variant="pill" aria-label="Handoff code" idBase={idBase} value={tab} onChange={setTab} items={snippets.map((s) => ({ value: s.id, label: s.label }))} />
+        {snippets.map((snippet) => (
+          <TabPanel key={snippet.id} idBase={idBase} value={snippet.id} active={tab === snippet.id} className="sb-insp-code">
+            <pre className="sb-insp-code__pre sb-mono sb-selectable">{snippet.code}</pre>
+            <IconButton size="xs" icon={<Copy size={12} />} label={`Copy ${snippet.label} code`} className="sb-insp-code__copy" onClick={() => copy(snippet.code)} />
+          </TabPanel>
+        ))}
+      </div>
     </div>
   );
 }
