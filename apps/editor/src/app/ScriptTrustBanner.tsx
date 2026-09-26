@@ -20,7 +20,7 @@ export function ScriptTrustBanner() {
         This prototype has {count === 1 ? "a JavaScript patch" : `${count} JavaScript patches`}. {count === 1 ? "It's" : "They're"} paused until you trust this project.
       </span>
       <div className="sb-banner__actions">
-        <Button size="sm" variant="primary" loading={requesting} onClick={() => void session.runtime.requestScriptTrust()}>
+        <Button variant="primary" loading={requesting} onClick={() => void session.runtime.requestScriptTrust()}>
           Review Scripts…
         </Button>
       </div>

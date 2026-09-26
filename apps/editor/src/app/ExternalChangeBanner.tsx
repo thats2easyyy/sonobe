@@ -26,10 +26,10 @@ export function ExternalChangeBanner() {
           <strong>{name}</strong> changed outside Sonobe{fileList(change.paths)}. Reload to use that version, or keep your edits and save over it.
         </span>
         <div className="sb-banner__actions">
-          <Button size="sm" variant="ghost" onClick={() => session.document.getState().dismissExternalChange()}>
+          <Button variant="ghost" onClick={() => session.document.getState().dismissExternalChange()}>
             Keep My Edits
           </Button>
-          <Button size="sm" variant="primary" onClick={() => session.document.getState().acceptExternalChange()}>
+          <Button variant="primary" onClick={() => session.document.getState().acceptExternalChange()}>
             Reload
           </Button>
         </div>
@@ -48,7 +48,7 @@ export function ExternalChangeBanner() {
         <strong>{name}</strong> changed outside Sonobe{fileList(problem.paths)} and can't be opened as it is: {problem.message.split("\n")[0]} Save to write your version over it.
       </span>
       <div className="sb-banner__actions">
-        <Button size="sm" variant="primary" onClick={() => void save()}>
+        <Button variant="primary" onClick={() => void save()}>
           Save
         </Button>
       </div>
