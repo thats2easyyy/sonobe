@@ -31,7 +31,7 @@
  * Panels that are on screen at startup import from `api.ts` (bridge, placement, drop attributes,
  * breadcrumbs), which doesn't pull in React Flow; only the app's lazy import loads `PatchEditor.tsx`.
  *
- * React Flow's attribution shows small in the bottom-left corner, as its maintainers ask (hiding it
+ * React Flow's attribution shows small in a strip under the graph, as its maintainers ask (hiding it
  * logs a dev warning); About also credits xyflow (MIT).
  */
 
