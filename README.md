@@ -98,7 +98,7 @@ After a build, `npm link -w @sonobe/cli` puts `sonobe` on your PATH. Inside the 
 
 ## Build with Claude
 
-![The Sonobe editor after Claude added press feedback over MCP: the AI Activity panel lists each change with its op count and an Undo button](docs/assets/claude-activity.png)
+![The Sonobe editor after Claude added press feedback over MCP: the AI Activity panel lists each change with its edit count and an Undo this button](docs/assets/claude-activity.png)
 
 Sonobe runs an MCP server on `127.0.0.1` that only accepts requests carrying the token the app writes to `~/.sonobe/mcp.json`. Claude connects through `sonobe mcp`, a small relay that reads the token for you, so there's nothing to paste. The easiest way to set it up is in the app: click **Connect Claude** in the toolbar (or choose Help → Connect Claude…) and copy the command it fills in for your machine.
 
