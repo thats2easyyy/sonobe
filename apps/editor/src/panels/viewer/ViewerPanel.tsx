@@ -2,11 +2,14 @@
  * The Viewer panel: the live prototype in a device frame. The header keeps the zoom menu (fit or
  * actual size) and a More menu with restart (⌘R), rotate, device, the device frame (⌥D), hit targets,
  * pop-out, and phone preview, so nothing truncates at narrow widths; a chip appears while hit targets
- * are on. Play/pause and the status sit under the prototype, next to "On phone" (a QR code for the LAN
- * web player). While the running prototype has an empty_loop warning, a notice over the top of the
- * stage says what draws no copies, with Why? to reveal it, or, when a fresh start would draw it (an
- * edit left old state), offers Restart instead. Notices never move the device. Switching the knob
- * preset shows its name over the bottom of the stage for a moment.
+ * are on. The status word (Live or Paused) sits under the prototype, next to "On phone" (a QR code for
+ * the LAN web player). Play/pause and the fps readout live in the toolbar and the bottom panel; only
+ * the floating window, which has no toolbar, keeps its own play/pause.
+ *
+ * While the running prototype has an empty_loop warning, a notice over the top of the stage says what
+ * draws no copies, with Why? to reveal it, or, when a fresh start would draw it (an edit left old
+ * state), offers Restart instead. Notices never move the device. Switching the knob preset shows its
+ * name over the bottom of the stage for a moment.
  */
 
 import { DEVICE_PRESETS, getDevicePreset, type DevicePreset } from "@sonobe/core";
@@ -135,7 +138,8 @@ function EmptyLoopNote({ session }: { session: EditorSession }) {
   );
 }
 
-function ViewerTransport({ session, phone, phoneOpen, onPhoneOpenChange }: { session: EditorSession; phone: PhonePreviewController; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void }) {
+/** Docked, the footer is a status word and the chips: playback lives in the toolbar. The floating window has no toolbar, so it keeps play/pause and the fps. */
+function ViewerFooter({ session, phone, phoneOpen, onPhoneOpenChange, floating }: { session: EditorSession; phone: PhonePreviewController; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void; floating: boolean }) {
   const playing = useStore(session.runtime.state, (s) => s.playing);
   const fps = useStore(session.runtime.state, (s) => s.fps);
   const frame = useStore(session.runtime.state, (s) => s.frame);
@@ -148,24 +152,26 @@ function ViewerTransport({ session, phone, phoneOpen, onPhoneOpenChange }: { ses
   const rounded = Math.round(fps);
 
   return (
-    <div className="sb-vw__footer">
+    <div className="sb-vw__footer" data-floating={floating || undefined}>
       <Tooltip placement="top" content={playing ? formatFps(rounded) : `Frame ${Math.max(0, frame).toLocaleString("en-US")}`}>
         <span className="sb-vw__pill" data-static="" tabIndex={0} data-playing={playing || undefined}>
           <span className="sb-vw__dot" aria-hidden />
           {playing ? "Live" : "Paused"}
-          {playing && fpsBelowTarget(fps, targetFps) && <span className="sb-vw__pill-meta sb-tabular">{formatFps(rounded)}</span>}
+          {floating && playing && fpsBelowTarget(fps, targetFps) && <span className="sb-vw__pill-meta sb-tabular">{formatFps(rounded)}</span>}
         </span>
       </Tooltip>
-      <div className="sb-vw__transport" role="group" aria-label="Prototype playback">
-        <IconButton
-          size="sm"
-          icon={playing ? <Pause size={14} fill="currentColor" strokeWidth={0} /> : <Play size={14} fill="currentColor" strokeWidth={0} />}
-          label={playing ? "Pause prototype" : "Play prototype"}
-          shortcut="Mod+Alt+P"
-          tooltipPlacement="top"
-          onClick={() => session.runtime.togglePlay()}
-        />
-      </div>
+      {floating && (
+        <div className="sb-vw__transport" role="group" aria-label="Prototype playback">
+          <IconButton
+            size="sm"
+            icon={playing ? <Pause size={14} fill="currentColor" strokeWidth={0} /> : <Play size={14} fill="currentColor" strokeWidth={0} />}
+            label={playing ? "Pause prototype" : "Play prototype"}
+            shortcut="Mod+Alt+P"
+            tooltipPlacement="top"
+            onClick={() => session.runtime.togglePlay()}
+          />
+        </div>
+      )}
       <div className="sb-vw__footer-end">
         {warnings.length > 0 && (
           <Tooltip placement="top" content={warnings.slice(0, 3).map((w) => w.message).join(" · ") + (warnings.length > 3 ? ` · +${warnings.length - 3} more` : "")}>
@@ -366,7 +372,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
     ) : null;
   const caption = <PresetCaption session={session} />;
   const stage = (notices: ReactNode) => <ViewerStage session={session} showFrame={showFrame} zoom={zoom} showHitTargets={showHitTargets} onScaleChange={setScale} notices={notices} />;
-  const transport = <ViewerTransport session={session} phone={phone} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} />;
+  const footer = (floating: boolean) => <ViewerFooter session={session} phone={phone} phoneOpen={phoneOpen} onPhoneOpenChange={setPhoneOpen} floating={floating} />;
 
   return (
     <Panel
@@ -415,7 +421,7 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
           <>
             {caption}
             {stage(<>{windowNote}{loopNote}</>)}
-            {transport}
+            {footer(false)}
           </>
         )}
       </div>
@@ -427,15 +433,15 @@ export function ViewerPanel({ session: sessionProp, lanPreviewUrl, onPopOut, onC
           themeFrom={rootRef.current}
           actions={
             <>
-              <IconButton size="xs" icon={<RotateCcw size={13} />} label="Restart prototype" shortcut="Mod+R" tooltipPlacement="bottom" onClick={restart} />
-              <IconButton size="xs" icon={<Minimize2 size={13} />} label="Dock viewer" tooltipPlacement="bottom" onClick={() => setFloating(false)} />
+              <IconButton size="xs" icon={<RotateCcw size={14} />} label="Restart prototype" shortcut="Mod+R" tooltipPlacement="bottom" onClick={restart} />
+              <IconButton size="xs" icon={<Minimize2 size={14} />} label="Dock viewer" tooltipPlacement="bottom" onClick={() => setFloating(false)} />
             </>
           }
         >
           <div className="sb-vw">
             {caption}
             {stage(loopNote)}
-            {transport}
+            {footer(true)}
           </div>
         </FloatingWindow>
       )}

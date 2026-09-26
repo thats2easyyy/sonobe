@@ -538,7 +538,10 @@ describe("CanvasPanel", () => {
       );
     });
     const link = container.querySelector<HTMLButtonElement>(".sb-cv__hint-action")!;
-    expect(link.closest(".sb-cv__hint")?.textContent).toBe("Empty screenDraw with R, O or T, or let Claude draft one.Describe a screen");
+    const hint = link.closest<HTMLElement>(".sb-cv__hint")!;
+    expect(hint.textContent).toBe("Empty screenDraw with R, O or T, or let Claude draft one.Describe a screen");
+    expect(hint.style.top).toBe("12px");
+    expect(hint.style.left).toBe("12px");
     act(() => {
       link.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...at(201, 437) }));
     });

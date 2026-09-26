@@ -181,10 +181,11 @@ async function viewerQa(context: BrowserContext, page: Page) {
   await shot(page, "viewer-08-on-phone");
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Pause prototype" }).click();
+  check("the docked footer has no second Pause button", (await page.getByRole("button", { name: "Pause prototype" }).count()) === 0);
+  await sessionEval(page, (s) => s.runtime.togglePlay());
   await page.waitForTimeout(350);
   check("pause shows the frame counter", (await page.locator(".sb-vw__pill").first().textContent())?.includes("Paused") ?? false);
-  await page.getByRole("button", { name: "Play prototype" }).click();
+  await sessionEval(page, (s) => s.runtime.togglePlay());
 
   await chooseMenu(page, "More viewer options", "Pop Out Viewer");
   await page.waitForTimeout(600);
@@ -251,7 +252,7 @@ async function viewerQa(context: BrowserContext, page: Page) {
       const inner = [...el.querySelectorAll<HTMLElement>(".sb-vw__pill, .sb-iconbtn")];
       return { spill: Math.max(0, ...inner.map((c) => Math.max(box.left - c.getBoundingClientRect().left, c.getBoundingClientRect().right - box.right))), count: inner.length };
     });
-    check(`the footer fits the panel at ${width}px`, footer.spill <= 0.5 && footer.count >= 4, JSON.stringify(footer));
+    check(`the footer fits the panel at ${width}px`, footer.spill <= 0.5 && footer.count >= 3, JSON.stringify(footer));
   }
 
   // Desktop host: the phone preview server and a host viewer window.

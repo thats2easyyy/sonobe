@@ -39,10 +39,10 @@ const ID_BASE = "sb-hudx";
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 const TAB_ICONS: Record<HudTabId, ReactNode> = {
-  console: <SquareTerminal size={13} />,
-  diagnostics: <TriangleAlert size={13} />,
-  ai: <Sparkles size={13} />,
-  performance: <Gauge size={13} />,
+  console: <SquareTerminal size={14} />,
+  diagnostics: <TriangleAlert size={14} />,
+  ai: <Sparkles size={14} />,
+  performance: <Gauge size={14} />,
 };
 
 /**

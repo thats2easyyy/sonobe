@@ -1,6 +1,6 @@
 /* Viewer panel */
 .sb-vw {
-  --sb-vw-footer-h: 44px;
+  --sb-vw-footer-h: 34px;
   position: relative;
   display: flex;
   flex: 1 1 auto;
@@ -297,15 +297,24 @@
   flex: none;
 }
 
-/* Status on the left of play/pause and the chips on its right, so the button stays at the centre. */
+/* The status word on the left and the chips on the right. The floating window adds play/pause between them. */
 .sb-vw__footer {
-  display: grid;
+  display: flex;
   flex: none;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   column-gap: var(--space-4);
   min-width: 0;
   height: var(--sb-vw-footer-h);
+  padding: 0 var(--space-4) 0 var(--space-5);
+}
+
+.sb-float .sb-vw {
+  --sb-vw-footer-h: 44px;
+}
+
+.sb-vw__footer[data-floating] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   padding: 0 var(--space-4);
 }
 
@@ -323,6 +332,7 @@
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  margin-left: auto;
 }
 
 .sb-vw__pill {
@@ -370,11 +380,15 @@ button.sb-vw__pill::after {
 
 /* Read-only status: text, not a control. */
 .sb-vw__pill[data-static] {
-  justify-self: end;
+  justify-self: start;
   padding: 0;
   background: none;
   box-shadow: none;
   cursor: default;
+}
+
+.sb-vw__footer[data-floating] .sb-vw__pill[data-static] {
+  justify-self: end;
 }
 
 .sb-vw__pill[data-static]:focus-visible {
@@ -522,6 +536,8 @@ button.sb-vw__pill::after {
   cursor: grab;
   touch-action: none;
   user-select: none;
+  --control-h-xs: 24px;
+  --control-h-sm: 24px;
 }
 
 .sb-float__header[data-dragging] {
@@ -538,7 +554,7 @@ button.sb-vw__pill::after {
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;

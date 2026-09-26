@@ -220,7 +220,7 @@ describe("ViewerPanel", () => {
     expect(buttonWithText("Start phone preview")).toBeDefined();
   });
 
-  it("keeps the status text fixed, and shows fps only when it falls under the target", () => {
+  it("keeps one plain status word in the docked footer, with no fps text and no second Pause button", () => {
     mount(<ViewerPanel />);
     const status = () => container.querySelector(".sb-vw__pill[data-static]")!;
     expect(status().textContent).toBe("Paused");
@@ -228,8 +228,23 @@ describe("ViewerPanel", () => {
     act(() => session.runtime.state.setState({ playing: true, fps: 60 }));
     expect(status().textContent).toBe("Live");
     act(() => session.runtime.state.setState({ fps: 41.6 }));
-    expect(status().textContent).toBe("Live42 fps");
-    expect(container.querySelector(".sb-vw__pill-meta")?.textContent).toBe("42 fps");
+    expect(status().textContent).toBe("Live");
+    expect(container.querySelector(".sb-vw__pill-meta")).toBeNull();
+    expect(button("Pause prototype")).toBeNull();
+    expect(button("Play prototype")).toBeNull();
+  });
+
+  it("keeps play/pause and the fps text in the floating window, which has no toolbar", () => {
+    mount(<ViewerPanel />);
+    chooseMore("Pop Out Viewer");
+    const float = document.querySelector(".sb-float")!;
+    act(() => session.runtime.state.setState({ playing: true, fps: 41.6 }));
+    expect(float.querySelector(".sb-vw__pill[data-static]")?.textContent).toBe("Live42 fps");
+    const pause = float.querySelector<HTMLButtonElement>('button[aria-label="Pause prototype"]')!;
+    expect(pause).not.toBeNull();
+    const toggle = vi.spyOn(session.runtime, "togglePlay");
+    act(() => pause.click());
+    expect(toggle).toHaveBeenCalledOnce();
   });
 
   it("opens Diagnostics from the footer warning, which hides while the note over the stage names it", () => {

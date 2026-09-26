@@ -107,6 +107,10 @@ const DESIGN_BOX_CLEARANCE = 16 + 12;
 /** Fit padding in the area above the box, and the least room there that's worth fitting into (the box grows at most to leave it). */
 const DESIGN_FIT_PADDING = 28;
 const DESIGN_FIT_MIN_HEIGHT = 200;
+/** The empty-screen hint sits in the pane's top-left corner, left of the artboard, and is left out when it would not fit there. */
+const HINT_MARGIN = 12;
+const HINT_MIN_WIDTH = 144;
+const HINT_MAX_WIDTH = 240;
 /** The box is never capped below this: under it, the prompt field and the close button lose their edges. */
 const DESIGN_BOX_MIN_HEIGHT = 250;
 /** A draft's frame is fitted whole when that's at least this zoom; otherwise its width is. */
@@ -1297,13 +1301,19 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
               <HologramBuild session={session} componentId={componentId} index={index} viewport={viewport} width={box.width} height={box.height} />
-              {component.layers.length === 0 && !designOpen && (
-                <div className="sb-cv__hint" style={{ top: `calc(50% + ${inset / 2}px)`, left: `calc(50% + ${inset / 2}px)` }}>
-                  <div className="sb-cv__hint-title">Empty screen</div>
-                  <div className="sb-cv__hint-body">Draw with R, O or T, or let Claude draft one.</div>
-                  <Button size="sm" variant="ai" className="sb-cv__hint-action" icon={<Sparkles size={12} />} onClick={openDesign}>
-                    Describe a screen
-                  </Button>
+              {component.layers.length === 0 && !designOpen && viewport.x - inset - HINT_MARGIN * 2 >= HINT_MIN_WIDTH && (
+                <div className="sb-cv__hint" style={{ top: inset + HINT_MARGIN, left: inset + HINT_MARGIN, maxWidth: Math.min(HINT_MAX_WIDTH, viewport.x - inset - HINT_MARGIN * 2) }}>
+                  <EmptyState
+                    size="sm"
+                    variant="inline"
+                    title="Empty screen"
+                    description="Draw with R, O or T, or let Claude draft one."
+                    actions={
+                      <Button size="sm" variant="ai" className="sb-cv__hint-action" icon={<Sparkles size={12} />} onClick={openDesign}>
+                        Describe a screen
+                      </Button>
+                    }
+                  />
                 </div>
               )}
               <CanvasOverlay index={index} viewport={viewport} {...shownChrome} draft={draft} altMeasure={altMeasure} />

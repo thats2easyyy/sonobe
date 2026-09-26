@@ -4,6 +4,7 @@ import { useDocument, useEditorSession, useRuntimeState } from "../../state/Edit
 import { isPatchImplemented } from "../../state/registry.ts";
 import { Badge } from "../../ui/Badge.tsx";
 import { Button } from "../../ui/Button.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { usePerfSamples } from "./hooks.ts";
 import { itemDisplayName } from "./itemNames.ts";
 import { documentStats, formatMs, frameBudgetShare, patchTimingsOf, sceneStats, smoothness, summarizeSamples, type PatchTiming, type SceneStats } from "./perfModel.ts";
@@ -12,6 +13,14 @@ import { SampleChart } from "./SampleChart.tsx";
 
 const CAPACITY = 120;
 const SAMPLE_MS = 500;
+
+function Sub({ children }: { children: string }) {
+  return (
+    <Tooltip content={children} placement="top-start">
+      <span className="sb-perfx__sub">{children}</span>
+    </Tooltip>
+  );
+}
 
 export interface PerformanceViewProps {
   /** False while another tab is showing: patch timings and the scene poll stop, the chart history keeps filling. */
@@ -57,7 +66,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
 
   return (
     <div className="sb-hudview">
-      <div className="sb-hudview__scroll sb-scroll">
+      <div className="sb-hudview__scroll sb-perfx__scroll sb-scroll">
         <div className="sb-perfx">
           <section className="sb-perfx__charts" aria-label="Frame rate">
             <div className="sb-perfx__headline">
@@ -82,7 +91,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
                 format={(v) => `${Math.round(v)} fps`}
                 label={summary.playingSamples ? `Frame rate over the last minute: average ${Math.round(summary.fps.avg)} fps, lowest ${Math.round(summary.fps.min)} fps` : "Frame rate: the prototype is paused"}
                 sampleMs={SAMPLE_MS}
-                height={64}
+                height={48}
                 {...(status.tone === "warn" || status.tone === "danger" ? { tone: status.tone } : {})}
               />
             </div>
@@ -97,7 +106,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
                 format={formatMs}
                 label={`Frame time: average ${formatMs(summary.frameMs.avg)}, slowest ${formatMs(summary.frameMs.max)}`}
                 sampleMs={SAMPLE_MS}
-                height={40}
+                height={48}
                 {...(budget > 1 ? { tone: "danger" as const } : budget > 0.8 ? { tone: "warn" as const } : {})}
               />
             </div>
@@ -108,39 +117,35 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
               <dt>Latest frame</dt>
               <dd className="sb-tabular">
                 {formatMs(summary.frameMs.latest)}
-                <span className="sb-perfx__sub">
-                  avg {formatMs(summary.frameMs.avg)} · max {formatMs(summary.frameMs.max)}
-                </span>
+                <Sub>{`avg ${formatMs(summary.frameMs.avg)} · max ${formatMs(summary.frameMs.max)}`}</Sub>
               </dd>
             </div>
             <div className="sb-perfx__stat">
               <dt>Frame budget used</dt>
               <dd className="sb-tabular" data-tone={budget > 0.8 ? "warn" : undefined}>
                 {Math.round(budget * 100)}%
-                <span className="sb-perfx__sub">of {formatMs(budgetMs)}</span>
+                <Sub>{`of ${formatMs(budgetMs)}`}</Sub>
               </dd>
             </div>
             <div className="sb-perfx__stat">
               <dt>Dropped</dt>
               <dd className="sb-tabular">
                 {summary.slowSamples}
-                <span className="sb-perfx__sub">slow samples in the last {Math.round((samples.length * SAMPLE_MS) / 1000)}s</span>
+                <Sub>{`slow samples in the last ${Math.round((samples.length * SAMPLE_MS) / 1000)}s`}</Sub>
               </dd>
             </div>
             <div className="sb-perfx__stat">
               <dt>Patches</dt>
               <dd className="sb-tabular">
                 {stats.patches}
-                <span className="sb-perfx__sub">
-                  in {stats.components} {stats.components === 1 ? "component" : "components"}
-                </span>
+                <Sub>{`in ${stats.components} ${stats.components === 1 ? "component" : "components"}`}</Sub>
               </dd>
             </div>
             <div className="sb-perfx__stat">
               <dt>Layers drawn</dt>
               <dd className="sb-tabular">
                 {scene.visible}
-                <span className="sb-perfx__sub">of {scene.nodes} in the scene</span>
+                <Sub>{`of ${scene.nodes} in the scene`}</Sub>
               </dd>
             </div>
             {scene.loopInstances > 0 && (
@@ -148,14 +153,14 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
                 <dt>Loop instances</dt>
                 <dd className="sb-tabular">
                   {scene.loopInstances}
-                  {scene.replicated.length > 0 && <span className="sb-perfx__sub">{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId, session.registry)} ×${r.count}`).join(" · ")}</span>}
+                  {scene.replicated.length > 0 && <Sub>{scene.replicated.slice(0, 3).map((r) => `${itemDisplayName(doc, doc.project.root, r.layerId, session.registry)} ×${r.count}`).join(" · ")}</Sub>}
                 </dd>
               </div>
             )}
             <div className="sb-perfx__stat">
               <dt>Running</dt>
               <dd className="sb-tabular">
-                {time.toFixed(1)}s<span className="sb-perfx__sub">frame {Math.max(0, frame).toLocaleString()}</span>
+                {time.toFixed(1)}s<Sub>{`frame ${Math.max(0, frame).toLocaleString()}`}</Sub>
               </dd>
             </div>
             {stats.unimplemented.length > 0 && (
@@ -170,24 +175,24 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
                 </dd>
               </div>
             )}
-            {timings && timings.length > 0 && (
-              <div className="sb-perfx__stat" data-wide>
-                <dt>Slowest patches</dt>
-                <dd>
-                  <ol className="sb-perfx__slow">
-                    {timings.map((t) => (
-                      <li key={`${t.componentPath ?? ""}/${t.patchId}`}>
-                        <button type="button" onClick={() => revealItems(session, doc.project.root, [t.patchId])}>
-                          {itemDisplayName(doc, doc.project.root, t.patchId, session.registry)}
-                        </button>
-                        <span className="sb-tabular">{formatMs(t.ms)}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </dd>
-              </div>
-            )}
           </dl>
+          {timings && timings.length > 0 && (
+            <section className="sb-perfx__slowest" aria-label="Slowest patches">
+              <h3 className="sb-perfx__heading">Slowest patches</h3>
+              <ol className="sb-perfx__slow">
+                {timings.map((t) => (
+                  <li key={`${t.componentPath ?? ""}/${t.patchId}`}>
+                    <Tooltip content={itemDisplayName(doc, doc.project.root, t.patchId, session.registry)} placement="top-start">
+                      <button type="button" onClick={() => revealItems(session, doc.project.root, [t.patchId])}>
+                        {itemDisplayName(doc, doc.project.root, t.patchId, session.registry)}
+                      </button>
+                    </Tooltip>
+                    <span className="sb-tabular">{formatMs(t.ms)}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
         </div>
       </div>
     </div>
