@@ -105,11 +105,46 @@ async function eventually(check: () => void) {
 }
 
 describe("LayersPanel", () => {
-  it("lists layers front-most first under the component breadcrumb", () => {
+  it("lists layers front-most first and shows no breadcrumb at the root", () => {
     mount(fixture());
     expect(labels()).toEqual(["Title", "Group", "Label", "Inner One", "B", "A"]);
-    expect(container.querySelector('[aria-current="page"]')?.textContent).toBe("Main");
-    expect(container.querySelector(".sb-layerspanel__kind")?.textContent).toBe("Prototype");
+    expect(container.querySelector(".sb-layerspanel__component")).toBeNull();
+    expect(container.querySelector('[aria-current="page"]')).toBeNull();
+  });
+
+  it("shows the path inside a component, with a landmark of its own", () => {
+    const s = mount(build([...FIXTURE_OPS, { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } }]));
+    act(() => s.selection.getState().enterComponent("card"));
+    const nav = container.querySelector('nav[aria-label="Layers component path"]')!;
+    expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe("Card");
+    expect(nav.querySelector("button")?.textContent).toBe("Main");
+    expect(container.querySelector(".sb-layerspanel__kind")).toBeNull();
+    click(button("Exit component"));
+    expect(container.querySelector(".sb-layerspanel__component")).toBeNull();
+  });
+
+  it("describes only the ambiguous Touch rows, so the rest stay on one line", () => {
+    mount(fixture());
+    click(button("Touch: add an interaction to A", rowNamed("A")));
+    const described = [...document.querySelectorAll('[role="menuitem"]')].filter((el) => el.querySelector(".sb-menu__description")).map((el) => el.querySelector(".sb-menu__title")?.textContent);
+    expect(described).toEqual(["Press", "Long Press", "Scroll Y", "Scroll X"]);
+  });
+
+  it("puts the filter right under the header", () => {
+    mount(fixture());
+    const panel = container.querySelector(".sb-panel")!;
+    expect(panel.querySelector("footer")).toBeNull();
+    const field = container.querySelector<HTMLInputElement>('input[aria-label="Filter layers"]')!;
+    expect(field.placeholder).toBe("Filter layers");
+    expect(container.querySelector(".sb-layerspanel")!.firstElementChild!.contains(field)).toBe(true);
+    expect(button("Filter by type")).not.toBeNull();
+  });
+
+  it("draws no chevrons while a filter is active", () => {
+    mount(fixture());
+    expect(container.querySelectorAll(".sb-tree__chevron[data-visible]").length).toBeGreaterThan(0);
+    type(container.querySelector<HTMLInputElement>('input[aria-label="Filter layers"]')!, "label");
+    expect(container.querySelectorAll(".sb-tree__chevron[data-visible]")).toHaveLength(0);
   });
 
   it("selects rows into the selection store and follows external selection", () => {
@@ -180,7 +215,10 @@ describe("LayersPanel", () => {
     type(container.querySelector<HTMLInputElement>('input[aria-label="Filter layers"]')!, "label");
     expect(labels()).toEqual(["Group", "Label"]);
     type(container.querySelector<HTMLInputElement>('input[aria-label="Filter layers"]')!, "nothing like this");
-    expect(container.textContent).toContain("No matching layers");
+    expect(container.textContent).toContain("No matching layers for “nothing like this”");
+    click([...container.querySelectorAll("button")].find((b) => b.textContent === "Clear")!);
+    expect(labels()).toHaveLength(6);
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Filter layers"]')!.value).toBe("");
   });
 
   it("highlights a layer hovered in another panel and reports its own hover", () => {
@@ -248,6 +286,68 @@ describe("LayersPanel", () => {
     click(menuItem("Group"));
     expect(main(s).layers.map((l) => l.type)).toContain("group");
     expect(findLayer(main(s).layers, "a")!.parent?.name).toBe("Group");
+  });
+
+  const openRowMenu = (name: string) =>
+    act(() => {
+      rowNamed(name).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+    });
+  const menuTitles = () => [...document.querySelectorAll('[role="menu"] > [role="menuitem"]')].map((el) => el.querySelector(".sb-menu__title")?.textContent);
+
+  it("lists Rename after Duplicate and Redesign after Reveal in the row menu, and Rename starts the inline editor", () => {
+    const s = mount(fixture());
+    openRowMenu("B");
+    const titles = menuTitles();
+    expect(titles.indexOf("Rename")).toBe(titles.indexOf("Duplicate") + 1);
+    expect(titles.indexOf("Redesign with Claude…")).toBe(titles.indexOf("Reveal in Patch Editor") + 1);
+    expect(menuItem("Rename").querySelector(".sb-menu__shortcut")).not.toBeNull();
+    click(menuItem("Rename"));
+    const input = container.querySelector<HTMLInputElement>(".sb-tree__rename")!;
+    expect(input.value).toBe("B");
+    type(input, "Hero");
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(findLayer(main(s).layers, "b")!.layer.name).toBe("Hero");
+  });
+
+  it("enters a component instance on double-click anywhere on its row instead of renaming it", () => {
+    const s = mount(build([...FIXTURE_OPS, { op: "addComponent", component: { id: "card", name: "Card", kind: "layerComponent" } }, { op: "addLayer", layer: { id: "inst", type: "componentInstance", name: "Card Instance", component: "card" } }]));
+    act(() => {
+      rowNamed("Card Instance").querySelector(".sb-tree__label")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    expect(container.querySelector(".sb-tree__rename")).toBeNull();
+    expect(s.selection.getState().componentPath.at(-1)).toBe("card");
+  });
+
+  it("lists Group with the basic layers and keeps a disabled Component Instance on one line", () => {
+    const s = mount(fixture());
+    click(button("Insert layer"));
+    const labelsIn = () => [...document.querySelectorAll(".sb-menu__label")].map((el) => el.textContent);
+    expect(labelsIn()).not.toContain("Containers");
+    expect(menuItem("Group")).toBeTruthy();
+    const instance = menuItem("Component Instance (none yet)");
+    expect(instance.getAttribute("aria-disabled")).toBe("true");
+    expect(instance.textContent).toBe("Component Instance (none yet)");
+    expect(instance.querySelector(".sb-menu__description")).toBeNull();
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    act(() => s.selection.getState().select({ layers: ["a"] }));
+    click(button("Insert layer"));
+    expect(labelsIn().some((label) => label?.startsWith("Insert above"))).toBe(false);
+  });
+
+  it("scrolls the virtualized list to a layer selected elsewhere", () => {
+    const bulk = Array.from({ length: 200 }, (_, i): Op => ({ op: "addLayer", layer: { id: `bulk_${i}`, type: "rectangle", name: `Bulk ${i}` } }));
+    const s = mount(build(bulk));
+    const tree = container.querySelector<HTMLElement>(".sb-tree")!;
+    expect(tree.scrollTop).toBe(0);
+    act(() => s.selection.getState().select({ layers: ["bulk_20"] }));
+    const top = tree.scrollTop;
+    expect(top).toBeGreaterThan(0);
+    act(() => s.selection.getState().select({ layers: ["bulk_199"] }));
+    expect(tree.scrollTop).toBeLessThan(top);
   });
 
   it("redesigns one layer with Claude from the row menu: it selects the row and opens the box", () => {
@@ -346,7 +446,7 @@ describe("LayersPanel in a patch component", () => {
   it("offers no layer inserts and explains why, so no invisible layers get added", () => {
     const s = mount(build([...FIXTURE_OPS, { op: "addComponent", component: { id: "logic", name: "Logic", kind: "patchComponent" } }]));
     act(() => s.selection.getState().enterComponent("logic"));
-    expect(container.textContent).toContain("Patch components have no layers");
+    expect(container.textContent).toContain("Patch components hold logic only.");
     expect([...container.querySelectorAll("button")].some((b) => ["Rectangle", "Text", "Image"].includes(b.textContent?.trim() ?? ""))).toBe(false);
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Insert layer"]')!.disabled).toBe(true);
     expect(planInsertLayer(s.document.getState().doc, "logic", registry, "rectangle")).toBeUndefined();

@@ -13,19 +13,20 @@ export interface TouchOption {
   label: string;
   /** Patch type the option inserts. */
   patchType: string;
-  description: string;
+  /** Only where the label alone doesn't say when it fires. */
+  description?: string;
 }
 
 /** Menu order. Options whose patch type isn't in the registry are hidden. */
 export const TOUCH_OPTIONS: readonly TouchOption[] = [
-  { kind: "tap", label: "Tap", patchType: "interaction", description: "Pulses Tap when the layer is tapped." },
-  { kind: "press", label: "Press", patchType: "interaction", description: "Down stays on while the layer is held." },
-  { kind: "longPress", label: "Long Press", patchType: "longPress", description: "Turns on after holding still for a moment." },
-  { kind: "doubleTap", label: "Double Tap", patchType: "doubleTap", description: "Tells a double tap from a single tap." },
-  { kind: "drag", label: "Drag", patchType: "drag", description: "Moves the layer with a finger, wired to its Position." },
-  { kind: "scrollY", label: "Scroll Y", patchType: "scroll", description: "Scrolls the layer up and down inside its parent." },
-  { kind: "scrollX", label: "Scroll X", patchType: "scroll", description: "Scrolls the layer sideways inside its parent." },
-  { kind: "hover", label: "Hover", patchType: "hover", description: "On while the mouse pointer is over the layer." },
+  { kind: "tap", label: "Tap", patchType: "interaction" },
+  { kind: "press", label: "Press", patchType: "interaction", description: "While the layer is held down" },
+  { kind: "longPress", label: "Long Press", patchType: "longPress", description: "After holding still for a moment" },
+  { kind: "doubleTap", label: "Double Tap", patchType: "doubleTap" },
+  { kind: "drag", label: "Drag", patchType: "drag" },
+  { kind: "scrollY", label: "Scroll Y", patchType: "scroll", description: "Scroll up and down in its parent" },
+  { kind: "scrollX", label: "Scroll X", patchType: "scroll", description: "Scroll sideways in its parent" },
+  { kind: "hover", label: "Hover", patchType: "hover" },
 ];
 
 /** Touch options available with this registry. */

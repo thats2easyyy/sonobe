@@ -1,9 +1,24 @@
 /* Layers panel */
 .sb-layerspanel {
+  container-type: inline-size;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+}
+
+.sb-layerspanel__filter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3) 0 var(--space-4);
+}
+
+.sb-layerspanel__search {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .sb-layerspanel__component {
@@ -11,14 +26,10 @@
   flex: none;
   align-items: center;
   gap: var(--space-2);
-  height: 30px;
-  padding: 0 var(--space-4) 0 var(--space-5);
+  height: var(--control-h-md);
+  padding: 0 var(--space-4) 0 var(--space-3);
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
-}
-
-.sb-layerspanel__component-icon {
-  flex: none;
 }
 
 .sb-layerspanel__crumbs {
@@ -33,12 +44,16 @@
   display: inline-flex;
   flex: none;
   align-items: center;
+  max-width: 40%;
   color: var(--text-disabled);
 }
 
+.sb-layerspanel__crumb-item > svg {
+  flex: none;
+}
+
 .sb-layerspanel__crumb {
-  display: inline-flex;
-  align-items: center;
+  display: block;
   min-width: 0;
   height: 20px;
   padding: 0 var(--space-2);
@@ -48,6 +63,7 @@
   background: transparent;
   color: var(--text-tertiary);
   font: inherit;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -65,16 +81,10 @@ button.sb-layerspanel__crumb {
 
 .sb-layerspanel__crumb[aria-current] {
   display: block;
+  flex: 1 1 auto;
   line-height: 20px;
   color: var(--text-secondary);
   font-weight: var(--font-weight-medium);
-}
-
-.sb-layerspanel__kind {
-  flex: none;
-  margin-left: auto;
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
 }
 
 .sb-layerspanel__body {
@@ -110,22 +120,23 @@ button.sb-layerspanel__crumb {
   pointer-events: none;
 }
 
+.sb-layerspanel .sb-tree__actions {
+  gap: 2px;
+}
+
 .sb-layerspanel__status {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
 
+/* The action cluster overlays a row's right edge only where the tree shows it: pointer hover, the keyboard-focused row, focus or an open menu inside it. */
 @media (hover: hover) {
-  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-layerspanel__status,
-  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover .sb-layerspanel__badges {
-    display: none;
+  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:hover :is(.sb-layerspanel__status, .sb-layerspanel__badges),
+  .sb-layerspanel .sb-tree:not([data-dragging])[data-kbd] .sb-tree__row[data-focused] :is(.sb-layerspanel__status, .sb-layerspanel__badges),
+  .sb-layerspanel .sb-tree:not([data-dragging]) .sb-tree__row:has(.sb-tree__actions :focus-visible, .sb-tree__actions [aria-expanded="true"]) :is(.sb-layerspanel__status, .sb-layerspanel__badges) {
+    visibility: hidden;
   }
-}
-
-.sb-layerspanel .sb-tree:focus-within .sb-tree__row[data-focused] .sb-layerspanel__status,
-.sb-layerspanel .sb-tree:focus-within .sb-tree__row[data-focused] .sb-layerspanel__badges {
-  display: none;
 }
 
 .sb-layerspanel__badges {
@@ -143,28 +154,63 @@ button.sb-layerspanel__crumb {
   border-radius: var(--radius-xs);
   background: var(--bg-field);
   color: var(--text-secondary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   line-height: 15px;
   white-space: nowrap;
 }
 
-.sb-layerspanel__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
+.sb-layerspanel__empty .sb-empty__title {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-normal);
 }
 
-.sb-layerspanel__filter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.sb-layerspanel__starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(max-content, 1fr));
+  gap: var(--space-3);
   width: 100%;
 }
 
-.sb-layerspanel__search {
-  flex: 1 1 auto;
+.sb-layerspanel__starters .sb-btn {
   min-width: 0;
+  padding: 0 var(--space-3);
+}
+
+@container (max-width: 259px) {
+  .sb-layerspanel__starters .sb-btn {
+    padding: 0 var(--space-2);
+  }
+
+  .sb-layerspanel__starters .sb-btn__icon {
+    display: none;
+  }
+}
+
+@container (max-width: 219px) {
+  .sb-layerspanel__starters {
+    gap: var(--space-2);
+  }
+}
+
+.sb-layerspanel__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .sb-layerspanel__link:hover {
+    text-decoration: underline;
+  }
+}
+
+.sb-layerspanel__link:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* Drops: cables from the patch editor and files from the desktop */
@@ -202,7 +248,7 @@ button.sb-layerspanel__crumb {
   border-radius: var(--radius-full);
   background: var(--accent);
   color: var(--text-on-accent);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   line-height: 16px;
   text-overflow: ellipsis;

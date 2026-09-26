@@ -17,6 +17,7 @@ import {
   LockOpen,
   LogIn,
   PanelLeftClose,
+  Pencil,
   Plus,
   Pointer,
   Repeat,
@@ -76,18 +77,23 @@ export interface LayersPanelProps {
 
 const EMPTY_LAYERS: readonly LayerNode[] = [];
 
-const LAYER_CATEGORY_ORDER: readonly LayerTypeSpec["category"][] = ["shape", "basic", "media", "container", "advanced", "component"];
+type LayerCategory = LayerTypeSpec["category"];
 
-const LAYER_CATEGORY_LABELS: Readonly<Record<LayerTypeSpec["category"], string>> = {
+const LAYER_CATEGORY_ORDER: readonly LayerCategory[] = ["shape", "basic", "media", "advanced", "component"];
+
+const LAYER_CATEGORY_LABELS: Readonly<Partial<Record<LayerCategory, string>>> = {
   shape: "Shapes",
   basic: "Basic",
   media: "Media",
-  container: "Containers",
   advanced: "Advanced",
   component: "Components",
 };
 
+/** The + menu lists Group with the basic layers; the registry keeps it in its own category. */
+const menuCategory = (category: LayerCategory): LayerCategory => (category === "container" ? "basic" : category);
+
 const KIND_LABELS = { prototype: "Prototype", layerComponent: "Layer component", patchComponent: "Patch component" } as const;
+const INSERT_ANCHOR_MAX = 24;
 
 const isHidden = (node: LayerNode) => node.props.enabled === false;
 
@@ -176,10 +182,12 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   /** A patch component is never drawn, so it can't hold layers (core refuses them too). */
   const canHoldLayers = component?.kind !== "patchComponent";
   const menu = useContextMenu();
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const pendingScroll = useRef<Id | null>(null);
+  const renameNonce = useRef(0);
+  const scrollNonce = useRef(0);
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<ReadonlySet<string>>(() => new Set());
+  const [renameRequest, setRenameRequest] = useState<{ id: Id; nonce: number }>();
+  const [scrollTo, setScrollTo] = useState<{ id: Id; nonce: number }>();
   const [collapsedByComponent, setCollapsedByComponent] = useState<Readonly<Record<Id, ReadonlySet<Id>>>>({});
   const [fileDrop, setFileDrop] = useState<{ layerId: Id | null; label: string } | null>(null);
   const drag = useCableDrag(session);
@@ -219,7 +227,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   useEffect(() => {
     if (selectedLayers.length === 0) return;
     expandTo(selectedLayers);
-    pendingScroll.current = selectedLayers.at(-1)!;
+    setScrollTo({ id: selectedLayers.at(-1)!, nonce: ++scrollNonce.current });
     // Only a selection change should expand; collapsing a selected layer's parent must stick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLayers]);
@@ -229,17 +237,9 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     const revealed = reveal.ids.filter((id) => findLayer(layers, id));
     if (revealed.length === 0) return;
     expandTo(revealed);
-    pendingScroll.current = revealed[0]!;
+    setScrollTo({ id: revealed[0]!, nonce: ++scrollNonce.current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal?.nonce]);
-
-  useEffect(() => {
-    const id = pendingScroll.current;
-    if (!id) return;
-    pendingScroll.current = null;
-    const row = bodyRef.current?.querySelector(`[data-layer-id="${id}"]`)?.closest(".sb-tree__row");
-    (row as HTMLElement | null | undefined)?.scrollIntoView?.({ block: "nearest" });
-  });
 
   const apply = (ops: readonly Op[], label: string) => {
     if (ops.length === 0) return undefined;
@@ -257,7 +257,17 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     else fallback();
   };
 
+  /** The registered shortcut of a command, so tooltips and menus show what the keyboard does. */
+  const keyOf = (commandId: string): string | undefined => {
+    const shortcut = commands?.registry.get(commandId)?.shortcut;
+    return typeof shortcut === "string" ? shortcut : shortcut?.[0];
+  };
+
+  const requestRename = (id: Id) => setRenameRequest({ id, nonce: ++renameNonce.current });
+
   const layerById = (id: Id) => findLayer(layers, id)?.layer;
+  const insertAnchor = selectedLayers.length ? layerById(selectedLayers.at(-1)!)?.name : undefined;
+  const insertAnchorName = insertAnchor && insertAnchor.length > INSERT_ANCHOR_MAX ? `${insertAnchor.slice(0, INSERT_ANCHOR_MAX - 1)}…` : insertAnchor;
 
   /** A row action applies to the whole selection when the row is part of it. */
   const targetsFor = (node: LayerNode): LayerNode[] => {
@@ -340,9 +350,9 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     const specs = [...registry.layers.values()];
     const out: MenuEntry[] = [];
     for (const category of LAYER_CATEGORY_ORDER) {
-      const list = specs.filter((s) => s.category === category);
+      const list = specs.filter((spec) => menuCategory(spec.category) === category);
       if (list.length === 0) continue;
-      out.push({ type: "label", id: `label-${category}`, label: LAYER_CATEGORY_LABELS[category] });
+      out.push({ type: "label", id: `label-${category}`, label: LAYER_CATEGORY_LABELS[category] ?? category });
       for (const spec of list) {
         if (spec.type !== COMPONENT_INSTANCE_LAYER_TYPE) {
           out.push({ id: `insert-${spec.type}`, label: spec.name, icon: <LayerTypeIcon type={spec.type} />, onSelect: () => insert(spec.type) });
@@ -352,7 +362,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
         out.push(
           targets.length
             ? { id: "insert-componentInstance", label: "Component Instance", icon: <LayerTypeIcon type={spec.type} />, submenu: targets.map((c): MenuEntry => ({ id: `insert-instance-${c.id}`, label: c.name, onSelect: () => insert(spec.type, c.id) })) }
-            : { id: "insert-componentInstance", label: "Component Instance", icon: <LayerTypeIcon type={spec.type} />, description: "Select layers and choose Create Component first.", disabled: true },
+            : { id: "insert-componentInstance", label: "Component Instance (none yet)", icon: <LayerTypeIcon type={spec.type} />, disabled: true },
         );
       }
     }
@@ -363,6 +373,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     id,
     label,
     icon,
+    shortcut: keyOf(`layer.${id}`),
     onSelect: () => run(`layer.${id}`, () => report(arrangeLayers(session, direction))),
   });
 
@@ -374,6 +385,18 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     const instance = single && node.type === COMPONENT_INSTANCE_LAYER_TYPE && node.component ? doc.components[node.component] : undefined;
     return [
       { id: "touch", label: "Add Interaction", icon: <Pointer size={14} />, disabled: !single, ...(single ? { submenu: touchMenuEntries(session, node.id).filter((e) => e.type !== "label") } : { description: "Select one layer" }) },
+      { type: "separator" },
+      { id: "copy", label: "Copy", icon: <Copy size={14} />, shortcut: "Mod+C", onSelect: () => run("edit.copy", () => void copyFallback()) },
+      { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, shortcut: "Mod+V", onSelect: () => run("edit.paste", () => void pasteFallback()) },
+      { id: "duplicate", label: "Duplicate", icon: <CopyPlus size={14} />, shortcut: "Mod+D", onSelect: () => run("edit.duplicate", () => report(duplicateSelection(session))) },
+      { id: "rename", label: "Rename", icon: <Pencil size={14} />, shortcut: "Enter", onSelect: () => requestRename(node.id) },
+      { type: "separator" },
+      { id: "group", label: "Group", icon: <Group size={14} />, shortcut: "Mod+G", onSelect: () => run("layer.group", () => report(groupSelection(session))) },
+      { id: "ungroup", label: "Ungroup", icon: <Ungroup size={14} />, shortcut: "Mod+Shift+G", disabled: !hasGroup, onSelect: () => run("layer.ungroup", () => report(ungroupSelection(session))) },
+      { id: "createComponent", label: "Create Component", icon: <Component size={14} />, shortcut: "Mod+Ctrl+G", onSelect: () => run("layer.createComponent", () => report(createComponentFromSelection(session))) },
+      ...(instance ? [{ id: "enterComponent", label: `Edit “${instance.name}”`, icon: <LogIn size={14} />, shortcut: "Alt+ArrowDown", onSelect: () => sel().enterComponent(instance.id) } satisfies MenuEntry] : []),
+      { type: "separator" },
+      { id: "reveal", label: "Reveal in Patch Editor", icon: <ScanSearch size={14} />, onSelect: () => revealInPatchEditor(targets) },
       {
         id: "redesign",
         label: "Redesign with Claude…",
@@ -385,19 +408,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
           run("ai.redesign", () => designStore.getState().openBox());
         },
       },
-      { type: "separator" },
-      { id: "copy", label: "Copy", icon: <Copy size={14} />, shortcut: "Mod+C", onSelect: () => run("edit.copy", () => void copyFallback()) },
-      { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, shortcut: "Mod+V", onSelect: () => run("edit.paste", () => void pasteFallback()) },
-      { id: "duplicate", label: "Duplicate", icon: <CopyPlus size={14} />, shortcut: "Mod+D", onSelect: () => run("edit.duplicate", () => report(duplicateSelection(session))) },
-      { type: "separator" },
-      { id: "group", label: "Group", icon: <Group size={14} />, shortcut: "Mod+G", onSelect: () => run("layer.group", () => report(groupSelection(session))) },
-      { id: "ungroup", label: "Ungroup", icon: <Ungroup size={14} />, shortcut: "Mod+Shift+G", disabled: !hasGroup, onSelect: () => run("layer.ungroup", () => report(ungroupSelection(session))) },
-      { id: "createComponent", label: "Create Component", icon: <Component size={14} />, shortcut: "Mod+Ctrl+G", onSelect: () => run("layer.createComponent", () => report(createComponentFromSelection(session))) },
-      ...(instance ? [{ id: "enterComponent", label: `Edit “${instance.name}”`, icon: <LogIn size={14} />, shortcut: "Alt+ArrowDown", onSelect: () => sel().enterComponent(instance.id) } satisfies MenuEntry] : []),
-      { type: "separator" },
-      { id: "reveal", label: "Reveal in Patch Editor", icon: <ScanSearch size={14} />, onSelect: () => revealInPatchEditor(targets) },
-      { id: "visibility", label: hidden ? "Show" : "Hide", icon: hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: () => toggleVisibility(node) },
-      { id: "lock", label: node.locked ? "Unlock" : "Lock", icon: node.locked ? <LockOpen size={14} /> : <Lock size={14} />, onSelect: () => toggleLock(node) },
+      { id: "visibility", label: hidden ? "Show" : "Hide", icon: hidden ? <Eye size={14} /> : <EyeOff size={14} />, shortcut: keyOf("layer.toggleVisibility"), onSelect: () => toggleVisibility(node) },
+      { id: "lock", label: node.locked ? "Unlock" : "Lock", icon: node.locked ? <LockOpen size={14} /> : <Lock size={14} />, shortcut: keyOf("layer.toggleLock"), onSelect: () => toggleLock(node) },
       {
         id: "arrange",
         label: "Arrange",
@@ -510,46 +522,39 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
 
   const crumbs = selectBreadcrumbs({ componentPath }, doc);
 
+  const clearFilter = () => {
+    setQuery("");
+    setTypes(new Set());
+  };
+
   const emptyState = filtering ? (
     <EmptyState
       size="sm"
-      icon={<Search size={16} />}
-      title="No matching layers"
-      description={query.trim() ? `Nothing here matches “${query.trim()}”.` : "No layers of the chosen types."}
-      actions={
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setQuery("");
-            setTypes(new Set());
-          }}
-        >
-          Clear Filter
-        </Button>
+      variant="inline"
+      title={
+        <>
+          {query.trim() ? `No matching layers for “${query.trim()}”.` : "No matching layers."}{" "}
+          <button type="button" className="sb-layerspanel__link" onClick={clearFilter}>
+            Clear
+          </button>
+        </>
       }
     />
   ) : !canHoldLayers ? (
-    <EmptyState
-      size="sm"
-      icon={<Component size={16} />}
-      title="Patch components have no layers"
-      description="A patch component is logic only, like a function: edit its patches in the patch editor. To reuse layers, select them in a prototype and choose Create Component."
-    />
+    <EmptyState size="sm" variant="inline" title="Patch components hold logic only. Select layers and choose Create Component to reuse them." />
   ) : (
     <EmptyState
       size="sm"
-      icon={<LayerTypeIcon type="rectangle" size={16} />}
-      title="No layers yet"
-      description="Layers are what people see and touch. Start with a shape, some text, or an image, or drop an image file here."
+      variant="inline"
+      title="No layers yet. Drop an image or add one."
       actions={
-        <>
+        <div className="sb-layerspanel__starters">
           {["rectangle", "text", "image"].filter((type) => registry.layers.has(type)).map((type) => (
-            <Button key={type} size="sm" variant="secondary" icon={<LayerTypeIcon type={type} size={13} />} onClick={() => insert(type)}>
+            <Button key={type} icon={<LayerTypeIcon type={type} size={13} />} onClick={() => insert(type)}>
               {typeName(type)}
             </Button>
           ))}
-        </>
+        </div>
       }
     />
   );
@@ -563,7 +568,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
         <>
           {canHoldLayers ? (
             <Menu aria-label="Insert layer" placement="bottom-end" entries={insertEntries}>
-              <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" />
+              <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" tooltip={insertAnchorName ? `Insert layer above “${insertAnchorName}”` : undefined} shortcut={keyOf("layer.insert")} />
             </Menu>
           ) : (
             <IconButton size="sm" icon={<Plus size={14} />} label="Insert layer" tooltip="Patch components hold only patches" disabled />
@@ -571,49 +576,50 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
           {onCollapse && <IconButton size="sm" icon={<PanelLeftClose size={14} />} label="Hide layers" shortcut="Mod+1" onClick={onCollapse} />}
         </>
       }
-      footer={
+    >
+      <div className="sb-layerspanel" onFocusCapture={() => sel().setFocusedPanel("layers")}>
         <div className="sb-layerspanel__filter">
           <TextField
             size="sm"
             aria-label="Filter layers"
-            placeholder="Filter by name or type"
+            placeholder="Filter layers"
             containerClassName="sb-layerspanel__search"
-            leading={<Search size={12} strokeWidth={2} />}
+            leading={<Search size={12} strokeWidth={1.75} />}
             trailing={query ? <IconButton size="xs" icon={<X size={11} />} label="Clear filter" tooltip={false} onClick={() => setQuery("")} /> : undefined}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onCancel={() => setQuery("")}
           />
-          <Menu aria-label="Filter by layer type" placement="top-end" entries={typeFilterEntries}>
+          <Menu aria-label="Filter by layer type" placement="bottom-end" entries={typeFilterEntries}>
             <IconButton size="sm" icon={<ListFilter size={13} />} label={types.size ? `Showing ${types.size} layer ${types.size === 1 ? "type" : "types"}` : "Filter by type"} active={types.size > 0} badge={types.size > 0} />
           </Menu>
         </div>
-      }
-    >
-      <div className="sb-layerspanel" onFocusCapture={() => sel().setFocusedPanel("layers")}>
-        <div className="sb-layerspanel__component">
-          {crumbs.length > 1 && <IconButton size="xs" icon={<ChevronLeft size={13} />} label="Exit component" shortcut="Alt+ArrowUp" onClick={() => exitComponent(session)} />}
-          <Component size={13} strokeWidth={1.75} aria-hidden className="sb-layerspanel__component-icon" />
-          <nav aria-label="Component path" className="sb-layerspanel__crumbs">
-            {crumbs.map((crumb, i) =>
-              i < crumbs.length - 1 ? (
-                <span key={crumb.id} className="sb-layerspanel__crumb-item">
-                  <button type="button" className="sb-layerspanel__crumb" onClick={() => sel().setComponentPath(crumb.path)}>
-                    {crumb.name}
-                  </button>
-                  <ChevronRight size={11} aria-hidden />
-                </span>
-              ) : (
-                <span key={crumb.id} className="sb-layerspanel__crumb" aria-current="page">
-                  {crumb.name}
-                </span>
-              ),
-            )}
-          </nav>
-          {component && <span className="sb-layerspanel__kind">{KIND_LABELS[component.kind]}</span>}
-        </div>
+        {crumbs.length > 1 && (
+          <div className="sb-layerspanel__component">
+            <IconButton size="sm" icon={<ChevronLeft size={13} />} label="Exit component" shortcut="Alt+ArrowUp" onClick={() => exitComponent(session)} />
+            <nav aria-label="Layers component path" className="sb-layerspanel__crumbs">
+              {crumbs.map((crumb, i) =>
+                i < crumbs.length - 1 ? (
+                  <span key={crumb.id} className="sb-layerspanel__crumb-item">
+                    <Tooltip content={crumb.name} placement="bottom-start">
+                      <button type="button" className="sb-layerspanel__crumb" onClick={() => sel().setComponentPath(crumb.path)}>
+                        {crumb.name}
+                      </button>
+                    </Tooltip>
+                    <ChevronRight size={11} aria-hidden />
+                  </span>
+                ) : (
+                  <Tooltip key={crumb.id} content={component ? `${crumb.name} · ${KIND_LABELS[component.kind]}` : crumb.name} placement="bottom-start">
+                    <span className="sb-layerspanel__crumb" aria-current="page">
+                      {crumb.name}
+                    </span>
+                  </Tooltip>
+                ),
+              )}
+            </nav>
+          </div>
+        )}
         <div
-          ref={bodyRef}
           className="sb-layerspanel__body"
           data-cable={cableActive ? "" : undefined}
           data-file-drop={fileDrop ? (fileDrop.layerId === null ? "panel" : "row") : undefined}
@@ -631,6 +637,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
             nodes={nodes}
             getLabel={(node) => node.name}
             expanded={expanded}
+            expandable={!filtering}
             onExpandedChange={
               filtering
                 ? undefined
@@ -653,6 +660,9 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
                     apply(ops, `Move ${subject(moving)}`);
                   }
             }
+            renameRequest={renameRequest}
+            renameOnDoubleClick={(node) => !(node.type === COMPONENT_INSTANCE_LAYER_TYPE && node.component && doc.components[node.component])}
+            scrollToId={scrollTo}
             onActivate={(node) => {
               if (node.type === COMPONENT_INSTANCE_LAYER_TYPE && node.component && doc.components[node.component]) sel().enterComponent(node.component);
             }}
@@ -677,8 +687,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
                   {shapes && <LayerBadges node={node} copies={shapes.copies(node.id)} />}
                   {(isHidden(node) || node.locked) && (
                     <span className="sb-layerspanel__status">
-                      {isHidden(node) && <EyeOff size={12} strokeWidth={1.75} aria-label="Hidden" />}
-                      {node.locked && <Lock size={12} strokeWidth={1.75} aria-label="Locked" />}
+                      {isHidden(node) && <EyeOff size={13} strokeWidth={1.75} aria-label="Hidden" />}
+                      {node.locked && <Lock size={13} strokeWidth={1.75} aria-label="Locked" />}
                     </span>
                   )}
                   {accepting && (
@@ -699,10 +709,25 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
               return (
                 <>
                   <Menu aria-label={`Add an interaction to ${node.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, node.id)}>
-                    <IconButton size="xs" icon={<Pointer size={12} />} label={`Touch: add an interaction to ${node.name}`} tooltip="Touch: add an interaction" />
+                    <IconButton size="sm" icon={<Pointer size={13} strokeWidth={1.75} />} label={`Touch: add an interaction to ${node.name}`} tooltip="Touch: add an interaction" />
                   </Menu>
-                  <IconButton size="xs" icon={hidden ? <EyeOff size={12} /> : <Eye size={12} />} label={hidden ? `Show ${node.name}` : `Hide ${node.name}`} tooltip={hidden ? "Show" : "Hide"} onClick={() => toggleVisibility(node)} />
-                  <IconButton size="xs" icon={node.locked ? <Lock size={12} /> : <LockOpen size={12} />} label={node.locked ? `Unlock ${node.name}` : `Lock ${node.name}`} tooltip={node.locked ? "Unlock" : "Lock"} active={node.locked} onClick={() => toggleLock(node)} />
+                  <IconButton
+                    size="sm"
+                    icon={hidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
+                    label={hidden ? `Show ${node.name}` : `Hide ${node.name}`}
+                    tooltip={hidden ? "Show" : "Hide"}
+                    shortcut={keyOf("layer.toggleVisibility")}
+                    onClick={() => toggleVisibility(node)}
+                  />
+                  <IconButton
+                    size="sm"
+                    icon={node.locked ? <Lock size={13} strokeWidth={1.75} /> : <LockOpen size={13} strokeWidth={1.75} />}
+                    label={node.locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
+                    tooltip={node.locked ? "Unlock" : "Lock"}
+                    shortcut={keyOf("layer.toggleLock")}
+                    active={node.locked}
+                    onClick={() => toggleLock(node)}
+                  />
                 </>
               );
             }}

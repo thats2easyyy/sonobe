@@ -1,7 +1,7 @@
 /** Session-bound Touch actions, shared by the Layers panel rows and the inspector header. */
 
 import type { Id } from "@sonobe/core";
-import { ArrowLeftRight, ArrowUpDown, Hand, MousePointer2, MousePointerClick, Move, Pointer, Timer } from "lucide-react";
+import { ArrowLeftRight, ArrowUpDown, CircleDot, Hand, MousePointer2, MousePointerClick, Move, Timer } from "lucide-react";
 import type { ReactNode } from "react";
 import type { EditorSession } from "../../state/session.ts";
 import type { MenuEntry } from "../../ui/Menu.tsx";
@@ -9,7 +9,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { planTouch, touchOptions, type TouchKind } from "./touch.ts";
 
 export const TOUCH_ICONS: Readonly<Record<TouchKind, ReactNode>> = {
-  tap: <Pointer size={14} />,
+  tap: <CircleDot size={14} />,
   press: <Hand size={14} />,
   longPress: <Timer size={14} />,
   doubleTap: <MousePointerClick size={14} />,
@@ -24,6 +24,19 @@ export interface TouchResult {
   patchId?: Id;
   message?: string;
 }
+
+const NEXT_STEP = "Drag from its output into empty space to add what happens next.";
+const DRIVES_POSITION = "It now drives the layer's Position.";
+const TOAST_DESCRIPTION: Readonly<Record<TouchKind, string>> = {
+  tap: NEXT_STEP,
+  press: NEXT_STEP,
+  longPress: NEXT_STEP,
+  doubleTap: NEXT_STEP,
+  hover: NEXT_STEP,
+  drag: DRIVES_POSITION,
+  scrollX: DRIVES_POSITION,
+  scrollY: DRIVES_POSITION,
+};
 
 /** Add a pre-wired interaction for a layer in the current component, reveal it in the patch editor, and say what happened. */
 export function addTouchInteraction(session: EditorSession, layerId: Id, kind: TouchKind): TouchResult {
@@ -46,7 +59,7 @@ export function addTouchInteraction(session: EditorSession, layerId: Id, kind: T
   toast({
     id: "touch-added",
     title: plan.label.replace(/^Add /, "Added "),
-    description: plan.positionLinked ? "Position is already driven by a patch, so it wasn't rewired." : "It's selected in the patch editor, ready to wire up.",
+    description: plan.positionLinked ? "Position is already driven by a patch, so it wasn't rewired." : TOAST_DESCRIPTION[kind],
     tone: "success",
   });
   return patchId ? { ok: true, patchId } : { ok: true };
@@ -60,8 +73,8 @@ export function touchMenuEntries(session: EditorSession, layerId: Id): MenuEntry
       (option): MenuEntry => ({
         id: `touch-${option.kind}`,
         label: option.label,
-        description: option.description,
         icon: TOUCH_ICONS[option.kind],
+        ...(option.description ? { description: option.description } : {}),
         onSelect: () => void addTouchInteraction(session, layerId, option.kind),
       }),
     ),

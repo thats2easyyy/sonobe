@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { blurFields, collectConsoleProblems, flowNode, hook, modKey, newIds, openEditor, patchIds, runCommand } from "./helpers.ts";
 
 test.describe("patch editor: align keys, publishing ports, and variables", () => {
@@ -141,5 +141,40 @@ test.describe("patch editor: reveal (MCP reveal with focus)", () => {
     });
     await page.waitForTimeout(500);
     expect((await viewport(page)).transform).toBe(measured);
+  });
+});
+
+const settledRect = (locator: Locator) =>
+  locator.evaluate(async (el) => {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    let last = "";
+    for (let steady = 0; steady < 8; ) {
+      await frame();
+      const now = JSON.stringify(el.getBoundingClientRect());
+      steady = now === last ? steady + 1 : 0;
+      last = now;
+    }
+    return last;
+  });
+
+test.describe("layers panel: the Touch menu under a real mouse", () => {
+  test("the menu stays where it opened while the pointer travels from the row into it, and its item adds the patch", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const before = await patchIds(page);
+    const row = page.locator("#sb-layers").getByText("Sun", { exact: true }).first();
+    await row.hover();
+    await page.getByRole("button", { name: "Touch: add an interaction to Sun" }).click();
+    const menu = page.getByRole("menu", { name: "Add an interaction to Sun" });
+    await expect(menu).toBeVisible();
+    const opened = await settledRect(menu);
+    const tap = menu.getByRole("menuitem", { name: /^Tap/ });
+    const target = (await tap.boundingBox())!;
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 });
+    expect(await settledRect(menu)).toBe(opened);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
+    expect(problems).toEqual([]);
   });
 });
