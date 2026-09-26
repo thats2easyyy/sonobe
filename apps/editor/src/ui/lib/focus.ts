@@ -46,3 +46,12 @@ export function isFocusVisible(el: Element): boolean {
     return true;
   }
 }
+
+const NON_TEXT_INPUTS = new Set(["button", "checkbox", "radio", "range", "color", "file", "image", "reset", "submit"]);
+
+/** Fields that match :focus-visible after a mouse click because the caret needs to show. */
+export function isTextEntry(el: Element): boolean {
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) return !NON_TEXT_INPUTS.has(el.type);
+  return el instanceof HTMLElement && el.isContentEditable;
+}
