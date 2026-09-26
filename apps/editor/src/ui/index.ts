@@ -7,7 +7,7 @@ export { ColorField, type ColorFieldProps } from "./ColorField.tsx";
 export { ColorPicker, DEFAULT_SWATCHES, type ColorPickerProps } from "./ColorPicker.tsx";
 export { CommandPalette, type CommandPaletteProps } from "./CommandPalette.tsx";
 export { ContextMenu, Menu, MenuList, useContextMenu, type ContextMenuProps, type MenuCloseReason, type MenuEntry, type MenuItemEntry, type MenuListProps, type MenuProps } from "./Menu.tsx";
-export { Dialog, type DialogProps } from "./Dialog.tsx";
+export { DIALOG_WIDTH, Dialog, type DialogHeaderProps, type DialogMotion, type DialogProps } from "./Dialog.tsx";
 export { EmptyState, type EmptyStateProps } from "./EmptyState.tsx";
 export { IconButton, type IconButtonProps } from "./IconButton.tsx";
 export { Kbd, type KbdProps } from "./Kbd.tsx";

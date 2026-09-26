@@ -42,8 +42,10 @@ export interface SearchListProps<T> {
   onActiveChange?: (item: T | null) => void;
   /** Section headers when the query is empty (items should already be ordered by group). */
   groupBy?: (item: T) => string | undefined;
-  /** Rows shown greyed out that can't be picked; while searching they sort after the rest. */
+  /** Rows shown greyed out that can't be picked; while searching they sort after the enabled rows of the same match tier (a match on the first key, then the others). */
   isDisabled?: (item: T) => boolean;
+  /** Keys whose matches alone don't earn an active row: while searching, start with none unless an enabled row matched some other key, so Enter never picks a hidden match. */
+  weakKeys?: readonly string[];
   renderGroupLabel?: (group: string) => ReactNode;
   query?: string;
   defaultQuery?: string;
@@ -84,6 +86,7 @@ export function SearchList<T>({
   onActiveChange,
   groupBy,
   isDisabled,
+  weakKeys,
   renderGroupLabel,
   query: controlledQuery,
   defaultQuery = "",
@@ -104,6 +107,7 @@ export function SearchList<T>({
   const listId = useId();
   const [query, setQuery] = useControllableState(controlledQuery, defaultQuery, onQueryChange);
   const [active, setActive] = useState(0);
+  const [moved, setMoved] = useState(false);
   const localInputRef = useRef<HTMLInputElement>(null);
   const inputRef = externalInputRef ?? localInputRef;
   const listRef = useRef<HTMLDivElement>(null);
@@ -111,18 +115,29 @@ export function SearchList<T>({
   const lastPointer = useRef({ x: -1, y: -1 });
   const onActiveChangeRef = useLatest(onActiveChange);
 
+  const searching = query.trim().length > 0;
+  const primaryKey = keys[0]?.name;
+
   const rows = useMemo<Row<T>[]>(() => {
-    let results = fuzzySearch(items, query, keys, { limit });
-    if (isDisabled && query.trim()) results = [...results.filter((r) => !isDisabled(r.item)), ...results.filter((r) => isDisabled(r.item))];
+    let results = fuzzySearch(items, query, keys, { limit: searching ? limit : undefined });
+    if (isDisabled && searching) {
+      const rank = (r: (typeof results)[number]) => (primaryKey !== undefined && r.matches[primaryKey] ? 0 : 2) + (isDisabled(r.item) ? 1 : 0);
+      results = results.map((r, i) => ({ r, i, rank: rank(r) })).sort((a, b) => a.rank - b.rank || a.i - b.i).map(({ r }) => r);
+    }
     return results.map((r, index) => ({
       item: r.item,
       index,
       matches: r.matches,
-      group: !query.trim() && groupBy ? groupBy(r.item) : undefined,
+      group: !searching && groupBy ? groupBy(r.item) : undefined,
     }));
-  }, [items, query, keys, limit, groupBy, isDisabled]);
+  }, [items, query, searching, keys, primaryKey, limit, groupBy, isDisabled]);
 
-  const clampedActive = rows.length === 0 ? -1 : Math.min(active, rows.length - 1);
+  let guarded = false;
+  if (weakKeys && searching && !moved) {
+    const enabledRows = rows.filter((r) => !isDisabled?.(r.item));
+    guarded = enabledRows.length > 0 && !enabledRows.some((r) => Object.keys(r.matches).some((key) => !weakKeys.includes(key)));
+  }
+  const clampedActive = rows.length === 0 || guarded ? -1 : Math.min(active, rows.length - 1);
   const activeRow = clampedActive >= 0 ? rows[clampedActive] : undefined;
   const activeItem = activeRow?.item ?? null;
   const activeDomId = activeRow ? `${listId}-${clampedActive}` : undefined;
@@ -144,6 +159,7 @@ export function SearchList<T>({
   const go = (index: number) => {
     if (rows.length === 0) return;
     scrollOnChange.current = true;
+    setMoved(true);
     setActive(Math.max(0, Math.min(rows.length - 1, index)));
   };
 
@@ -199,6 +215,7 @@ export function SearchList<T>({
           onChange={(event) => {
             setQuery(event.target.value);
             setActive(0);
+            setMoved(false);
             if (listRef.current) listRef.current.scrollTop = 0;
           }}
           onKeyDown={handleKeyDown}
@@ -229,7 +246,9 @@ export function SearchList<T>({
                   onPointerMove={(event) => {
                     if (event.clientX === lastPointer.current.x && event.clientY === lastPointer.current.y) return;
                     lastPointer.current = { x: event.clientX, y: event.clientY };
-                    if (!isActive) setActive(row.index);
+                    if (isActive) return;
+                    setMoved(true);
+                    setActive(row.index);
                   }}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => {

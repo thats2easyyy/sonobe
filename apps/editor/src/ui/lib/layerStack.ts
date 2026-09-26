@@ -2,6 +2,7 @@
  * A stack of dismissable layers (popovers, menus, dialogs). Escape closes only the topmost layer,
  * and a press outside closes layers from the top down until it reaches one that contains the
  * target, so clicking inside a color picker closes a select open above it but not the picker.
+ * A press inside `[data-layer-ignore]` (the toaster) dismisses nothing.
  */
 
 import { useEffect, type RefObject } from "react";
@@ -21,6 +22,7 @@ const stack: DismissableLayer[] = [];
 function handlePointerDown(event: PointerEvent) {
   const target = event.target;
   if (!target || typeof (target as Node).nodeType !== "number") return;
+  if ((target as Element).closest?.("[data-layer-ignore]")) return;
   for (const layer of [...stack].reverse()) {
     if (layer.contains(target as Node)) return;
     if (!layer.outside) return;

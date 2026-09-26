@@ -6,7 +6,7 @@ import { SearchList } from "./SearchList.tsx";
 import { useCommandList, useCommands } from "./commands/CommandProvider.tsx";
 import { commandDisabledReason, commandTitle } from "./commands/commandRegistry.ts";
 import { orderPaletteItems, type PaletteItem } from "./commands/paletteOrder.ts";
-import { matchesChord, parseShortcut } from "./commands/shortcutManager.ts";
+import { formatShortcut, matchesChord, parseShortcut } from "./commands/shortcutManager.ts";
 import type { FuzzyKey } from "./lib/fuzzy.ts";
 import "./CommandPalette.css";
 
@@ -27,6 +27,8 @@ export const PALETTE_KEYS: FuzzyKey<PaletteRow>[] = [
   { name: "category", get: (i) => i.command.category, weight: 0.5, wordStart: true },
 ];
 
+const WEAK_KEYS = ["keywords"];
+
 export interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,7 +42,7 @@ export interface CommandPaletteProps {
  */
 export function CommandPalette({ open, onOpenChange, placeholder = "Type a command or search…" }: CommandPaletteProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} aria-label="Command palette" placement="top" width={620} modalScope="palette" className="sb-palette">
+    <Dialog open={open} onOpenChange={onOpenChange} aria-label="Command palette" placement="top" width={620} motion="none" modalScope="palette" className="sb-palette">
       <PaletteBody placeholder={placeholder} onClose={() => onOpenChange(false)} />
     </Dialog>
   );
@@ -67,6 +69,7 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
     [registry, all, searching],
   );
 
+  const addPatchKeys = useMemo(() => formatShortcut("Alt+Enter", platform).join(platform === "mac" ? "" : "+"), [platform]);
   const closeChord = useMemo(() => parseShortcut("Mod+K", platform), [platform]);
 
   const run = useCallback(
@@ -91,6 +94,7 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
       getId={(i) => `${i.group}:${i.command.id}`}
       groupBy={(i) => i.group}
       isDisabled={(i) => !i.enabled}
+      weakKeys={WEAK_KEYS}
       onSelect={run}
       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
         if (matchesChord(event, closeChord)) {
@@ -98,12 +102,7 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
           onClose();
         }
       }}
-      emptyState={(q) => (
-        <div className="sb-palette__empty">
-          <div className="sb-palette__empty-title">No commands match “{q}”</div>
-          <div>Looking for a patch? Close this, point at the patch editor, and press ⌥⏎ to search patches.</div>
-        </div>
-      )}
+      emptyState={`No commands match. To add a patch, hover the patch editor and press ${addPatchKeys}.`}
       renderItem={(item, ctx) => {
         const Icon = item.command.icon;
         return (
@@ -112,7 +111,8 @@ function PaletteBody({ placeholder, onClose }: { placeholder: string; onClose: (
               {Icon ? <Icon size={15} strokeWidth={1.75} /> : null}
             </span>
             <span className="sb-palette__title">{ctx.highlight("title", item.title)}</span>
-            {ctx.query && item.command.category && <span className="sb-palette__category">{item.command.category}</span>}
+            {ctx.matches.keywords && !ctx.matches.title && <span className="sb-palette__matches">matches “{ctx.query.trim()}”</span>}
+            {ctx.query && item.command.category && <span className="sb-palette__category">{ctx.highlight("category", item.command.category)}</span>}
             {!item.enabled && item.reason && <span className="sb-palette__reason">{item.reason}</span>}
             {item.command.shortcut && <Kbd shortcut={item.command.shortcut} className="sb-palette__kbd" />}
           </div>

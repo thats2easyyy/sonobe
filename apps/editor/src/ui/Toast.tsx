@@ -16,7 +16,7 @@ export interface ToastOptions {
   details?: readonly string[];
   tone?: ToastTone;
   action?: { label: string; onClick: () => void };
-  /** ms, or "persistent". Defaults to a reading-time estimate. */
+  /** ms, or "persistent". Defaults to a reading-time estimate; a toast with an action lasts at least 8 s, and a failure with an action stays until dismissed. */
   duration?: number | "persistent";
   icon?: ReactNode;
 }
@@ -25,13 +25,17 @@ interface ToastRecord extends ToastOptions {
   id: string;
   tone: ToastTone;
   state: "open" | "closing";
+  /** Grows with every show, so replacing a toast by id restarts its timer. */
+  seq: number;
 }
 
 const MAX_VISIBLE = 4;
 const EXIT_MS = 160;
+const ACTION_MIN_MS = 8_000;
 
 let toasts: ToastRecord[] = [];
 let counter = 0;
+let seq = 0;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -53,11 +57,19 @@ export function readingDuration(text: string): number {
 
 function showToast(options: ToastOptions): string {
   const id = options.id ?? `toast-${++counter}`;
-  const record: ToastRecord = { ...options, id, tone: options.tone ?? "neutral", state: "open" };
+  const record: ToastRecord = { ...options, id, tone: options.tone ?? "neutral", state: "open", seq: ++seq };
   const exists = toasts.some((t) => t.id === id);
   toasts = exists ? toasts.map((t) => (t.id === id ? record : t)) : [...toasts, record].slice(-MAX_VISIBLE);
   emit();
   return id;
+}
+
+function lifetime(item: ToastRecord): number {
+  if (item.duration === "persistent") return Infinity;
+  if (item.duration !== undefined) return item.duration;
+  if (item.action && item.tone === "danger") return Infinity;
+  const reading = readingDuration(`${item.title} ${item.description ?? ""}`);
+  return item.action ? Math.max(reading, ACTION_MIN_MS) : reading;
 }
 
 export function dismissToast(id: string): void {
@@ -95,21 +107,35 @@ export interface ToasterProps {
   placement?: "bottom-right" | "bottom-center" | "top-right";
 }
 
-/** Renders the toast stack. Mount once near the app root. Hovering pauses timers. */
+/** Renders the toast stack. Mount once near the app root. Hovering or focusing a toast pauses timers. */
 export function Toaster({ placement = "bottom-right" }: ToasterProps) {
   const items = useSyncExternalStore(subscribe, () => toasts, () => toasts);
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const section = useRef<HTMLElement>(null);
+
+  // A dismissed toast takes its focus with it without a blur.
+  useEffect(() => {
+    if (focused && !section.current?.contains(document.activeElement)) setFocused(false);
+  }, [items, focused]);
+
   return (
     <Portal>
       <section
+        ref={section}
         className="sb-toaster"
         data-placement={placement}
+        data-layer-ignore
         aria-label="Notifications"
-        onPointerEnter={() => setPaused(true)}
-        onPointerLeave={() => setPaused(false)}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+        }}
       >
         {items.map((item) => (
-          <ToastItem key={item.id} toast={item} paused={paused} />
+          <ToastItem key={item.id} toast={item} paused={hovered || focused} />
         ))}
       </section>
     </Portal>
@@ -117,9 +143,14 @@ export function Toaster({ placement = "bottom-right" }: ToasterProps) {
 }
 
 function ToastItem({ toast: item, paused }: { toast: ToastRecord; paused: boolean }) {
-  const remaining = useRef(item.duration === "persistent" ? Infinity : (item.duration ?? readingDuration(`${item.title} ${item.description ?? ""}`)));
+  const remaining = useRef(lifetime(item));
+  const shownSeq = useRef(item.seq);
 
   useEffect(() => {
+    if (shownSeq.current !== item.seq) {
+      shownSeq.current = item.seq;
+      remaining.current = lifetime(item);
+    }
     if (item.state !== "open" || paused || !Number.isFinite(remaining.current)) return;
     const startedAt = Date.now();
     const timer = setTimeout(() => dismissToast(item.id), remaining.current);
@@ -127,7 +158,8 @@ function ToastItem({ toast: item, paused }: { toast: ToastRecord; paused: boolea
       clearTimeout(timer);
       remaining.current -= Date.now() - startedAt;
     };
-  }, [item.id, item.state, paused]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id, item.seq, item.state, paused]);
 
   const icon = item.icon ?? ICONS[item.tone];
   return (
@@ -161,7 +193,7 @@ function ToastItem({ toast: item, paused }: { toast: ToastRecord; paused: boolea
           {item.action.label}
         </Button>
       )}
-      <IconButton size="xs" icon={<X size={12} />} label="Dismiss notification" tooltip={false} className="sb-toast__close" onClick={() => dismissToast(item.id)} />
+      <IconButton size="sm" icon={<X size={14} />} label="Dismiss notification" tooltip={false} className="sb-toast__close" onClick={() => dismissToast(item.id)} />
     </div>
   );
 }

@@ -10,6 +10,16 @@
   animation: sb-fade-in var(--duration-base) var(--ease-out);
 }
 
+.sb-dialog-overlay[data-motion="fade"],
+.sb-dialog-overlay[data-motion="fade"] .sb-dialog {
+  animation: sb-fade-in 100ms var(--ease-out);
+}
+
+.sb-dialog-overlay[data-motion="none"],
+.sb-dialog-overlay[data-motion="none"] .sb-dialog {
+  animation: none;
+}
+
 .sb-dialog-overlay[data-placement="top"] {
   align-items: flex-start;
   padding-top: min(14vh, 120px);
@@ -23,8 +33,72 @@
   overflow: hidden;
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-modal);
+  animation: sb-dialog-in var(--duration-base) var(--ease-out);
+}
+
+.sb-dialog {
   outline: none;
-  animation: sb-dialog-in var(--duration-slow) var(--ease-out);
+}
+
+.sb-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+  flex: none;
+  padding: var(--space-6) var(--space-7) var(--space-5);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.sb-dialog__header[data-scrolled] {
+  border-bottom-color: var(--border-subtle);
+}
+
+.sb-dialog__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sb-dialog__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: 20px;
+}
+
+.sb-dialog__description {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.sb-dialog__close {
+  margin: -1px calc(-1 * var(--space-2)) 0 0;
+}
+
+.sb-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-2) var(--space-7) var(--space-6);
+  overflow-y: auto;
+}
+
+.sb-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  flex: none;
+  padding: var(--space-5) var(--space-7);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sb-dialog__footer-start {
+  display: flex;
+  gap: var(--space-4);
+  margin-right: auto;
 }
 
 @keyframes sb-fade-in {
@@ -36,6 +110,6 @@
 @keyframes sb-dialog-in {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.985);
+    transform: translateY(6px);
   }
 }

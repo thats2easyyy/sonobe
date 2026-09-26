@@ -73,6 +73,41 @@ describe("CommandPalette", () => {
     expect(rows().map((r) => r.title)).toEqual(["Undo Mute Card Shadow"]);
     search("phone");
     expect(rows()).toEqual([]);
-    expect(document.body.textContent).toContain("Looking for a patch?");
+    expect(document.body.textContent).toContain("No commands match. To add a patch, hover the patch editor and press ⌥⏎.");
+  });
+
+  it("opens on the first command for a category-only match, with the category highlighted", () => {
+    search("edit");
+    expect(document.querySelector('[role="option"][data-active] .sb-palette__title')?.textContent).toBe("Undo Mute Card Shadow");
+    expect(document.querySelector(".sb-palette__category mark")?.textContent).toBe("Edit");
+  });
+
+  it("marks keyword-only matches and doesn't run one on Enter until you pick it", () => {
+    const comment = vi.fn();
+    const group = vi.fn();
+    const own = new CommandRegistry();
+    own.register([
+      { id: "patchEditor.comment", title: "Comment Selected Patches", keywords: ["group", "frame"], category: "Patches", run: comment },
+      { id: "patchEditor.group", title: "Group Patches into Component", category: "Patches", when: () => false, disabledReason: "Select 2 or more patches", run: group },
+    ]);
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommandProvider registry={own} platform="mac" attach={false}>
+          <CommandPalette open onOpenChange={() => undefined} />
+        </CommandProvider>,
+      ),
+    );
+    const input = search("group");
+    expect(rows().map((r) => r.title)).toEqual(["Group Patches into Component", "Comment Selected Patches"]);
+    expect(document.querySelector(".sb-palette__matches")?.textContent).toBe("matches “group”");
+    expect(document.querySelector('[role="option"][data-active]')).toBeNull();
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(comment).not.toHaveBeenCalled();
+    for (let i = 0; i < 2; i++) act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(document.querySelector('[role="option"][data-active] .sb-palette__title')?.textContent).toBe("Comment Selected Patches");
   });
 });

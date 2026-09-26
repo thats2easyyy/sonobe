@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computePosition, splitPlacement } from "./position.ts";
+import { computePosition, isEmptyRect, splitPlacement } from "./position.ts";
 
 const viewport = { width: 1000, height: 800 };
 
@@ -56,5 +56,13 @@ describe("splitPlacement", () => {
   it("defaults alignment to center", () => {
     expect(splitPlacement("left")).toEqual(["left", "center"]);
     expect(splitPlacement("bottom-end")).toEqual(["bottom", "end"]);
+  });
+});
+
+describe("isEmptyRect", () => {
+  it("is true for the zeros of a detached or hidden anchor, false for any area", () => {
+    expect(isEmptyRect({ x: 0, y: 0, width: 0, height: 0 })).toBe(true);
+    expect(isEmptyRect({ x: 40, y: 12, width: 0, height: 0 })).toBe(true);
+    expect(isEmptyRect({ x: 0, y: 0, width: 1, height: 0 })).toBe(false);
   });
 });

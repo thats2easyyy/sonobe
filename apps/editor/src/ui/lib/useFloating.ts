@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type RefCallback, type RefObject } from "react";
 import { useLatest } from "./hooks.ts";
 import { observeResize } from "./observeResize.ts";
-import { computePosition, splitPlacement, type Placement, type Rect, type Side } from "./position.ts";
+import { computePosition, isEmptyRect, splitPlacement, type Placement, type Rect, type Side } from "./position.ts";
 
 /** An element, or a virtual rect in viewport coordinates (e.g. a context-menu point). */
 export type FloatingAnchor = Element | Rect | null;
@@ -76,9 +76,11 @@ export function useFloating<T extends HTMLElement = HTMLDivElement>(options: Use
     const { anchor, placement, offset, crossOffset, padding, flip } = latest.current;
     if (!el || !anchor) return;
     let rect: Rect;
+    let detached = false;
     if (isElementAnchor(anchor)) {
       const r = anchor.getBoundingClientRect();
       rect = { x: r.left, y: r.top, width: r.width, height: r.height };
+      detached = isEmptyRect(rect);
     } else {
       rect = anchor;
     }
@@ -97,7 +99,8 @@ export function useFloating<T extends HTMLElement = HTMLDivElement>(options: Use
       maxHeight: result.maxHeight,
       anchorWidth: Math.round(rect.width),
     };
-    setState((prev) => (prev && sameState(prev, next) ? prev : next));
+    // An anchor that unmounted or hid (a hover-only trigger) reports zeros; stay where the popover was.
+    setState((prev) => (prev && (detached || sameState(prev, next)) ? prev : next));
   }, [latest]);
 
   const anchor = options.anchor;

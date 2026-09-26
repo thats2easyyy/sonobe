@@ -15,6 +15,11 @@ export interface Rect {
   height: number;
 }
 
+/** A box with no area: an element that is unmounted or `display: none` reports all zeros. */
+export function isEmptyRect(rect: Rect): boolean {
+  return rect.width === 0 && rect.height === 0;
+}
+
 export interface Size {
   width: number;
   height: number;

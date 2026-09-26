@@ -21,7 +21,7 @@
     inset 0 -1px 0 var(--border-default);
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   line-height: 1;
 }

@@ -20,7 +20,7 @@
   border: 0;
   background: transparent;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   white-space: nowrap;
   transition: color var(--duration-fast) var(--ease-standard);

@@ -2,6 +2,7 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Dialog } from "./Dialog.tsx";
 import { Popover } from "./Popover.tsx";
 import { dismissableLayerCount } from "./lib/layerStack.ts";
 
@@ -86,5 +87,44 @@ describe("Popover", () => {
     });
     expect(popover()).toBeNull();
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps a dialog open when the press lands in the toaster", () => {
+    const onOpenChange = vi.fn();
+    const toaster = document.createElement("section");
+    toaster.setAttribute("data-layer-ignore", "");
+    toaster.innerHTML = "<button>Undo</button>";
+    document.body.appendChild(toaster);
+    act(() =>
+      root.render(
+        <Dialog open onOpenChange={onOpenChange} aria-label="Demo dialog">
+          <button>Inside</button>
+        </Dialog>,
+      ),
+    );
+    act(() => {
+      toaster.querySelector("button")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    act(() => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("stays put when the anchor goes empty, as a hover-only trigger does when it unmounts", () => {
+    const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) }) as DOMRect;
+    let anchorRect = rect(100, 100, 40, 20);
+    act(() => root.render(<Harness />));
+    trigger().getBoundingClientRect = () => anchorRect;
+    act(() => trigger().click());
+    const before = { left: popover()!.style.left, top: popover()!.style.top };
+    expect(before.left).not.toBe("-10000px");
+    anchorRect = rect(0, 0, 0, 0);
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect({ left: popover()!.style.left, top: popover()!.style.top }).toEqual(before);
+    anchorRect = rect(300, 200, 40, 20);
+    act(() => void window.dispatchEvent(new Event("resize")));
+    expect(popover()!.style.left).not.toBe(before.left);
   });
 });

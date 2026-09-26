@@ -20,6 +20,8 @@ export interface TabsProps<V extends string = string> {
   idBase: string;
   variant?: "underline" | "pill";
   size?: "sm" | "md";
+  /** Set when every panel stays mounted (TabPanel `keepMounted`); otherwise only the selected tab points at its panel. */
+  keepMounted?: boolean;
   className?: string;
 }
 
@@ -35,6 +37,7 @@ export function Tabs<V extends string = string>({
   idBase,
   variant = "underline",
   size = "md",
+  keepMounted = false,
   className,
 }: TabsProps<V>) {
   const refs = useRef(new Map<V, HTMLButtonElement>());
@@ -69,7 +72,7 @@ export function Tabs<V extends string = string>({
             type="button"
             role="tab"
             id={tabId(idBase, item.value)}
-            aria-controls={tabPanelId(idBase, item.value)}
+            aria-controls={selected || keepMounted ? tabPanelId(idBase, item.value) : undefined}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             disabled={item.disabled}

@@ -85,7 +85,7 @@
 .sb-searchlist__group {
   padding: var(--space-5) var(--space-4) var(--space-2);
   color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -109,10 +109,15 @@
   background: var(--bg-selected-muted);
 }
 
+.sb-searchlist__option[data-active] .sb-kbd--plain {
+  color: var(--text-secondary);
+}
+
 .sb-searchlist__empty {
-  padding: var(--space-9) var(--space-6);
-  color: var(--text-tertiary);
-  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
 }
 
 .sb-searchlist__footer {

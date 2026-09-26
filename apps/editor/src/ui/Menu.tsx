@@ -70,6 +70,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
   const typeahead = useRef({ text: "", at: 0 });
 
   const enabled = useMemo(() => entries.flatMap((entry, i) => (isItem(entry) && !entry.disabled ? [i] : [])), [entries]);
+  const hasIcons = useMemo(() => entries.some((entry) => isItem(entry) && (!!entry.icon || entry.checked !== undefined)), [entries]);
 
   const focusIndex = useCallback((index: number) => {
     setActive(index);
@@ -155,7 +156,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
   };
 
   return (
-    <div ref={containerRef} role="menu" aria-label={ariaLabel} tabIndex={-1} className={cx("sb-menu sb-scroll", className)} onKeyDown={onKeyDown}>
+    <div ref={containerRef} role="menu" aria-label={ariaLabel} tabIndex={-1} className={cx("sb-menu sb-scroll", className)} data-icons={hasIcons || undefined} onKeyDown={onKeyDown}>
       {entries.map((entry, index) => {
         if (entry.type === "separator") return <div key={entry.id ?? `sep-${index}`} role="separator" className="sb-menu__separator" />;
         if (entry.type === "label")
@@ -189,7 +190,7 @@ export function MenuList({ entries, onClose, "aria-label": ariaLabel, autoFocus 
             onClick={() => activate(index, false)}
           >
             <span className="sb-menu__icon" aria-hidden>
-              {item.checked ? <Check size={13} strokeWidth={2.25} /> : item.icon}
+              {item.checked ? <Check size={14} /> : item.icon}
             </span>
             <span className="sb-menu__text">
               <span className="sb-menu__title">{item.label}</span>
