@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Plug } from "lucide-react";
 import { useState } from "react";
 import { getDesktopHostApi } from "../../host/detect.ts";
 import { usePresence } from "../../state/EditorProvider.tsx";
@@ -54,7 +54,7 @@ export function ConnectClaudeButton({ onClick, host, className }: ConnectClaudeB
     <Tooltip content={<span className="sb-claudebtn__tooltip">{tooltip[state]}</span>}>
       <button type="button" className={cx("sb-claudebtn", className)} data-state={state} onClick={onClick ?? (() => connectClaudeStore.getState().show())}>
         <span className="sb-claudebtn__icon" aria-hidden>
-          <Sparkles size={13} strokeWidth={2} />
+          <Plug size={14} strokeWidth={1.75} />
           <span className="sb-claudebtn__dot" />
         </span>
         <span className="sb-claudebtn__label">{label}</span>

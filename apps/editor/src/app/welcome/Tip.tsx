@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from "react";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 
-/** Tooltip text with its own measure: the kit tooltip sizes itself to the viewport, so long text would run on one line. */
+/** Tooltip text that breaks inside a long unbroken word, such as a folder path or a snake_case name. */
 export function Tip({ children }: { children: string }) {
   return <span className="sb-welcome__tip">{children}</span>;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getRegistry } from "../state/registry.ts";
 import type { Command } from "../ui/commands/commandRegistry.ts";
-import { filterShortcutSections, GESTURES_SECTION, gestureEntries, PATCH_KEYS_SECTION, shortcutSections } from "./KeyboardShortcutsDialog.tsx";
+import { filterShortcutSections, GESTURES_SECTION, gestureEntries, PATCH_KEYS_SECTION, portKeyEntries, shortcutSections } from "./KeyboardShortcutsDialog.tsx";
 
 const run = () => undefined;
 
@@ -23,6 +23,15 @@ describe("keyboard shortcuts cheat sheet", () => {
     expect(keys).toContainEqual({ title: "Insert Variable Broadcaster", shortcut: "W" });
     expect(keys).toContainEqual({ title: "Insert Pop Animation", shortcut: "A" });
     expect(sections.at(-1)!.entries.map((e) => e.title)).toContain("Cut cables");
+  });
+
+  it("teaches connecting ports from the keyboard, ahead of the single-key inserts", () => {
+    const keys = shortcutSections(commands, getRegistry(), "mac").find((s) => s.title === PATCH_KEYS_SECTION)!.entries;
+    expect(keys.slice(0, 5).map((e) => e.title)).toEqual(["Step into a node's ports", "Move between ports", "Arm an output, or connect it to an input", "Keep the output armed to connect several", "Cancel connecting"]);
+    expect(portKeyEntries("mac")[2]!.keys).toBe("⏎ or Space");
+    expect(portKeyEntries("windows")[2]!.keys).toBe("Enter or Space");
+    expect(portKeyEntries("windows")[3]).toEqual({ title: "Keep the output armed to connect several", shortcut: "Shift+Enter" });
+    expect(filterShortcutSections(shortcutSections(commands, getRegistry(), "mac"), "armed").map((s) => s.title)).toEqual([PATCH_KEYS_SECTION]);
   });
 
   it("searches titles and gesture words, keeping a matching section whole", () => {

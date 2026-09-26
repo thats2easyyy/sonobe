@@ -1,7 +1,7 @@
 import { FileBox } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
-import { Dialog } from "../ui/Dialog.tsx";
+import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
 import { SearchList } from "../ui/SearchList.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { FuzzyKey } from "../ui/lib/fuzzy.ts";
@@ -85,14 +85,14 @@ function DiscardDialog({ request, onSettle }: { request: Extract<AppDialogReques
   const titleId = useId();
   const saveRef = useRef<HTMLButtonElement>(null);
   return (
-    <Dialog open onOpenChange={(open) => !open && onSettle("cancel")} aria-labelledby={titleId} width={440} className="sb-appdialog" initialFocusRef={saveRef} closeOnOverlayClick={false}>
+    <Dialog open onOpenChange={(open) => !open && onSettle("cancel")} aria-labelledby={titleId} width={DIALOG_WIDTH.sm} className="sb-appdialog" initialFocusRef={saveRef} closeOnOverlayClick={false}>
       <div className="sb-appdialog__body">
         <h2 id={titleId} className="sb-appdialog__title">
           Save changes to “{request.name}”?
         </h2>
         <p className="sb-appdialog__text">You have unsaved changes. Save them before {DISCARD_VERBS[request.action]}, or they’ll be lost.</p>
         <div className="sb-appdialog__actions">
-          <Button variant="ghost" className="sb-appdialog__discard" onClick={() => onSettle("discard")}>
+          <Button variant="ghost-danger" className="sb-appdialog__discard" onClick={() => onSettle("discard")}>
             Don’t Save
           </Button>
           <Button onClick={() => onSettle("cancel")}>Cancel</Button>

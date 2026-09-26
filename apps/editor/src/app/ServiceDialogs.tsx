@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { DialogRequest, DialogStore, DialogVariant, PickDialogItem } from "../state/dialogs.ts";
 import { Button, type ButtonVariant } from "../ui/Button.tsx";
-import { Dialog } from "../ui/Dialog.tsx";
+import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
 import { SearchList } from "../ui/SearchList.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { FuzzyKey } from "../ui/lib/fuzzy.ts";
@@ -35,7 +35,7 @@ function ConfirmDialog({ request, onSettle }: { request: Extract<DialogRequest, 
   const cancelRef = useRef<HTMLButtonElement>(null);
   const { title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false } = request.options;
   return (
-    <Dialog open onOpenChange={(open) => !open && onSettle(false)} aria-labelledby={titleId} width={440} className="sb-appdialog" initialFocusRef={danger ? cancelRef : confirmRef} modalScope="serviceDialog">
+    <Dialog open onOpenChange={(open) => !open && onSettle(false)} aria-labelledby={titleId} width={DIALOG_WIDTH.sm} className="sb-appdialog" initialFocusRef={danger ? cancelRef : confirmRef} modalScope="serviceDialog">
       <div className="sb-appdialog__body">
         <h2 id={titleId} className="sb-appdialog__title">
           {title}
@@ -115,7 +115,7 @@ function ChooseDialog({ request, onSettle }: { request: Extract<DialogRequest, {
   const focused = (end.find((a) => a.variant === "primary") ?? end.at(-1) ?? actions[0])?.value;
   const button = (action: (typeof actions)[number]) =>
     action.align === "start" ? (
-      <Button key={action.value} variant="ghost" data-tone={action.variant === "danger" ? "danger" : undefined} onClick={() => onSettle(action.value)}>
+      <Button key={action.value} variant={action.variant === "danger" ? "ghost-danger" : "ghost"} onClick={() => onSettle(action.value)}>
         {action.label}
       </Button>
     ) : (
@@ -124,7 +124,7 @@ function ChooseDialog({ request, onSettle }: { request: Extract<DialogRequest, {
       </Button>
     );
   return (
-    <Dialog open onOpenChange={(open) => !open && onSettle(null)} aria-labelledby={titleId} width={460} className="sb-appdialog" initialFocusRef={focusRef} modalScope="serviceDialog">
+    <Dialog open onOpenChange={(open) => !open && onSettle(null)} aria-labelledby={titleId} width={DIALOG_WIDTH.sm} className="sb-appdialog" initialFocusRef={focusRef} modalScope="serviceDialog">
       <div className="sb-appdialog__body">
         <h2 id={titleId} className="sb-appdialog__title">
           {title}

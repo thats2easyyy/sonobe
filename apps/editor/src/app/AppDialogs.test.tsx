@@ -80,6 +80,7 @@ describe("AppDialogs", () => {
     });
     expect(document.body.textContent).toContain("Save changes to “Photo Zoom”?");
     expect(document.body.textContent).toContain("opening another prototype");
+    expect(buttonNamed("Don’t Save")!.dataset.variant).toBe("ghost-danger");
     act(() => buttonNamed("Don’t Save")!.click());
     await expect(first).resolves.toBe("discard");
     expect(document.body.textContent).toContain("starting a new prototype");

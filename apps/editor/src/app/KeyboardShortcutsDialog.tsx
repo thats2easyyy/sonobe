@@ -51,6 +51,18 @@ export function gestureEntries(platform: Platform): ShortcutEntry[] {
   ];
 }
 
+/** Connecting ports from the keyboard: Tab to a node, step into its ports, arm an output, connect it to an input. */
+export function portKeyEntries(platform: Platform): ShortcutEntry[] {
+  const mac = platform === "mac";
+  return [
+    { title: "Step into a node's ports", keys: mac ? "⏎ or → on a focused node, ⌥→ once it's selected" : "Enter or → on a focused node, Alt+→ once it's selected" },
+    { title: "Move between ports", keys: "↑ ↓ along a side, ← → to the other side" },
+    { title: "Arm an output, or connect it to an input", keys: mac ? "⏎ or Space" : "Enter or Space" },
+    { title: "Keep the output armed to connect several", shortcut: "Shift+Enter" },
+    { title: "Cancel connecting", shortcut: "Escape" },
+  ];
+}
+
 /** The cheat sheet's sections: commands by category (menu order), single-key inserts, then gestures. */
 export function shortcutSections(commands: readonly Command[], registry: Registry, platform: Platform): ShortcutSection[] {
   const byCategory = new Map<string, ShortcutEntry[]>();
@@ -69,7 +81,7 @@ export function shortcutSections(commands: readonly Command[], registry: Registr
     .sort(([a], [b]) => rank(a) - rank(b))
     .map(([title, entries]) => ({ title, entries }));
   const inserts = singleKeyInserts(registry).map((insert): ShortcutEntry => ({ title: `Insert ${getPatchSpec(registry, insert.type)?.name ?? insert.type}`, shortcut: insert.shortcut }));
-  if (inserts.length) sections.push({ title: PATCH_KEYS_SECTION, entries: inserts });
+  sections.push({ title: PATCH_KEYS_SECTION, entries: [...portKeyEntries(platform), ...inserts] });
   sections.push({ title: GESTURES_SECTION, entries: gestureEntries(platform) });
   return sections;
 }

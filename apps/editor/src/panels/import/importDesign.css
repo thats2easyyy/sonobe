@@ -143,7 +143,6 @@
   padding-left: var(--space-6);
 }
 
-.sb-import__note,
 .sb-import__problem {
   display: flex;
   align-items: flex-start;
@@ -154,12 +153,6 @@
   line-height: 1.45;
 }
 
-.sb-import__note {
-  background: var(--warn-soft);
-  color: var(--warn-text);
-}
-
-.sb-import__note > svg,
 .sb-import__problem > svg {
   flex: none;
   margin-top: 2px;

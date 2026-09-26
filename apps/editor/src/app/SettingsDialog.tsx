@@ -1,5 +1,5 @@
 import { DEVICE_PRESETS, type DevicePreset } from "@sonobe/core";
-import { FolderLock, Trash2 } from "lucide-react";
+import { ChevronRight, FolderLock, Trash2 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useAssistant } from "../panels/assistant/assistantStore.ts";
 import { sharedAssistantController } from "../panels/assistant/controller.ts";
@@ -22,11 +22,11 @@ const KIND_LABELS: Record<DevicePreset["kind"], string> = { phone: "Phones", tab
 
 const DEVICE_OPTIONS: SelectOption[] = DEVICE_PRESETS.map((d) => ({ value: d.id, label: d.name, group: KIND_LABELS[d.kind], trailing: `${d.size[0]}×${d.size[1]}`, keywords: [d.platform, d.kind] }));
 
-/** `descriptionId`: the description's id, for the control's aria-describedby. */
-function Row({ name, description, descriptionId, children, stack = false }: { name: string; description?: ReactNode; descriptionId?: string; children: ReactNode; stack?: boolean }) {
+/** `descriptionId`: the description's id, for the control's aria-describedby. `details`: what doesn't fit in the description, behind a closed disclosure. */
+function Row({ name, description, descriptionId, details, children, stack = false }: { name: string; description?: ReactNode; descriptionId?: string; details?: ReactNode; children: ReactNode; stack?: boolean }) {
   const id = useId();
   return (
-    <div className="sb-settings__row" data-stack={stack || undefined} role="group" aria-labelledby={id}>
+    <div className="sb-settings__row" data-stack={stack || undefined} data-details={details ? "" : undefined} role="group" aria-labelledby={id}>
       <div className="sb-settings__label">
         <span className="sb-settings__name" id={id}>
           {name}
@@ -35,6 +35,15 @@ function Row({ name, description, descriptionId, children, stack = false }: { na
           <span className="sb-settings__desc" id={descriptionId}>
             {description}
           </span>
+        )}
+        {details && (
+          <details className="sb-settings__details">
+            <summary>
+              <ChevronRight size={12} strokeWidth={2} aria-hidden />
+              Details
+            </summary>
+            <p className="sb-settings__desc">{details}</p>
+          </details>
         )}
       </div>
       <div className="sb-settings__control">{children}</div>
@@ -68,8 +77,8 @@ export interface SettingsDialogProps {
 }
 
 export const SUBSCRIPTION_SWITCH_LABEL = "Use my Claude subscription in the Assistant";
-export const SUBSCRIPTION_SWITCH_DESCRIPTION =
-  "Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees. When it's on, the Assistant can run Claude through Claude's agent adapter with the Claude account you're signed in to on this computer, using your plan's usage limits.";
+export const SUBSCRIPTION_SWITCH_DESCRIPTION = "Experimental · awaiting Anthropic's permission. Off by default and not part of any release until Anthropic agrees.";
+const SUBSCRIPTION_SWITCH_DETAILS = "When it's on, the Assistant runs Claude through Claude's agent adapter. It uses the Claude account you're signed in to on this computer, and your plan's usage limits.";
 
 /**
  * The experimental switch (desktop, with a preload that has it): the Assistant on the person's Claude
@@ -94,7 +103,7 @@ function SubscriptionSwitch() {
   if (!connection || connection.available === false) return null;
   return (
     // The description is the switch's too: a screen reader says it's experimental and awaiting Anthropic's permission.
-    <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION} descriptionId={descriptionId}>
+    <Row name={SUBSCRIPTION_SWITCH_LABEL} description={SUBSCRIPTION_SWITCH_DESCRIPTION} descriptionId={descriptionId} details={SUBSCRIPTION_SWITCH_DETAILS}>
       <Toggle aria-label={SUBSCRIPTION_SWITCH_LABEL} aria-describedby={descriptionId} checked={connection.subscriptionEnabled} disabled={saving} onChange={(checked) => void change(checked)} />
     </Row>
   );
@@ -170,7 +179,7 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
               name="What Claude can do"
               description={
                 agentPermission === "edit"
-                  ? "Claude can read, simulate, and change your prototype. Every change is one labeled undo step."
+                  ? "Claude can read, simulate, and change your prototype. Each change is one undo step."
                   : "Claude can look and simulate, but can't change, save, or open prototypes."
               }
             >

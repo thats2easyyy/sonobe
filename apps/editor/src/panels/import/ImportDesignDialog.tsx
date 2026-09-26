@@ -1,4 +1,4 @@
-import { ChevronRight, CircleAlert, Code, Globe, Sparkles } from "lucide-react";
+import { ChevronRight, CircleAlert, Code, Globe, Plug, Sparkles } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { connectClaudeStore } from "../connect/connectStore.ts";
@@ -59,7 +59,10 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
   const [assistantAvailable] = useState(() => supportsAssistant(getAssistantHost()));
   // The experimental switch in Settings → Claude puts the Assistant on the person's Claude subscription.
   const onSubscription = useStore(assistantStore, (s) => chatProvider(s.status) === "subscription");
-  const [tab, setTab] = useState<ImportTab>(() => initialTab ?? ((readString(TAB_KEY) as ImportTab | null) ?? (urlSupported ? "url" : "html")));
+  const [tab, setTab] = useState<ImportTab>(() => {
+    const wanted = initialTab ?? (readString(TAB_KEY) as ImportTab | null) ?? "url";
+    return wanted === "url" && !urlSupported ? "html" : wanted;
+  });
   const [url, setUrl] = useState(() => readString(URL_KEY) ?? "http://localhost:3000/");
   const [html, setHtml] = useState("");
   const [name, setName] = useState("");
@@ -106,18 +109,16 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
 
   const trimmedUrl = url.trim();
   const validUrl = /^https?:\/\/\S+$/i.test(trimmedUrl);
-  const canSubmit = !busy && ((tab === "url" && urlSupported && validUrl) || (tab === "html" && html.trim() !== ""));
+  const canSubmit = !busy && ((tab === "url" && validUrl) || (tab === "html" && html.trim() !== ""));
 
   const submitBlocker =
     tab === "claude"
-      ? "Claude does the importing. Copy a prompt below."
-      : tab === "url" && !urlSupported
-        ? "Use the desktop app, or paste the HTML."
-        : tab === "url" && !validUrl
-          ? "Enter an address that starts with http:// or https://."
-          : tab === "html" && html.trim() === ""
-            ? "Paste the page's HTML first."
-            : undefined;
+      ? "Claude does the importing. Copy a prompt above."
+      : tab === "url" && !validUrl
+        ? "Enter an address that starts with http:// or https://."
+        : tab === "html" && html.trim() === ""
+          ? "Paste the page's HTML first."
+          : undefined;
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -170,12 +171,13 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
       <Dialog.Body className="sb-import__body">
         <div className="sb-import__content" inert={busy}>
           <SegmentedControl<ImportTab>
+            size="sm"
             fullWidth
             aria-label="Import from"
             value={tab}
             onChange={setTab}
             options={[
-              { value: "url", label: "From URL", icon: <Globe size={13} /> },
+              ...(urlSupported ? [{ value: "url" as const, label: "From URL", icon: <Globe size={13} /> }] : []),
               { value: "html", label: "Paste HTML", icon: <Code size={13} /> },
               { value: "claude", label: "With Claude", icon: <Sparkles size={13} /> },
             ]}
@@ -183,15 +185,9 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
 
           {tab === "url" && (
             <section className="sb-import__section" aria-label="From URL">
-              {!urlSupported && (
-                <p className="sb-import__note" role="status">
-                  <CircleAlert size={13} strokeWidth={2} aria-hidden />
-                  <span>Importing from a URL needs the Sonobe desktop app: a browser tab can't read another site's layout. Paste the page's HTML instead.</span>
-                </p>
-              )}
               <label className="sb-import__field">
                 <span className="sb-import__label">Page address</span>
-                <TextField ref={urlRef} mono value={url} disabled={!urlSupported || busy} placeholder="http://localhost:3000/settings" onChange={(event) => setUrl(event.target.value)} aria-label="Page address" invalid={trimmedUrl !== "" && !validUrl} spellCheck={false} />
+                <TextField ref={urlRef} mono value={url} disabled={busy} placeholder="http://localhost:3000/settings" onChange={(event) => setUrl(event.target.value)} aria-label="Page address" invalid={trimmedUrl !== "" && !validUrl} spellCheck={false} />
                 <span className="sb-import__hint">Start your app's dev server and open the screen you want. Storybook stories work too.</span>
               </label>
             </section>
@@ -205,7 +201,7 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit();
                 }} />
                 <span className="sb-import__hint">
-                  A complete page with its CSS. Put <code>data-name="Like Button"</code> on elements to name their layers.
+                  A complete page with its CSS. Put <code>data-name="Like Button"</code> on elements to name their layers.{!urlSupported && " To import from a URL, use the desktop app."}
                 </span>
               </label>
             </section>
@@ -236,7 +232,7 @@ function ImportContent({ onClose, initialTab, deps }: { onClose: () => void; ini
                   <Button
                     size="sm"
                     variant="ai"
-                    icon={<Sparkles size={12} />}
+                    icon={<Plug size={12} strokeWidth={1.75} />}
                     onClick={() => {
                       onClose();
                       connectClaudeStore.getState().show();

@@ -164,6 +164,7 @@ function ConnectClaudeContent({ onClose, host, onOpenGuide, defaults, initialTab
 
         <section className="sb-connect__section" aria-label="Setup">
           <SegmentedControl<ConnectTab>
+            size="sm"
             fullWidth
             aria-label="Claude app"
             value={tab}

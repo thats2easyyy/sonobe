@@ -76,6 +76,14 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     expect(document.getElementById(toggle.getAttribute("aria-describedby")!)?.textContent).toBe(SUBSCRIPTION_SWITCH_DESCRIPTION);
   });
 
+  it("keeps the rest of its explanation behind a closed Details disclosure", async () => {
+    await mount(fakeAssistantHost());
+    const details = subscriptionSwitch()!.closest('[role="group"]')!.querySelector<HTMLDetailsElement>("details.sb-settings__details")!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")!.textContent).toBe("Details");
+    expect(details.textContent).toContain("your plan's usage limits");
+  });
+
   it("isn't there, and says nothing, in a build that doesn't offer it", async () => {
     const host = fakeAssistantHost({ connection: { available: false } });
     await mount(host);
@@ -119,5 +127,14 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     delete older.assistant!.setConnection;
     await mount(older);
     expect(subscriptionSwitch()).toBeNull();
+  });
+});
+
+describe("Settings helper text", () => {
+  it("is at most 14 words a row", async () => {
+    await mount(null);
+    const helpers = [...document.querySelectorAll(".sb-settings__desc")].map((el) => el.textContent ?? "");
+    expect(helpers.length).toBeGreaterThan(4);
+    for (const text of helpers) expect(text.trim().split(/\s+/).length, text).toBeLessThanOrEqual(14);
   });
 });

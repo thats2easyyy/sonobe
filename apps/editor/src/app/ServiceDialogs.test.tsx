@@ -57,8 +57,7 @@ describe("ServiceDialogs", () => {
     });
     const anyway = buttonNamed("Save Anyway");
     expect(anyway.closest(".sb-appdialog__actions-start")).not.toBeNull();
-    expect(anyway.dataset.variant).toBe("ghost");
-    expect(anyway.dataset.tone).toBe("danger");
+    expect(anyway.dataset.variant).toBe("ghost-danger");
     expect(buttonNamed("Cancel").closest(".sb-appdialog__actions-start")).toBeNull();
     expect(document.activeElement).toBe(buttonNamed("Reload"));
     act(() => anyway.click());

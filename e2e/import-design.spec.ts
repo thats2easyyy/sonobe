@@ -111,11 +111,11 @@ test.describe("Import Design", () => {
     await runCommand(page, "Import Design");
     const dialog = page.getByRole("dialog", { name: "Import Design" });
     await expect(dialog).toBeVisible();
-    // The browser editor can't read other sites, so the URL tab explains the desktop app.
-    await dialog.getByRole("radio", { name: "From URL" }).click();
-    await expect(dialog.getByText("needs the Sonobe desktop app")).toBeVisible();
+    // The browser editor can't read other sites, so there is no URL tab, and the HTML tab says where URLs work.
+    await expect(dialog.getByRole("radio", { name: "From URL" })).toHaveCount(0);
+    await expect(dialog.getByRole("radio", { name: "Paste HTML" })).toBeChecked();
+    await expect(dialog.getByText("To import from a URL, use the desktop app.")).toBeVisible();
 
-    await dialog.getByRole("radio", { name: "Paste HTML" }).click();
     await dialog.getByRole("textbox", { name: "HTML" }).fill(profileHtml);
     await screenshot(page, "import-01-dialog-html");
     await dialog.getByRole("button", { name: "Import", exact: true }).click();

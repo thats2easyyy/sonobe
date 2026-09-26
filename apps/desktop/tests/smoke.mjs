@@ -225,7 +225,7 @@ const readConnection = async (file = tokenFile) => {
 async function dismissWelcome(page) {
   const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
   if (!(await welcome.waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
-  const keepWorking = welcome.getByRole("button", { name: /Keep working on/ });
+  const keepWorking = welcome.getByRole("button", { name: /Keep working on|Explore the/ });
   if (!(await keepWorking.click({ timeout: 3000 }).then(() => true, () => false))) await page.keyboard.press("Escape");
   await welcome.waitFor({ state: "hidden", timeout: 5000 }).catch(() => undefined);
   log("dismissed the first-launch welcome screen");
