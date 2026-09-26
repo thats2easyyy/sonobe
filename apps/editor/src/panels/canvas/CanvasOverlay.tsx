@@ -50,6 +50,11 @@ export interface CanvasOverlayProps {
   altMeasure?: readonly Measurement[];
 }
 
+/** A pill is 16 px tall; a selection shorter than that gets no size label. */
+const PILL_HEIGHT = 16;
+/** A size label's width: its text at the pill's tabular figures, plus padding. */
+const pillWidth = (text: string) => text.length * 6.5 + 10;
+
 const r2 = (n: number) => Math.round(n * 100) / 100;
 /** Snap a coordinate to the pixel grid for 1px lines. */
 const crisp = (n: number) => Math.round(n) + 0.5;
@@ -59,6 +64,7 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
   const toScreen = (p: Point) => artboardToScreen(viewport, p);
   const quads = (id: Id) => (index.entry(id)?.nodes ?? []).map((n) => nodeQuad(n).map(toScreen));
   const pills: ReactNode[] = [];
+  const measurePills: ReactNode[] = [];
 
   const guides = draft.guides.map((g, i) => {
     const a = toScreen(g.axis === "x" ? [g.at, g.from] : [g.from, g.at]);
@@ -73,7 +79,7 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
     const horizontal = m.axis === "x";
     const y = crisp(a[1]);
     const x = crisp(a[0]);
-    pills.push(
+    measurePills.push(
       <div key={`m${i}`} className="sb-cv__pill" data-tone="guide" style={{ left: (a[0] + b[0]) / 2, top: (a[1] + b[1]) / 2 }}>
         {formatMeasurement(m.value)}
       </div>,
@@ -99,7 +105,7 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
     const horizontal = mark.axis === "x";
     const cx = s.x + s.width / 2;
     const cy = s.y + s.height / 2;
-    pills.push(
+    measurePills.push(
       <div key={`sp${i}`} className="sb-cv__pill" data-tone="guide" style={{ left: cx, top: cy }}>
         {formatMeasurement(mark.value)}
       </div>,
@@ -134,13 +140,18 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
   }
 
   if (chrome && !draft.hideChrome) {
+    const top = Math.min(...chrome.quad.map((p) => p[1]));
     const bottom = Math.max(...chrome.quad.map((p) => p[1]));
     const centerX = chrome.quad.reduce((sum, p) => sum + p[0], 0) / 4;
-    pills.push(
-      <div key="size" className="sb-cv__pill" data-tone="selection" style={{ left: centerX, top: bottom + 8 }}>
-        {chrome.sizeLabel}
-      </div>,
-    );
+    const width = Math.max(...chrome.quad.map((p) => p[0])) - Math.min(...chrome.quad.map((p) => p[0]));
+    // A label more than twice as wide as the selection would bury what is around it.
+    if (altMeasure.length === 0 && bottom - top >= PILL_HEIGHT && pillWidth(chrome.sizeLabel) <= width * 2) {
+      pills.push(
+        <div key="size" className="sb-cv__pill" data-tone="selection" style={{ left: centerX, top: bottom + 8 }}>
+          {chrome.sizeLabel}
+        </div>,
+      );
+    }
   }
   if (draft.label) {
     const at = toScreen(draft.label.at);
@@ -199,6 +210,7 @@ export function CanvasOverlay({ index, viewport, selected, hovered, chrome, draf
         {dropLine && <line className="sb-cv__drop" x1={dropLine[0]![0]} y1={dropLine[0]![1]} x2={dropLine[1]![0]} y2={dropLine[1]![1]} />}
       </svg>
       {pills}
+      {measurePills}
     </>
   );
 }

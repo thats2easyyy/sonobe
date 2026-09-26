@@ -1,6 +1,7 @@
 /* Canvas panel */
 .sb-cv {
   --cv-guide: #ff3d7f;
+  --cv-guide-fill: #d42a6b;
   --cv-handle-fill: #ffffff;
 
   position: relative;
@@ -19,10 +20,23 @@
 
 [data-theme="light"] .sb-cv {
   --cv-guide: #e0115f;
+  --cv-guide-fill: #e0115f;
 }
 
-.sb-cv:focus-visible {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--focus-ring) 45%, transparent);
+/* Drawn over the rulers, so the ring reads on all four edges. The panel sets data-kbd only for focus that did not come from a pointer. */
+.sb-cv[data-kbd]:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border: 2px solid var(--focus-ring);
+  pointer-events: none;
+}
+
+@media (forced-colors: active) {
+  .sb-cv[data-kbd]:focus-visible::after {
+    border-color: Highlight;
+  }
 }
 
 .sb-cv[data-tool="rectangle"],
@@ -37,17 +51,74 @@
 
 .sb-cv > .sb-empty {
   position: absolute;
-  inset: 0;
+  inset: 0 0 auto;
 }
 
+.sb-cv-panel {
+  container: cv-panel / inline-size;
+}
+
+/* The header shrinks before it overflows: the Design label goes first, then Group, then the zoom's chevron. */
 .sb-cv__toolbar {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.sb-cv__tools {
   display: flex;
   align-items: center;
   gap: var(--space-3);
 }
 
+.sb-cv__design.sb-btn {
+  font-size: var(--font-size-sm);
+}
+
+.sb-cv__design.sb-btn:not(:disabled) {
+  color: var(--ai-text);
+}
+
+.sb-cv__design.sb-btn[aria-pressed="true"]:not(:disabled) {
+  background: var(--ai-soft);
+}
+
+@media (hover: hover) {
+  .sb-cv__design.sb-btn[data-variant]:hover:not(:disabled) {
+    color: var(--ai-text);
+  }
+}
+
+@container cv-panel (max-width: 350px) {
+  .sb-cv__design .sb-btn__label {
+    display: none;
+  }
+
+  .sb-cv__design.sb-btn {
+    width: var(--control-h-sm);
+    padding: 0;
+  }
+
+  .sb-cv__design .sb-btn__icon {
+    margin: 0;
+  }
+}
+
+@container cv-panel (max-width: 304px) {
+  .sb-cv__group {
+    display: none;
+  }
+}
+
+@container cv-panel (max-width: 273px) {
+  .sb-cv__zoom svg {
+    display: none;
+  }
+}
+
 .sb-cv__zoom {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
   height: var(--control-h-sm);
@@ -130,50 +201,46 @@
   border-radius: var(--radius-full);
   background: var(--success-soft);
   color: var(--success-text);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
 }
 
+/* Centered in the canvas, not on the artboard: it has its own surface, so it reads over the artboard and the canvas alike. */
 .sb-cv__hint {
   position: absolute;
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-full);
-  background: rgba(20, 20, 24, 0.06);
-  color: rgba(60, 60, 67, 0.8);
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(260px, calc(100% - 32px));
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
-/* The hint's one live part; the canvas's pointer-down skips it. The artboard is white in both themes: the light theme's AI text color. */
-.sb-cv__hint-action {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #c5521c;
-  font: inherit;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
-  text-underline-offset: 2px;
-  cursor: pointer;
+.sb-cv__hint-title {
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-cv__hint-body {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  text-wrap: balance;
+}
+
+/* The hint's one live part; the canvas's pointer-down skips it. */
+.sb-cv__hint-action.sb-btn {
+  font-size: var(--font-size-sm);
+  margin-top: var(--space-3);
   pointer-events: auto;
-}
-
-@media (hover: hover) {
-  .sb-cv__hint-action:hover {
-    text-decoration-color: currentColor;
-  }
-}
-
-.sb-cv__hint-action:focus-visible {
-  border-radius: var(--radius-xs);
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.sb-cv__design:not(:disabled) {
-  color: var(--ai-text);
 }
 
 /* Another agent at work on this component ("Claude Code: designing a checkout screen"). */
@@ -185,7 +252,7 @@
   border-radius: var(--radius-full);
   background: var(--ai-soft);
   color: var(--ai-text);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -199,23 +266,6 @@
   height: 5px;
   border-radius: var(--radius-full);
   background: currentColor;
-  animation: sb-cv-agent-pulse 1.6s var(--ease-in-out) infinite;
-}
-
-@keyframes sb-cv-agent-pulse {
-  50% {
-    opacity: 0.3;
-  }
-}
-
-:root[data-motion="reduce"] .sb-cv__label-agent-dot {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root:not([data-motion="full"]) .sb-cv__label-agent-dot {
-    animation: none;
-  }
 }
 
 .sb-cv__overlay {
@@ -371,7 +421,7 @@
   /* A darker fill than --selection so the white numbers keep 4.5:1. */
   background: var(--accent-pressed);
   color: #ffffff;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   font-weight: var(--font-weight-semibold);
   line-height: 16px;
@@ -381,7 +431,7 @@
 }
 
 .sb-cv__pill[data-tone="guide"] {
-  background: var(--cv-guide);
+  background: var(--cv-guide-fill);
   transform: translate(-50%, -50%);
 }
 

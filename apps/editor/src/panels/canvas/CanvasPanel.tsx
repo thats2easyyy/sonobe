@@ -16,17 +16,20 @@ import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/re
 import { ChevronDown, Circle, Group, MousePointer2, Ruler, Sparkles, Square, Type } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
+import { layoutStore, useLayout } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { topLevelLayerIds } from "../../state/clipboard.ts";
 import { duplicateSelection, enterSelectedComponent, groupSelection } from "../../state/editActions.ts";
 import { currentComponentId } from "../../state/selection.ts";
 import type { EditorSession } from "../../state/session.ts";
+import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { Tooltip } from "../../ui/Tooltip.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { isEditableTarget, type ShortcutBinding } from "../../ui/commands/shortcutManager.ts";
@@ -73,7 +76,7 @@ import { nudgeDelta, textOps, type ArrowKey, type InsertTool } from "./ops.ts";
 import { buildCanvasIndex, firstCopyBounds, hitCopy, hitLayers, isEditableLayer, marqueeLayers, pickChildOf, pickLayer, type CanvasIndex } from "./sceneIndex.ts";
 import { measureBetween, type Measurement } from "./snapping.ts";
 import { useCanvasScene, type SceneSource } from "./useCanvasScene.ts";
-import { clampZoom, ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, rectToScreen, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
+import { clampZoom, dotGrid, ensureVisible, fitRect, formatZoom, nextZoomStep, panBy, rectToScreen, screenToArtboard, wheelZoom, zoomAt, type Viewport } from "./viewport.ts";
 import "./canvas.css";
 
 export type CanvasTool = "select" | InsertTool;
@@ -93,6 +96,8 @@ const DRAG_THRESHOLD = 3;
 const SNAP_PX = 6;
 const NUDGE_IDLE_MS = 900;
 const FIT_PADDING = 56;
+/** The artboard's fit with the box closed: room above for its name and size, and less below and beside it. */
+const ARTBOARD_FIT_PADDING = { top: 34, right: 24, bottom: 14, left: 24 };
 const RULERS_KEY = "sonobe.canvas.rulers";
 const TOOL_LABELS: Record<InsertTool, string> = { rectangle: "Rectangle", oval: "Oval", text: "Text" };
 /** The presence pill in the artboard label is cut to this many characters. */
@@ -102,6 +107,8 @@ const DESIGN_BOX_CLEARANCE = 16 + 12;
 /** Fit padding in the area above the box, and the least room there that's worth fitting into (the box grows at most to leave it). */
 const DESIGN_FIT_PADDING = 28;
 const DESIGN_FIT_MIN_HEIGHT = 200;
+/** The box is never capped below this: under it, the prompt field and the close button lose their edges. */
+const DESIGN_BOX_MIN_HEIGHT = 250;
 /** A draft's frame is fitted whole when that's at least this zoom; otherwise its width is. */
 const DRAFT_WHOLE_ZOOM = 0.45;
 
@@ -179,6 +186,12 @@ function withInsertedText(ops: readonly Op[], text: string): Op[] {
 /** How the viewport follows the canvas's size: the artboard's fit, a draft's frame's fit, or where someone put it (null). */
 type FitMode = "artboard" | "draft" | null;
 
+/** The dot grid follows the artboard: dots on its 1-2-5 steps, moving with pan and zoom. */
+function gridStyle(viewport: Viewport): CSSProperties {
+  const grid = dotGrid(viewport);
+  return { backgroundSize: `${grid.size}px ${grid.size}px`, backgroundPosition: `${grid.x}px ${grid.y}px` };
+}
+
 /** A draft's frame at a size you can read, in `area`: whole when that's at least 45%, else its width fitted (at most 100%) with its top at the area's top. */
 function fitDraftFrame(frame: Rect, area: readonly [number, number], padding: number): Viewport {
   const whole = fitRect(frame, area, { padding, maxZoom: 1 });
@@ -236,6 +249,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const reveal = useStore(session.selection, (s) => s.reveal);
   const working = useStore(session.presence, (s) => s.working);
   const designOpen = useDesign((s) => s.open);
+  const viewMode = useLayout((s) => s.viewMode);
   const [designLoaded, setDesignLoaded] = useState(designOpen);
   /** The Design with Claude box's height when it opened (0 while it's closed): the canvas keeps that much room, so the fit doesn't move as the box grows. */
   const [designHeight, setDesignHeight] = useState(0);
@@ -277,6 +291,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   const nudgeRef = useRef<NudgeRun | null>(null);
   const viewportComponent = useRef<Id | null>(null);
   const pointerInside = useRef(false);
+  const pointerFocusing = useRef(false);
   const lastPointer = useRef<{ screen: Point; artboard: Point } | null>(null);
 
   const selectionIds = useMemo(() => (component ? topLevelLayerIds(component, selected) : []), [component, selected]);
@@ -293,9 +308,9 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   // While the box is open, the artboard fits (and reveals land) in the canvas above it, which keeps at least DESIGN_FIT_MIN_HEIGHT.
   const inset = rulers ? RULER_SIZE : 0;
-  const designReserve = designHeight > 0 ? Math.max(0, Math.min(designHeight + DESIGN_BOX_CLEARANCE, box.height - inset - DESIGN_FIT_MIN_HEIGHT)) : 0;
-  // The box grows up to leaving that room above it; then its reply and cards scroll (design-layout.css).
-  const designBoxMax = designHeight > 0 && box.height > 0 ? Math.max(designHeight, box.height - inset - DESIGN_BOX_CLEARANCE - DESIGN_FIT_MIN_HEIGHT) : null;
+  const designReserve = designHeight > 0 ? Math.max(0, Math.min(designHeight + DESIGN_BOX_CLEARANCE, Math.max(box.height - inset - DESIGN_FIT_MIN_HEIGHT, DESIGN_BOX_MIN_HEIGHT + DESIGN_BOX_CLEARANCE))) : 0;
+  // The box grows up to leaving that room above it, even when it opened taller; then its reply and cards scroll (design-layout.css).
+  const designBoxMax = designHeight > 0 && box.height > 0 ? Math.max(DESIGN_BOX_MIN_HEIGHT, box.height - inset - DESIGN_BOX_CLEARANCE - DESIGN_FIT_MIN_HEIGHT) : null;
 
   const latest = useLatest({ index, viewport, componentId, component, tool, artboard, chrome, spaceHeld, box, editing, designReserve, inset });
   // The box reads layers at event time; the preview reads them while it renders, so it gets this render's index.
@@ -312,8 +327,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     (frame?: Rect): Viewport | null => {
       if (box.width <= 0 || box.height <= 0) return null;
       const area: [number, number] = [Math.max(1, box.width - inset), Math.max(1, box.height - inset - designReserve)];
-      const padding = designHeight > 0 ? DESIGN_FIT_PADDING : FIT_PADDING;
-      const vp = frame ? fitDraftFrame(frame, area, padding) : fitRect(artboard, area, { padding, maxZoom: 1 });
+      const boxOpen = designHeight > 0;
+      const vp = frame ? fitDraftFrame(frame, area, boxOpen ? DESIGN_FIT_PADDING : FIT_PADDING) : fitRect(artboard, area, { padding: boxOpen ? DESIGN_FIT_PADDING : ARTBOARD_FIT_PADDING, maxZoom: 1 });
       return { ...vp, x: vp.x + inset, y: vp.y + inset };
     },
     [artboard, box.width, box.height, inset, designReserve, designHeight],
@@ -412,7 +427,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const notifyBlocked = (ids: readonly Id[], prop = "position") => {
     if (ids.length === 0) return;
-    toast({ title: `${layerNames(latest.current.index, ids)} ${ids.length === 1 ? "is" : "are"} driven by a patch`, description: `Its ${prop} is linked. Disconnect the link in the Inspector to edit it by hand.`, tone: "info" });
+    toast({ title: `${layerNames(latest.current.index, ids)} ${ids.length === 1 ? "is" : "are"} driven by a patch`, description: `Disconnect its ${prop} in the Inspector to set it by hand.`, tone: "info" });
   };
 
   const finishNudge = useCallback(() => {
@@ -598,13 +613,23 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
 
+  /** Focus from a click or a drop is not keyboard focus: the ring stays off (canvas.css reads data-kbd). */
+  const focusFromPointer = () => {
+    const body = bodyRef.current;
+    if (!body) return;
+    body.removeAttribute("data-kbd");
+    pointerFocusing.current = true;
+    body.focus({ preventScroll: true });
+    pointerFocusing.current = false;
+  };
+
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const { viewport: vp, index: idx, componentId: cid, artboard: board, chrome: c, tool: currentTool } = latest.current;
     if (!vp || (event.target as Element).closest?.(".sb-cv__text-editor, .sb-cv__hint-action")) return;
     const p = screenPoint(event);
     const a = screenToArtboard(vp, p);
     const base: GestureBase = { pointerId: event.pointerId, start: a, startScreen: p };
-    bodyRef.current?.focus({ preventScroll: true });
+    focusFromPointer();
     finishNudge();
     setAltMeasure([]);
 
@@ -856,7 +881,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const vp = latest.current.viewport;
     const files = Array.from(event.dataTransfer.files ?? []);
     if (!vp || files.length === 0) return;
-    bodyRef.current?.focus({ preventScroll: true });
+    focusFromPointer();
     void dropFiles(files, screenToArtboard(vp, screenPoint(event)));
   };
 
@@ -1047,14 +1072,16 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     setViewport(next);
   };
   const zoomToSelection = () => {
-    const bounds = latest.current.chrome?.bounds;
-    const { box: size } = latest.current;
-    if (!bounds) {
+    const { chrome: current, box: size, inset: rulerInset, designReserve: reserve } = latest.current;
+    if (!current) {
       zoomToFit();
       return;
     }
+    // The same area the fit uses: right of and below the rulers, above the Design box.
+    const area: [number, number] = [Math.max(1, size.width - rulerInset), Math.max(1, size.height - rulerInset - reserve)];
+    const vp = fitRect(current.bounds, area, { padding: Math.min(96, Math.min(area[0], area[1]) * 0.12), maxZoom: 8 });
     fitMode.current = null;
-    setViewport(fitRect(bounds, [size.width, size.height], { padding: 96, maxZoom: 8 }));
+    setViewport({ ...vp, x: vp.x + rulerInset, y: vp.y + rulerInset });
   };
   const toggleRulers = () =>
     setRulers((on) => {
@@ -1068,6 +1095,16 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
   /** Design with Claude: the ai.design command when it's registered (it refreshes the Assistant first), else just the box. */
   const openDesign = () => {
     if (!cmds?.registry.run("ai.design")) designStore.getState().openBox();
+  };
+
+  /** The header's Design button toggles the box; closing it hands focus back to the canvas. */
+  const toggleDesign = () => {
+    if (!designOpen) {
+      openDesign();
+      return;
+    }
+    designStore.getState().closeBox();
+    bodyRef.current?.focus({ preventScroll: true });
   };
 
   const actions = useLatest({ setTool, nudge, escape, enter, zoomBy, zoomTo, zoomToFit, zoomToSelection, group, toggleRulers });
@@ -1132,7 +1169,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     { id: "zoomOut", label: "Zoom Out", shortcut: "Mod+-", onSelect: () => zoomBy(-1) },
     { type: "separator" },
     { id: "fit", label: "Zoom to Fit", shortcut: "Shift+1", onSelect: zoomToFit },
-    { id: "selection", label: "Zoom to Selection", shortcut: "Shift+2", disabled: selectionIds.length === 0, onSelect: zoomToSelection },
+    { id: "selection", label: "Zoom to Selection", shortcut: "Shift+2", ...(selectionIds.length === 0 ? { description: "Select a layer first", disabled: true } : {}), onSelect: zoomToSelection },
     { id: "actual", label: "Actual Size", shortcut: "Shift+0", onSelect: () => zoomTo(1) },
     { id: "double", label: "200%", onSelect: () => zoomTo(2) },
     { type: "separator" },
@@ -1159,33 +1196,43 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
       title="Canvas"
       scope="canvas"
       surface="sunken"
-      className={className}
+      className={cx("sb-cv-panel", className)}
       style={designBoxMax !== null ? ({ "--sb-design-box-max": `${designBoxMax}px` } as CSSProperties) : undefined}
       headerContent={
         <div className="sb-cv__toolbar">
-          <SegmentedControl<CanvasTool>
-            size="sm"
-            aria-label="Tool"
-            value={tool}
-            onChange={setTool}
-            options={[
-              { value: "select", icon: <MousePointer2 size={13} />, tooltip: "Select", shortcut: "V" },
-              { value: "rectangle", icon: <Square size={13} />, tooltip: "Rectangle", shortcut: "R", disabled: !canDraw },
-              { value: "oval", icon: <Circle size={13} />, tooltip: "Oval", shortcut: "O", disabled: !canDraw },
-              { value: "text", icon: <Type size={13} />, tooltip: "Text", shortcut: "T", disabled: !canDraw },
-            ]}
-          />
-          <IconButton size="sm" icon={<Group size={14} />} label="Group selection" shortcut="Mod+G" disabled={selectionIds.length === 0} onClick={group} />
-          <IconButton size="sm" icon={<Sparkles size={14} />} label="Design with Claude" tooltip={canDraw ? "Design with Claude" : "Patch components have no layers to design"} className="sb-cv__design" disabled={!canDraw} onClick={openDesign} />
+          <div className="sb-cv__tools">
+            {canDraw && (
+              <SegmentedControl<CanvasTool>
+                size="sm"
+                aria-label="Tool"
+                value={tool}
+                onChange={setTool}
+                options={[
+                  { value: "select", icon: <MousePointer2 size={14} />, tooltip: "Select", shortcut: "V" },
+                  { value: "rectangle", icon: <Square size={14} />, tooltip: "Rectangle", shortcut: "R" },
+                  { value: "oval", icon: <Circle size={14} />, tooltip: "Oval", shortcut: "O" },
+                  { value: "text", icon: <Type size={14} />, tooltip: "Text", shortcut: "T" },
+                ]}
+              />
+            )}
+            <Tooltip content={canDraw ? "Design with Claude" : "Patch components have no layers to design"}>
+              <Button size="sm" variant="ghost" className="sb-cv__design" aria-label="Design with Claude" aria-pressed={designOpen} icon={<Sparkles size={14} />} disabled={!canDraw} onClick={toggleDesign}>
+                Design
+              </Button>
+            </Tooltip>
+            {canDraw && selectionIds.length > 0 && <IconButton size="sm" className="sb-cv__group" icon={<Group size={14} />} label="Group selection" shortcut="Mod+G" onClick={group} />}
+          </div>
         </div>
       }
       actions={
-        <Menu aria-label="Zoom" placement="bottom-end" entries={zoomEntries}>
-          <button type="button" className="sb-cv__zoom" aria-label={`Zoom: ${formatZoom(viewport?.zoom ?? 1)}`}>
-            <span className="sb-tabular">{formatZoom(viewport?.zoom ?? 1)}</span>
-            <ChevronDown size={12} strokeWidth={2} aria-hidden />
-          </button>
-        </Menu>
+        canDraw ? (
+          <Menu aria-label="Zoom" placement="bottom-end" entries={zoomEntries}>
+            <button type="button" className="sb-cv__zoom" aria-label={`Zoom: ${formatZoom(viewport?.zoom ?? 1)}`}>
+              <span className="sb-tabular">{formatZoom(viewport?.zoom ?? 1)}</span>
+              <ChevronDown size={12} strokeWidth={2} aria-hidden />
+            </button>
+          </Menu>
+        ) : undefined
       }
     >
       <div
@@ -1200,7 +1247,10 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         data-panning={spaceHeld || undefined}
         data-rulers={(rulers && canDraw) || undefined}
         data-dropping={draft.dropTarget ? true : undefined}
-        style={cursor ? { cursor } : undefined}
+        style={{ ...(cursor ? { cursor } : {}), ...(viewport ? gridStyle(viewport) : {}) }}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget && !pointerFocusing.current) event.currentTarget.dataset.kbd = "";
+        }}
         onPointerDown={canDraw ? onPointerDown : undefined}
         onPointerMove={canDraw ? onPointerMove : undefined}
         onPointerUp={onPointerUp}
@@ -1214,9 +1264,20 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         onKeyDown={commands && cmds ? undefined : onKeyDownFallback}
       >
         {!component ? (
-          <EmptyState title="Nothing to edit" description="This component no longer exists. Pick another one from the Layers panel." />
+          <EmptyState variant="inline" title="Nothing to edit" description="This component no longer exists. Pick another one in the Layers panel." />
         ) : !canDraw ? (
-          <EmptyState title="Nothing to draw here" description="This is a patch component: it has patches but no layers. Edit it in the Patch Editor." />
+          <EmptyState
+            variant="inline"
+            title="Nothing to draw here"
+            description="This patch component has patches but no layers. Edit it in the patch editor."
+            actions={
+              viewMode === "canvas" ? (
+                <Button size="sm" onClick={() => layoutStore.getState().setViewMode("split")}>
+                  Show Patches
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           viewport && (
             <>
@@ -1236,12 +1297,13 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
               </div>
               <ArtboardRenderer session={session} scene={scene} viewport={viewport} size={size} rendererRef={rendererRef} />
               <HologramBuild session={session} componentId={componentId} index={index} viewport={viewport} width={box.width} height={box.height} />
-              {component.layers.length === 0 && (
-                <div className="sb-cv__hint" style={{ left: Math.round(viewport.x + (size[0] * viewport.zoom) / 2), top: Math.round(viewport.y + (size[1] * viewport.zoom) / 2) }}>
-                  Draw a rectangle (R), an oval (O), or text (T), or{" "}
-                  <button type="button" className="sb-cv__hint-action" onClick={openDesign}>
-                    describe a screen to Claude
-                  </button>
+              {component.layers.length === 0 && !designOpen && (
+                <div className="sb-cv__hint" style={{ top: `calc(50% + ${inset / 2}px)`, left: `calc(50% + ${inset / 2}px)` }}>
+                  <div className="sb-cv__hint-title">Empty screen</div>
+                  <div className="sb-cv__hint-body">Draw with R, O or T, or let Claude draft one.</div>
+                  <Button size="sm" variant="ai" className="sb-cv__hint-action" icon={<Sparkles size={12} />} onClick={openDesign}>
+                    Describe a screen
+                  </Button>
                 </div>
               )}
               <CanvasOverlay index={index} viewport={viewport} {...shownChrome} draft={draft} altMeasure={altMeasure} />

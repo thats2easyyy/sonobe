@@ -8,6 +8,8 @@ const doc = buildDoc({
     { id: "card", type: "rectangle", props: { position: [10, 20], size: [100, 50] } },
     { id: "tilted", type: "rectangle", props: { position: [200, 200], size: [60, 60], rotation: 90 } },
     { id: "tiny", type: "rectangle", props: { position: [300, 300], size: [8, 8] } },
+    { id: "dotA", type: "rectangle", props: { position: [400, 400], size: [6, 6] } },
+    { id: "dotB", type: "rectangle", props: { position: [410, 400], size: [6, 6] } },
   ],
 });
 const rt = createTestRuntime(doc);
@@ -30,6 +32,29 @@ describe("selectionChrome", () => {
     const locked = selectionChrome(index, ["card"], vp, { resizable: false, rotatable: false })!;
     expect(locked.handles).toEqual([]);
     expect(locked.knob).toBeNull();
+  });
+
+  it("thins the chrome as the layer shrinks on screen: outline, corners, all eight, then the knob", () => {
+    const at = (zoom: number, ids: string[] = ["card"]) => selectionChrome(index, ids, { x: 0, y: 0, zoom }, { resizable: true, rotatable: true })!;
+    // The card is 50 pt on its short side.
+    const sizes = [0.2, 0.3, 0.5, 0.8, 1].map((zoom) => ({ side: 50 * zoom, handles: at(zoom).handles.length, knob: at(zoom).knob !== null }));
+    expect(sizes).toEqual([
+      { side: 10, handles: 0, knob: false },
+      { side: 15, handles: 4, knob: false },
+      { side: 25, handles: 4, knob: false },
+      { side: 40, handles: 8, knob: true },
+      { side: 50, handles: 8, knob: true },
+    ]);
+    expect(at(0.2).minSide).toBe(10);
+  });
+
+  it("gives a multi-selection the same tiers", () => {
+    const at = (zoom: number) => selectionChrome(index, ["dotA", "dotB"], { x: 0, y: 0, zoom }, { resizable: true, rotatable: true })!;
+    // Together they are 16 × 6 pt: the short side decides.
+    expect(at(1).handles).toHaveLength(0);
+    expect(at(3).handles.map((h) => h.handle)).toEqual(["nw", "ne", "se", "sw"]);
+    expect(at(6).handles).toHaveLength(8);
+    expect(at(6).knob).toBeNull();
   });
 
   it("frames a multi-selection with its bounds", () => {
@@ -59,6 +84,15 @@ describe("hitChrome", () => {
     // Inside the box near a corner is not a rotate zone.
     expect(hitChrome(chrome, [250, 160])).toBeNull();
     expect(hitChrome(chrome, [160, 120])).toBeNull();
+  });
+
+  it("reaches less far on a small selection, and finds no rotate zones without a knob", () => {
+    const small = selectionChrome(index, ["card"], { x: 0, y: 0, zoom: 0.3 }, { resizable: true, rotatable: true })!;
+    // 30 × 15 px: corners only, and a reach of a third of the short side (5 px, not 6).
+    expect(small.minSide).toBe(15);
+    expect(hitChrome(small, [3 + 4.9, 6])).toEqual({ kind: "resize", handle: "nw" });
+    expect(hitChrome(small, [3 + 5.5, 6])).toBeNull();
+    expect(hitChrome(small, [3 - 8, 6 - 8])).toBeNull();
   });
 });
 

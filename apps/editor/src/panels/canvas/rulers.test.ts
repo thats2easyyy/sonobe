@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRulerValue, rulerRange, rulerScale, rulerTicks } from "./rulers.ts";
+import { formatRulerValue, rulerRange, rulerScale, rulerTicks, spansOverlap } from "./rulers.ts";
 
 describe("rulerScale", () => {
   it("picks a 1-2-5 step whose labels stay at least 56 px apart", () => {
@@ -41,6 +41,19 @@ describe("ruler labels and ranges", () => {
     expect(formatRulerValue(100)).toBe("100");
     expect(formatRulerValue(12.5)).toBe("12.5");
     expect(formatRulerValue(0.1 + 0.2)).toBe("0.3");
+  });
+
+  it("keeps a rotated layer's values to one decimal, without a trailing .0", () => {
+    expect(formatRulerValue(211.72)).toBe("211.7");
+    expect(formatRulerValue(344.28)).toBe("344.3");
+    expect(formatRulerValue(215.96)).toBe("216");
+  });
+
+  it("finds labels that come within a gap of each other", () => {
+    expect(spansOverlap([0, 20], [30, 50], 4)).toBe(false);
+    expect(spansOverlap([0, 20], [23, 50], 4)).toBe(true);
+    expect(spansOverlap([30, 50], [0, 27], 4)).toBe(true);
+    expect(spansOverlap([30, 50], [0, 25], 4)).toBe(false);
   });
 
   it("reports the selection's extent on each ruler", () => {

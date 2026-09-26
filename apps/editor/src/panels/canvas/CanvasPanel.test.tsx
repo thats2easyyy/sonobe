@@ -4,6 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../../runtime/scheduler.ts";
+import { layoutStore } from "../../shell/layoutStore.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { CommandProvider } from "../../ui/commands/CommandProvider.tsx";
@@ -14,7 +15,7 @@ import { CanvasPanel } from "./CanvasPanel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// happy-dom has no layout: give the canvas body a size so the artboard fits at zoom 1, offset (199, 63).
+// happy-dom has no layout: give the canvas body a size so the artboard fits at zoom 1, offset (199, 73): 34 px of room above it, for its label, and 14 below.
 let bodySize: [number, number] = [800, 1000];
 const sizeDescriptors = { width: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth"), height: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight") };
 const OriginalResizeObserver = globalThis.ResizeObserver;
@@ -69,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  layoutStore.getState().setViewMode("split");
   designStore.setState(initialDesignData());
   session.dispose();
   container.remove();
@@ -90,7 +92,7 @@ function mount(ui: ReactNode = <CanvasPanel />) {
 
 const body = () => container.querySelector<HTMLElement>(".sb-cv")!;
 /** Artboard point → client point for the fitted viewport. */
-const at = (x: number, y: number) => ({ clientX: 199 + x, clientY: 63 + y });
+const at = (x: number, y: number) => ({ clientX: 199 + x, clientY: 73 + y });
 
 function pointer(type: string, point: { clientX: number; clientY: number }, init: PointerEventInit = {}) {
   act(() => {
@@ -143,10 +145,10 @@ const previewOffset = () => {
   return match ? [Number(match[1]), Number(match[2])] : null;
 };
 
-/** Where the fit puts the 402 × 874 artboard in a canvas of `size` with `padding`. */
-function fitRectOffset(size: [number, number], padding: number): [number, number] {
-  const zoom = Math.min(1, (size[0] - padding * 2) / 402, (size[1] - padding * 2) / 874);
-  return [(size[0] - 402 * zoom) / 2, (size[1] - 874 * zoom) / 2];
+/** Where the fit puts the 402 × 874 artboard in a canvas of `size`: 34 px of room above it and 14 below, 24 beside. */
+function fitRectOffset(size: [number, number]): [number, number] {
+  const zoom = Math.min(1, (size[0] - 48) / 402, (size[1] - 48) / 874);
+  return [(size[0] - 402 * zoom) / 2, 34 + (size[1] - 48 - 874 * zoom) / 2];
 }
 
 const position = (id: string) => findLayer(session.document.getState().doc.components.main!.layers, id)!.layer.props.position;
@@ -210,6 +212,36 @@ describe("CanvasPanel", () => {
     pointer("pointerup", at(230, 550));
     expect(position("card")).toEqual([46, 176]);
     expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Move Event Card"]);
+  });
+
+  it("marks focus as keyboard focus only when it did not come from a pointer", () => {
+    mount();
+    act(() => body().focus());
+    expect(body().hasAttribute("data-kbd")).toBe(true);
+    pointer("pointerdown", at(200, 520));
+    expect(body().hasAttribute("data-kbd")).toBe(false);
+    pointer("pointerup", at(200, 520));
+
+    act(() => body().blur());
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+    expect(document.activeElement).toBe(body());
+    expect(body().hasAttribute("data-kbd")).toBe(false);
+  });
+
+  it("hides the size label of a selection much narrower than the label", () => {
+    mount();
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+    expect(container.querySelector(".sb-cv__pill")?.textContent).toBe("370 × 440");
+    const outlineHeight = () => {
+      const ys = container.querySelector(".sb-cv__outline")!.getAttribute("points")!.split(" ").map((p) => Number(p.split(",")[1]));
+      return Math.max(...ys) - Math.min(...ys);
+    };
+    for (let i = 0; i < 40 && container.querySelector(".sb-cv__pill"); i++) act(() => void registry.run("canvas.zoomOut"));
+    // The label goes while the card is still taller than a pill: it would be wider than twice the card.
+    expect(container.querySelector(".sb-cv__pill")).toBeNull();
+    expect(outlineHeight()).toBeGreaterThan(16);
   });
 
   it("⌥-drag duplicates: the copy moves, the original stays, and one undo removes the copy", () => {
@@ -310,7 +342,7 @@ describe("CanvasPanel", () => {
   it("toggles rulers (⇧R) and re-fits the artboard around them", () => {
     mount();
     expect(container.querySelector(".sb-cv__ruler")).toBeNull();
-    expect(artboardOffset()).toEqual([199, 63]);
+    expect(artboardOffset()).toEqual([199, 73]);
     expect(registry.get("canvas.toggleRulers")?.shortcut).toBe("Shift+R");
     act(() => {
       registry.run("canvas.toggleRulers");
@@ -318,15 +350,15 @@ describe("CanvasPanel", () => {
     expect(container.querySelectorAll(".sb-cv__ruler")).toHaveLength(2);
     expect(container.querySelector(".sb-cv__ruler-corner")).not.toBeNull();
     expect(localStorage.getItem("sonobe.canvas.rulers")).toBe("on");
-    // 980 − 112 px of room for an 874 pt artboard: zoom 0.993, shifted past the 20 px rulers.
-    expect(artboardOffset()).toEqual([210, 76]);
+    // The 874 pt artboard still fits in 980 − 48 px of room, shifted past the 20 px rulers.
+    expect(artboardOffset()).toEqual([209, 83]);
   });
 
   it("re-fits when the panel resizes, until someone zooms; then keeps the center", () => {
     mount();
-    expect(artboardOffset()).toEqual([199, 63]);
+    expect(artboardOffset()).toEqual([199, 73]);
     resize(1000, 1000);
-    expect(artboardOffset()).toEqual([299, 63]);
+    expect(artboardOffset()).toEqual([299, 73]);
     act(() => {
       registry.run("canvas.zoomIn");
     });
@@ -339,7 +371,7 @@ describe("CanvasPanel", () => {
       registry.run("canvas.zoomToFit");
     });
     resize(1000, 1000);
-    expect(artboardOffset()).toEqual([299, 63]);
+    expect(artboardOffset()).toEqual([299, 73]);
   });
 
   it("adds dropped images as layers through the session's asset importer", async () => {
@@ -401,6 +433,63 @@ describe("CanvasPanel", () => {
     });
     expect(container.textContent).toContain("Nothing to draw here");
     expect(designButton().disabled).toBe(true);
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(container.querySelector(".sb-cv__zoom")).toBeNull();
+    // Beside the patch editor the copy points at it; on its own, a button brings it back.
+    expect(container.textContent).not.toContain("Show Patches");
+    act(() => layoutStore.getState().setViewMode("canvas"));
+    const show = [...container.querySelectorAll("button")].find((b) => b.textContent === "Show Patches")!;
+    act(() => show.click());
+    expect(layoutStore.getState().viewMode).toBe("split");
+  });
+
+  it("hides the empty screen's hint while the Design box is open", async () => {
+    mount();
+    act(() => {
+      const store = session.document.getState();
+      store.apply(
+        store.doc.components.main!.layers.map((l) => ({ op: "removeLayer" as const, component: "main", id: l.id })),
+        { label: "Clear" },
+      );
+    });
+    expect(container.querySelector(".sb-cv__hint")).not.toBeNull();
+    act(() => designButton().click());
+    await openedBox();
+    expect(container.querySelector(".sb-cv__hint")).toBeNull();
+  });
+
+  it("shows Group only while something is selected, and toggles the Design box from its header button", async () => {
+    mount();
+    const group = () => container.querySelector('button[aria-label="Group selection"]');
+    expect(group()).toBeNull();
+    act(() => session.selection.getState().select({ layers: ["card"] }));
+    expect(group()).not.toBeNull();
+    act(() => session.selection.getState().clear());
+    expect(group()).toBeNull();
+
+    expect(designButton().getAttribute("aria-pressed")).toBe("false");
+    expect(designButton().textContent).toBe("Design");
+    act(() => designButton().click());
+    expect(designButton().getAttribute("aria-pressed")).toBe("true");
+    await openedBox();
+    act(() => designButton().click());
+    expect(designStore.getState().open).toBe(false);
+    expect(designButton().getAttribute("aria-pressed")).toBe("false");
+    expect(document.activeElement).toBe(body());
+  });
+
+  it("draws the grid on the artboard's steps, following pan and zoom", () => {
+    mount();
+    const before = [body().style.backgroundSize, body().style.backgroundPosition];
+    expect(parseFloat(before[0]!)).toBeGreaterThanOrEqual(12);
+    act(() => {
+      body().dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 130, ...at(200, 300) }));
+    });
+    expect(body().style.backgroundPosition).not.toBe(before[1]);
+    act(() => {
+      registry.run("canvas.actualSize");
+    });
+    expect(body().style.backgroundSize).toBe("20px 20px");
   });
 
   it("opens the Design with Claude box from the header, outside the canvas's pointer and wheel gestures", async () => {
@@ -449,7 +538,7 @@ describe("CanvasPanel", () => {
       );
     });
     const link = container.querySelector<HTMLButtonElement>(".sb-cv__hint-action")!;
-    expect(link.closest(".sb-cv__hint")?.textContent).toBe("Draw a rectangle (R), an oval (O), or text (T), or describe a screen to Claude");
+    expect(link.closest(".sb-cv__hint")?.textContent).toBe("Empty screenDraw with R, O or T, or let Claude draft one.Describe a screen");
     act(() => {
       link.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...at(201, 437) }));
     });
@@ -556,7 +645,7 @@ describe("CanvasPanel with the Design with Claude box", () => {
   it("fits the artboard above the box while it's open, and keeps that room as the box grows", async () => {
     mount();
     // Fitted in the whole body: 402 × 874 at zoom 1, centered.
-    expect(artboardOffset()).toEqual([199, 63]);
+    expect(artboardOffset()).toEqual([199, 73]);
     await openDesignBox();
     // Above the box (300 px, 16 px from the bottom, a 12 px gap): the 672 px left, less 28 px of padding each side.
     const zoom = (672 - 56) / 874;
@@ -572,16 +661,60 @@ describe("CanvasPanel with the Design with Claude box", () => {
     growBox(460);
     expect(artboardOffset()).toEqual(fitted);
 
-    // In a canvas too small for that room, 200 px stay above the box, rather than a fit behind it.
+    // In a canvas too small for that room, the box is held at 250 px, and the artboard fits in what is left above it.
     resize(800, 450);
-    expect(artboardZoom()).toBeCloseTo((200 - 56) / 874, 3);
+    expect(artboardZoom()).toBeCloseTo((450 - 278 - 56) / 874, 3);
     expect(artboardOffset()![1]).toBeCloseTo(28, 0);
-    expect(boxMax()).toBe("300px");
+    expect(boxMax()).toBe("250px");
 
     resize(800, 1000);
     act(() => designStore.getState().closeBox());
-    expect(artboardOffset()).toEqual([199, 63]);
+    expect(artboardOffset()).toEqual([199, 73]);
     expect(boxMax()).toBe("");
+  });
+
+  it("caps a box that opens taller than the room, so the artboard stays above it", async () => {
+    boxHeight = 600;
+    bodySize = [800, 450];
+    mount();
+    await openDesignBox();
+    expect(boxMax()).toBe("250px");
+    // The box is held at 250 px, and the artboard fits above it, less 28 px of padding on each side.
+    expect(artboardZoom()).toBeCloseTo((450 - 278 - 56) / 874, 3);
+    expect(artboardOffset()![1] + 874 * artboardZoom()).toBeLessThanOrEqual(450 - 278);
+
+    // A canvas with more room lets it grow until 200 px are left above it.
+    resize(800, 800);
+    expect(boxMax()).toBe(`${800 - 28 - 200}px`);
+  });
+
+  it("zooms to the selection above the Design box, and right of and below the rulers", async () => {
+    mount();
+    await openDesignBox();
+    act(() => session.selection.getState().select({ layers: ["card"] }));
+    act(() => {
+      registry.run("canvas.zoomToSelection");
+    });
+    // The card is 370 × 440 at (16, 146); the room above the 300 px box is 800 × 672, with 12% of it as padding.
+    const padding = 0.12 * 672;
+    const zoom = artboardZoom();
+    expect(zoom).toBeCloseTo((672 - padding * 2) / 440, 3);
+    const [x, y] = artboardOffset()!;
+    expect(y + 146 * zoom).toBeGreaterThanOrEqual(padding - 1);
+    expect(y + (146 + 440) * zoom).toBeLessThanOrEqual(672 - padding + 1);
+    expect(x + (16 + 185) * zoom).toBeCloseTo(400, 0);
+
+    act(() => designStore.getState().closeBox());
+    act(() => {
+      registry.run("canvas.toggleRulers");
+    });
+    act(() => {
+      registry.run("canvas.zoomToSelection");
+    });
+    // With the rulers on, the card is centered in what is right of and below them.
+    const [rx, ry] = artboardOffset()!;
+    expect(rx + (16 + 185) * artboardZoom()).toBeCloseTo(20 + (800 - 20) / 2, 0);
+    expect(ry + (146 + 220) * artboardZoom()).toBeCloseTo(20 + (1000 - 20) / 2, 0);
   });
 
   it("fits the first page of a draft at a size you can read, top first, and keeps it as the screen lands", async () => {
@@ -628,8 +761,8 @@ describe("CanvasPanel with the Design with Claude box", () => {
 
     // Closing the box fits the whole artboard again, not the page Claude wrote.
     act(() => designStore.getState().closeBox());
-    expect(artboardZoom()).toBeCloseTo((400 - 112) / 874, 3);
-    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 400], 56)[1], 0);
+    expect(artboardZoom()).toBeCloseTo((400 - 48) / 874, 3);
+    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 400])[1], 0);
 
     // Claude Code redesigns the card with the box closed, and the card is deleted after it lands: a resize fits the artboard.
     showDraft(draftOf({ fields: { name: "Card", replace: "card" } }));
@@ -640,8 +773,8 @@ describe("CanvasPanel with the Design with Claude box", () => {
       session.document.getState().apply([{ op: "removeLayer", component: "main", id: "card" }], { label: "Delete" });
     });
     resize(800, 500);
-    expect(artboardZoom()).toBeCloseTo((500 - 112) / 874, 3);
-    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 500], 56)[1], 0);
+    expect(artboardZoom()).toBeCloseTo((500 - 48) / 874, 3);
+    expect(artboardOffset()![1]).toBeCloseTo(fitRectOffset([800, 500])[1], 0);
   });
 
   it("fits the part of a draft's frame on the artboard, or the artboard when the frame is off it, since the canvas and viewer show only the artboard", () => {
@@ -718,7 +851,7 @@ describe("CanvasPanel with the Design with Claude box", () => {
     bodySize = [800, 400];
     mount();
     const whole = artboardZoom();
-    expect(whole).toBeCloseTo((400 - 112) / 874, 3);
+    expect(whole).toBeCloseTo((400 - 48) / 874, 3);
     showDraft(draftOf());
     expect(artboardZoom()).toBe(1);
     expect(artboardOffset()).toEqual([199, 56]);

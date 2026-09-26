@@ -66,10 +66,15 @@ export function rulerTicks(offset: number, zoom: number, length: number, scale: 
   return out;
 }
 
-/** Ruler label text: whole points without decimals. */
+/** Ruler label text: whole points without a trailing ".0", at most one decimal. */
 export function formatRulerValue(value: number): string {
-  const r = Math.round(value * 100) / 100;
+  const r = Math.round(value * 10) / 10;
   return r === 0 ? "0" : String(r);
+}
+
+/** Whether two spans along a ruler, as [start, end] pixels, come within `gap` of each other. */
+export function spansOverlap(a: readonly [number, number], b: readonly [number, number], gap: number): boolean {
+  return a[0] < b[1] + gap && b[0] < a[1] + gap;
 }
 
 export interface RulerRange {

@@ -23,6 +23,8 @@ export interface SelectionChrome {
   bounds: Rect;
   /** "W × H" in points. */
   sizeLabel: string;
+  /** The shorter side of the frame on screen, which sets how much chrome fits. */
+  minSide: number;
 }
 
 export interface ChromeOptions {
@@ -31,8 +33,18 @@ export interface ChromeOptions {
 }
 
 const KNOB_OFFSET = 22;
-/** Below this on-screen side length only corner handles show. */
+/** By the shorter on-screen side: under the first only the outline shows, from it the four corner handles, from the second all eight. */
+const MIN_CORNER_HANDLES = 14;
 const MIN_EDGE_HANDLES = 28;
+const MIN_KNOB = 40;
+const HIT_TOLERANCE = 6;
+
+const CORNERS: readonly Handle[] = HANDLES.filter((h) => h.length === 2);
+
+function handlesFor(minSide: number): readonly Handle[] {
+  if (minSide < MIN_CORNER_HANDLES) return [];
+  return minSide < MIN_EDGE_HANDLES ? CORNERS : HANDLES;
+}
 
 const fmt = (n: number) => {
   const r = Math.round(n * 10) / 10;
@@ -49,11 +61,9 @@ export function selectionChrome(index: CanvasIndex, ids: readonly Id[], viewport
     const toScreen = (local: Point) => artboardToScreen(viewport, transformPoint(node.worldTransform, local));
     const quad: Quad = [toScreen([0, 0]), toScreen([node.width, 0]), toScreen([node.width, node.height]), toScreen([0, node.height])];
     const minSide = Math.min(distance(quad[0], quad[1]), distance(quad[1], quad[2]));
-    const handles = options.resizable
-      ? HANDLES.filter((h) => h.length === 2 || minSide >= MIN_EDGE_HANDLES).map((handle) => ({ handle, point: toScreen([HANDLE_POINTS[handle][0] * node.width, HANDLE_POINTS[handle][1] * node.height]) }))
-      : [];
+    const handles = options.resizable ? handlesFor(minSide).map((handle) => ({ handle, point: toScreen([HANDLE_POINTS[handle][0] * node.width, HANDLE_POINTS[handle][1] * node.height]) })) : [];
     let knob: SelectionChrome["knob"] = null;
-    if (options.rotatable) {
+    if (options.rotatable && minSide >= MIN_KNOB) {
       const base = toScreen([node.width / 2, 0]);
       const center = toScreen([node.width / 2, node.height / 2]);
       let dx = base[0] - center[0];
@@ -68,21 +78,22 @@ export function selectionChrome(index: CanvasIndex, ids: readonly Id[], viewport
       }
       knob = { base, point: [base[0] + dx * KNOB_OFFSET, base[1] + dy * KNOB_OFFSET] };
     }
-    return { single: entry.id, quad, handles, knob, angle: rotationDegrees(node.worldTransform), bounds: index.bounds(entry.id)!, sizeLabel: `${fmt(node.width)} × ${fmt(node.height)}` };
+    return { single: entry.id, quad, handles, knob, angle: rotationDegrees(node.worldTransform), bounds: index.bounds(entry.id)!, sizeLabel: `${fmt(node.width)} × ${fmt(node.height)}`, minSide };
   }
 
   const bounds = unionRects(drawn.map((id) => index.bounds(id)).filter((b): b is Rect => b !== null))!;
   const [x0, y0] = artboardToScreen(viewport, [bounds.x, bounds.y]);
   const [x1, y1] = artboardToScreen(viewport, [bounds.x + bounds.width, bounds.y + bounds.height]);
   const quad: Quad = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-  const handles = options.resizable ? HANDLES.map((handle) => ({ handle, point: [x0 + (x1 - x0) * HANDLE_POINTS[handle][0], y0 + (y1 - y0) * HANDLE_POINTS[handle][1]] as Point })) : [];
-  return { single: null, quad, handles, knob: null, angle: 0, bounds, sizeLabel: `${fmt(bounds.width)} × ${fmt(bounds.height)}` };
+  const minSide = Math.min(x1 - x0, y1 - y0);
+  const handles = options.resizable ? handlesFor(minSide).map((handle) => ({ handle, point: [x0 + (x1 - x0) * HANDLE_POINTS[handle][0], y0 + (y1 - y0) * HANDLE_POINTS[handle][1]] as Point })) : [];
+  return { single: null, quad, handles, knob: null, angle: 0, bounds, sizeLabel: `${fmt(bounds.width)} × ${fmt(bounds.height)}`, minSide };
 }
 
 export type ChromeHit = { kind: "resize"; handle: Handle } | { kind: "rotate" };
 
-/** What part of the chrome a screen point is over: handles first, then the knob, then the rotate zones just outside corners. */
-export function hitChrome(chrome: SelectionChrome, p: Point, tolerance = 6): ChromeHit | null {
+/** What part of the chrome a screen point is over: handles first, then the knob, then the rotate zones just outside corners. The reach shrinks with a small selection so a handle never wins over a neighbouring layer. */
+export function hitChrome(chrome: SelectionChrome, p: Point, tolerance = Math.min(HIT_TOLERANCE, chrome.minSide / 3)): ChromeHit | null {
   let best: { handle: Handle; d: number } | null = null;
   for (const h of chrome.handles) {
     const d = distance(h.point, p);

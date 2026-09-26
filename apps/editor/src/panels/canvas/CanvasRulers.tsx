@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Rect } from "./geometry.ts";
-import { formatRulerValue, RULER_SIZE, rulerRange, rulerScale, rulerTicks } from "./rulers.ts";
+import { formatRulerValue, RULER_SIZE, rulerRange, rulerScale, rulerTicks, spansOverlap } from "./rulers.ts";
 import type { Viewport } from "./viewport.ts";
 
 export interface CanvasRulersProps {
@@ -89,47 +89,52 @@ function drawRuler(canvas: HTMLCanvasElement, axis: "x" | "y", length: number, v
   }
   ctx.stroke();
 
-  const avoid = range ? [toRuler(range.start), toRuler(range.end)] : [];
+  const selectionFont = colors.font.replace(/^500/, "600");
+  ctx.font = selectionFont;
+  const selectionLabels: { p: number; text: string; width: number; at: number; before: boolean }[] = [];
+  if (range) {
+    const edges: [number, number, boolean][] = [[toRuler(range.start), range.from, true]];
+    if (Math.abs(range.end - range.start) >= 1) edges.push([toRuler(range.end), range.to, false]);
+    for (const [p, value, before] of edges) {
+      const text = formatRulerValue(value);
+      const width = ctx.measureText(text).width;
+      selectionLabels.push({ p, text, width, before, at: before ? p - width - 3 : p + 3 });
+    }
+  }
+
   ctx.font = colors.font;
   ctx.fillStyle = colors.text;
   ctx.textBaseline = "middle";
   for (const tick of ticks) {
     if (!tick.major) continue;
     const p = tick.position;
-    if (p < -40 || p > length + 40 || avoid.some((q) => Math.abs(q - p) < 34)) continue;
-    drawLabel(ctx, axis, formatRulerValue(tick.value), p + 3);
+    if (p < -40 || p > length + 40) continue;
+    const text = formatRulerValue(tick.value);
+    const span: [number, number] = [p + 3, p + 3 + ctx.measureText(text).width];
+    if (selectionLabels.some((label) => spansOverlap(span, [label.at, label.at + label.width], 4))) continue;
+    drawLabel(ctx, axis, text, p + 3);
   }
 
-  if (range) {
-    ctx.fillStyle = colors.accent;
-    ctx.font = colors.font.replace(/^500/, "600");
-    const labels: [number, number, boolean][] = [
-      [toRuler(range.start), range.from, true],
-      [toRuler(range.end), range.to, false],
-    ];
-    for (const [p, value, before] of labels) {
-      if (Math.abs(range.end - range.start) < 1 && !before) continue;
-      const text = formatRulerValue(value);
-      const width = ctx.measureText(text).width;
-      const at = before ? p - width - 3 : p + 3;
-      ctx.save();
-      ctx.fillStyle = colors.background;
-      if (axis === "x") ctx.fillRect(at - 2, 2, width + 4, 12);
-      else ctx.fillRect(2, before ? p - 3 - width - 2 : p + 1, 12, width + 4);
-      ctx.restore();
-      ctx.strokeStyle = colors.accent;
-      ctx.beginPath();
-      const q = Math.round(p) + 0.5;
-      if (axis === "x") {
-        ctx.moveTo(q, 0);
-        ctx.lineTo(q, RULER_SIZE);
-      } else {
-        ctx.moveTo(0, q);
-        ctx.lineTo(RULER_SIZE, q);
-      }
-      ctx.stroke();
-      drawLabel(ctx, axis, text, at);
+  ctx.fillStyle = colors.accent;
+  ctx.font = selectionFont;
+  for (const { p, text, width, at, before } of selectionLabels) {
+    ctx.save();
+    ctx.fillStyle = colors.background;
+    if (axis === "x") ctx.fillRect(at - 2, 2, width + 4, 12);
+    else ctx.fillRect(2, before ? p - 3 - width - 2 : p + 1, 12, width + 4);
+    ctx.restore();
+    ctx.strokeStyle = colors.accent;
+    ctx.beginPath();
+    const q = Math.round(p) + 0.5;
+    if (axis === "x") {
+      ctx.moveTo(q, 0);
+      ctx.lineTo(q, RULER_SIZE);
+    } else {
+      ctx.moveTo(0, q);
+      ctx.lineTo(RULER_SIZE, q);
     }
+    ctx.stroke();
+    drawLabel(ctx, axis, text, at);
   }
 }
 

@@ -41,9 +41,16 @@ export function panBy(vp: Viewport, dx: number, dy: number): Viewport {
   return { x: vp.x + dx, y: vp.y + dy, zoom: vp.zoom };
 }
 
+export interface SidePadding {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export interface FitOptions {
-  /** Screen pixels kept free around the rect. Default 48. */
-  padding?: number;
+  /** Screen pixels kept free around the rect, or per side. Default 48. */
+  padding?: number | SidePadding;
   /** Never zoom in beyond this. Default 1. */
   maxZoom?: number;
 }
@@ -51,10 +58,11 @@ export interface FitOptions {
 /** A viewport that centers `rect` (artboard space) in a container of `size` CSS pixels. */
 export function fitRect(rect: Rect, size: readonly [number, number], options: FitOptions = {}): Viewport {
   const padding = options.padding ?? 48;
-  const availW = Math.max(1, size[0] - padding * 2);
-  const availH = Math.max(1, size[1] - padding * 2);
+  const { top, right, bottom, left } = typeof padding === "number" ? { top: padding, right: padding, bottom: padding, left: padding } : padding;
+  const availW = Math.max(1, size[0] - left - right);
+  const availH = Math.max(1, size[1] - top - bottom);
   const zoom = clampZoom(Math.min(options.maxZoom ?? 1, availW / Math.max(1, rect.width), availH / Math.max(1, rect.height)));
-  return { x: (size[0] - rect.width * zoom) / 2 - rect.x * zoom, y: (size[1] - rect.height * zoom) / 2 - rect.y * zoom, zoom };
+  return { x: left + (availW - rect.width * zoom) / 2 - rect.x * zoom, y: top + (availH - rect.height * zoom) / 2 - rect.y * zoom, zoom };
 }
 
 /** The next zoom stop in `direction` (1 = in, -1 = out). */
@@ -76,6 +84,17 @@ export function ensureVisible(vp: Viewport, rect: Rect, size: readonly [number, 
   if (s.x >= margin && s.y >= margin && s.x + s.width <= size[0] - margin && s.y + s.height <= size[1] - margin) return vp;
   if (s.width > size[0] - margin * 2 || s.height > size[1] - margin * 2) return fitRect(rect, size, { padding: margin, maxZoom: vp.zoom });
   return { x: size[0] / 2 - (rect.x + rect.width / 2) * vp.zoom, y: size[1] / 2 - (rect.y + rect.height / 2) * vp.zoom, zoom: vp.zoom };
+}
+
+const GRID_STEPS: readonly number[] = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+const MIN_GRID_PX = 12;
+
+/** The dot grid for a viewport: dots every 1-2-5 step of artboard points that lands 12 to 30 px apart, on the artboard's own coordinates. */
+export function dotGrid(vp: Viewport): { size: number; x: number; y: number } {
+  const step = GRID_STEPS.find((s) => s * vp.zoom >= MIN_GRID_PX) ?? GRID_STEPS.at(-1)!;
+  const size = step * vp.zoom;
+  const wrap = (offset: number) => (((offset - size / 2) % size) + size) % size;
+  return { size, x: wrap(vp.x), y: wrap(vp.y) };
 }
 
 export function formatZoom(zoom: number): string {

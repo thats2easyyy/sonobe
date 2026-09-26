@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { artboardToScreen, clampZoom, ensureVisible, fitRect, formatZoom, MAX_ZOOM, nextZoomStep, screenToArtboard, wheelZoom, zoomAt } from "./viewport.ts";
+import { artboardToScreen, clampZoom, dotGrid, ensureVisible, fitRect, formatZoom, MAX_ZOOM, nextZoomStep, screenToArtboard, wheelZoom, zoomAt } from "./viewport.ts";
 
 describe("canvas viewport", () => {
   it("converts between artboard and screen", () => {
@@ -21,6 +21,31 @@ describe("canvas viewport", () => {
     expect(vp.zoom).toBe(0.5);
     expect(artboardToScreen(vp, [200, 400])).toEqual([250, 250]);
     expect(fitRect({ x: 0, y: 0, width: 10, height: 10 }, [500, 500]).zoom).toBe(1);
+  });
+
+  it("fits with different room on each side", () => {
+    const rect = { x: 0, y: 0, width: 400, height: 800 };
+    const vp = fitRect(rect, [500, 1000], { padding: { top: 100, right: 50, bottom: 20, left: 50 }, maxZoom: 4 });
+    // 400 × 880 of room for a 400 × 800 rect: height-bound at 1.1, centered in that room.
+    expect(vp.zoom).toBeCloseTo(1);
+    expect(artboardToScreen(vp, [200, 400])).toEqual([250, 100 + 880 / 2]);
+    const wide = fitRect(rect, [500, 1000], { padding: { top: 0, right: 0, bottom: 0, left: 200 } });
+    expect(wide.zoom).toBeCloseTo(0.75);
+    expect(artboardToScreen(wide, [0, 0])[0]).toBe(200);
+  });
+
+  it("puts grid dots on the artboard's steps, 12 to 30 px apart", () => {
+    for (const zoom of [0.02, 0.21, 0.5, 1, 3, 8, 64]) {
+      const { size } = dotGrid({ x: 0, y: 0, zoom });
+      expect(size).toBeGreaterThanOrEqual(12);
+      expect(size).toBeLessThanOrEqual(30);
+    }
+    expect(dotGrid({ x: 0, y: 0, zoom: 1 }).size).toBe(20);
+    expect(dotGrid({ x: 0, y: 0, zoom: 0.21 }).size).toBeCloseTo(100 * 0.21);
+    // A dot sits at the artboard's origin: the tile's center is at the viewport's offset.
+    const grid = dotGrid({ x: 105, y: -7, zoom: 1 });
+    expect((grid.x + grid.size / 2) % grid.size).toBe(105 % 20);
+    expect((grid.y + grid.size / 2) % grid.size).toBe(13);
   });
 
   it("steps through zoom presets", () => {
