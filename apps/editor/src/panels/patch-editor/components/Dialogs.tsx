@@ -4,7 +4,7 @@ import { findLayer, getPatchSpec, resolveNodePorts, type Id, type PatchSpec, typ
 import { isPatchImplemented } from "../../../state/registry.ts";
 import { singleKeyFor } from "../model/singleKey.ts";
 import { ArrowRight, CornerDownLeft, Layers } from "lucide-react";
-import { Fragment, useMemo, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { CATEGORY_LABELS, categoryColorVar } from "../../../theme/tokens.ts";
 import { Badge } from "../../../ui/Badge.tsx";
@@ -15,12 +15,14 @@ import { MenuList, type MenuEntry } from "../../../ui/Menu.tsx";
 import { Popover } from "../../../ui/Popover.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { SearchList, type SearchListRenderContext } from "../../../ui/SearchList.tsx";
+import { Tooltip } from "../../../ui/Tooltip.tsx";
 import type { SpliceOption } from "../model/editOps.ts";
-import { LINK_SEARCH_KEYS, linkCandidateGroup, linkCandidates, type LayerLinkItem, type LinkCandidate, type LinkSearchItem, type OutputLinkItem } from "../model/linkSearch.ts";
-import { PICKER_KEYS, pickerItems, type PickerItem } from "../model/picker.ts";
+import { browseLinkCandidates, LINK_SEARCH_KEYS, linkCandidateGroup, linkCandidates, linkEmptyCopy, searchLinkItems, type LayerLinkItem, type LinkCandidate, type LinkSearchItem, type OutputLinkItem } from "../model/linkSearch.ts";
+import { docsExcerpt, PICKER_KEYS, pickerBrowseItems, pickerGroup, pickerItems, type PickerItem } from "../model/picker.ts";
 import type { LinkSearchRequest, PickerRequest, XY } from "../state/actions.ts";
 import { usePatchEditor } from "../state/context.ts";
 import { CATEGORY_ICONS, LAYER_ICONS } from "./icons.ts";
+import "./dialogs.css";
 
 // ---------------------------------------------------------------------------
 // Patch picker
@@ -35,7 +37,7 @@ export interface PatchPickerDialogProps {
 /** ⌥⏎ or double-click the canvas: search every patch by name, alias, or port, with docs alongside. */
 export function PatchPickerDialog({ request, onClose, onPick }: PatchPickerDialogProps) {
   return (
-    <Dialog open={request !== null} onOpenChange={(open) => !open && onClose()} aria-label={request?.replace ? "Replace patch" : "Insert patch"} placement="top" width={820} modalScope="patchPicker" className="sb-pe-picker">
+    <Dialog open={request !== null} onOpenChange={(open) => !open && onClose()} aria-label={request?.replace ? "Replace patch" : "Insert patch"} placement="top" width={820} motion="fade" modalScope="patchPicker" className="sb-pe-picker">
       {request && <PickerBody request={request} onClose={onClose} onPick={onPick} />}
     </Dialog>
   );
@@ -45,6 +47,8 @@ function PickerBody({ request, onClose, onPick }: { request: PickerRequest; onCl
   const { session, registry, componentId } = usePatchEditor();
   const components = useStore(session.document, (s) => s.doc.components);
   const items = useMemo(() => pickerItems(registry, session.document.getState().doc), [registry, components]); // eslint-disable-line react-hooks/exhaustive-deps
+  const browseItems = useMemo(() => pickerBrowseItems(items), [items]);
+  const [query, setQuery] = useState("");
   const replacing = request.replace ? components[componentId]?.patches[request.replace] : undefined;
   const replacingName = replacing ? replacing.name || getPatchSpec(registry, replacing.type)?.name || replacing.type : undefined;
   const pick = (item: PickerItem) => {
@@ -56,16 +60,18 @@ function PickerBody({ request, onClose, onPick }: { request: PickerRequest; onCl
       size="lg"
       aria-label="Patches"
       placeholder={replacingName ? `Replace ${replacingName} with…` : "Search patches by name, alias, or port…"}
-      items={items}
+      items={query.trim() ? items : browseItems}
+      query={query}
+      onQueryChange={setQuery}
       keys={PICKER_KEYS}
       getId={(item) => item.id}
-      groupBy={(item) => (item.componentId ? "Components in this project" : CATEGORY_LABELS[item.spec.category])}
+      groupBy={pickerGroup}
       onSelect={pick}
       limit={120}
       emptyState={(query) => (
         <div className="sb-pe-picker__empty">
           <div>No patches match “{query}”.</div>
-          <div className="sb-pe-picker__empty-hint">Try what it does, like “spring”, “toggle”, or “fetch”.</div>
+          <div>Try what it does, like “spring”, “toggle”, or “fetch”.</div>
         </div>
       )}
       renderItem={(item, ctx) => {
@@ -75,7 +81,7 @@ function PickerBody({ request, onClose, onPick }: { request: PickerRequest; onCl
         return (
           <div className="sb-pe-picker__item" style={{ "--sb-cat": categoryColorVar(item.spec.category) } as CSSProperties}>
             <span className="sb-pe-picker__icon" aria-hidden>
-              <Icon size={13} strokeWidth={2} />
+              <Icon size={14} strokeWidth={1.75} />
             </span>
             <span className="sb-pe-picker__name">{ctx.highlight("name", item.name)}</span>
             {alias && !ctx.matches.name && <span className="sb-pe-picker__alias">{ctx.highlight("aliases", alias.value)}</span>}
@@ -93,11 +99,13 @@ function PickerBody({ request, onClose, onPick }: { request: PickerRequest; onCl
           </span>
           <span className="sb-pe-picker__hint">
             <Kbd>
-              <CornerDownLeft size={10} strokeWidth={2.25} />
+              <CornerDownLeft size={10} strokeWidth={1.75} />
             </Kbd>
             {request.replace ? "replace" : "insert"}
           </span>
-          <span className="sb-pe-picker__hint sb-pe-picker__hint--end">Tip: hover the patch editor and press a letter, like A for Pop Animation</span>
+          <span className="sb-pe-picker__hint sb-pe-picker__hint--end">
+            <Kbd>Esc</Kbd> close
+          </span>
         </>
       }
     />
@@ -114,9 +122,9 @@ function PortList({ title, ports, variants }: { title: string; ports: readonly {
         <div key={port.key} className="sb-pe-picker__port">
           <PortGlyph type={port.type === "variant" && variants?.length ? variants[0]! : port.type} size={8} />
           <span className="sb-pe-picker__port-name">{port.name}</span>
-          <span className="sb-pe-picker__port-type" title={port.type === "variant" && variants ? `Set with Change Type: ${variants.map((v) => VALUE_TYPE_LABELS[v]).join(", ")}` : undefined}>
-            {port.type === "variant" ? variantLabel : VALUE_TYPE_LABELS[port.type]}
-          </span>
+          <Tooltip content={`Set with Change Type: ${variants?.map((v) => VALUE_TYPE_LABELS[v]).join(", ")}`} disabled={port.type !== "variant" || !variants} placement="top">
+            <span className="sb-pe-picker__port-type">{port.type === "variant" ? variantLabel : VALUE_TYPE_LABELS[port.type]}</span>
+          </Tooltip>
         </div>
       ))}
     </div>
@@ -127,12 +135,13 @@ function PatchPreview({ item, onInsert, replacing }: { item: PickerItem; onInser
   const { registry } = usePatchEditor();
   const spec = item.spec;
   const Icon = CATEGORY_ICONS[spec.category];
+  const excerpt = docsExcerpt(spec.docs, spec.summary);
   const variadic = spec.variadic ? [{ key: `${spec.variadic.key}n`, name: `${spec.variadic.name} 1…${spec.variadic.defaultCount}`, type: spec.variadic.type }] : [];
   return (
     <div className="sb-pe-picker__preview" style={{ "--sb-cat": categoryColorVar(spec.category) } as CSSProperties}>
       <div className="sb-pe-picker__preview-head">
         <span className="sb-pe-picker__preview-icon" aria-hidden>
-          <Icon size={16} strokeWidth={2} />
+          <Icon size={16} strokeWidth={1.75} />
         </span>
         <div className="sb-pe-picker__preview-titles">
           <div className="sb-pe-picker__preview-title">{item.name}</div>
@@ -151,23 +160,8 @@ function PatchPreview({ item, onInsert, replacing }: { item: PickerItem; onInser
         <PortList title="Inputs" ports={[...spec.inputs.filter((p) => !p.advanced), ...variadic]} variants={spec.variants} />
         <PortList title="Outputs" ports={spec.outputs} variants={spec.variants} />
       </div>
-      {spec.pairsWellWith?.length ? (
-        <div className="sb-pe-picker__pairs">
-          <span className="sb-pe-eyebrow">Pairs well with</span>
-          <div className="sb-pe-picker__chips">
-            {spec.pairsWellWith.map((type) => (
-              <span key={type} className="sb-pe-picker__chip">
-                {getPatchSpec(registry, type)?.name ?? type}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {singleKeyFor(registry, spec.type) && (
-        <div className="sb-pe-picker__shortcut">
-          Quick insert: hover the patch editor and press <Kbd shortcut={singleKeyFor(registry, spec.type)} />
-        </div>
-      )}
+      {excerpt && <p className="sb-pe-picker__excerpt">{excerpt}</p>}
+      {spec.pairsWellWith?.length ? <p className="sb-pe-picker__pairs">Works with: {spec.pairsWellWith.map((type) => getPatchSpec(registry, type)?.name ?? type).join(", ")}</p> : null}
     </div>
   );
 }
@@ -200,6 +194,7 @@ export function LinkDragSearch({ request, onClose, onPick }: LinkDragSearchProps
       initialFocus="none"
       aria-label={searchLabel(request)}
       className="sb-pe-linksearch"
+      style={{ height: "min(420px, 60vh)" }}
     >
       {request && <LinkSearchBody request={request} onClose={onClose} onPick={onPick} />}
     </Popover>
@@ -211,15 +206,17 @@ function PatchCandidate({ item, ctx, side }: { item: LinkSearchItem; ctx: Search
   return (
     <div className="sb-pe-linksearch__item" style={{ "--sb-cat": categoryColorVar(item.spec.category) } as CSSProperties}>
       <span className="sb-pe-picker__icon" aria-hidden>
-        <Icon size={12} strokeWidth={2} />
+        <Icon size={12} strokeWidth={1.75} />
       </span>
       <span className="sb-pe-picker__name">{ctx.highlight("name", item.spec.name)}</span>
       {item.typeParam && item.spec.variants && item.typeParam !== item.spec.variants[0] && <span className="sb-pe-chip">{VALUE_TYPE_LABELS[item.typeParam]}</span>}
-      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
-        {side === "out" && <ArrowRight size={10} strokeWidth={2.25} aria-hidden />}
-        <PortGlyph type={item.port.type} size={7} />
-        {ctx.highlight("port", item.port.name)}
-      </span>
+      <Tooltip content={`Converted: ${item.conversion}`} disabled={!item.conversion} placement="top">
+        <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined}>
+          {side === "out" && <ArrowRight size={10} strokeWidth={1.75} aria-hidden />}
+          <PortGlyph type={item.port.type} size={7} />
+          {ctx.highlight("port", item.port.name)}
+        </span>
+      </Tooltip>
     </div>
   );
 }
@@ -242,19 +239,23 @@ function LayerCandidate({ item, ctx, singleLayer }: { item: LayerLinkItem; ctx: 
   return (
     <div className="sb-pe-linksearch__item" style={{ "--sb-cat": "var(--category-layers)" } as CSSProperties}>
       <span className="sb-pe-picker__icon" aria-hidden>
-        <Icon size={12} strokeWidth={2} />
+        <Icon size={12} strokeWidth={1.75} />
       </span>
       <span className="sb-pe-picker__name">{name}</span>
       {!singleLayer && item.parents.length > 0 && <span className="sb-pe-picker__alias">in {item.parents.at(-1)}</span>}
       {item.driver && (
-        <span className="sb-pe-chip" title={`Driven by ${item.driver}. Connecting replaces it.`}>
-          Driven
-        </span>
+        <Tooltip content={`Driven by ${item.driver}. Connecting replaces it.`} placement="top">
+          <span className="sb-pe-chip">Driven</span>
+        </Tooltip>
       )}
-      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
-        <PortGlyph type={item.port.type} size={7} />
-        {VALUE_TYPE_LABELS[item.port.type]}
-      </span>
+      {!item.exact && (
+        <Tooltip content={`Converted: ${item.conversion}`} disabled={!item.conversion} placement="top">
+          <span className="sb-pe-linksearch__port">
+            <PortGlyph type={item.port.type} size={7} />
+            {VALUE_TYPE_LABELS[item.port.type]}
+          </span>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -268,7 +269,7 @@ function OutputCandidate({ item, ctx }: { item: OutputLinkItem; ctx: SearchListR
   return (
     <div className="sb-pe-linksearch__item" style={{ "--sb-cat": categoryColorVar(category) } as CSSProperties}>
       <span className="sb-pe-picker__icon" aria-hidden>
-        <Icon size={12} strokeWidth={2} />
+        <Icon size={12} strokeWidth={1.75} />
       </span>
       <span className="sb-pe-picker__name">
         {ctx.matches.label ? (
@@ -283,10 +284,14 @@ function OutputCandidate({ item, ctx }: { item: OutputLinkItem; ctx: SearchListR
           </>
         )}
       </span>
-      <span className="sb-pe-linksearch__port" data-exact={item.exact || undefined} title={item.conversion ? `Converted: ${item.conversion}` : undefined}>
-        <PortGlyph type={item.port.type} size={7} />
-        {VALUE_TYPE_LABELS[item.port.type]}
-      </span>
+      {!item.exact && (
+        <Tooltip content={`Converted: ${item.conversion}`} disabled={!item.conversion} placement="top">
+          <span className="sb-pe-linksearch__port">
+            <PortGlyph type={item.port.type} size={7} />
+            {VALUE_TYPE_LABELS[item.port.type]}
+          </span>
+        </Tooltip>
+      )}
     </div>
   );
 }
@@ -305,6 +310,9 @@ function LinkSearchBody({ request, onClose, onPick }: { request: LinkSearchReque
       selectedLayers: session.selection.getState().layers,
     });
   }, [session, registry, componentId, request]);
+  const browseItems = useMemo(() => browseLinkCandidates(items), [items]);
+  const [query, setQuery] = useState("");
+  const typedItems = useMemo(() => searchLinkItems(items, query), [items, query]);
   const doc = session.document.getState().doc;
   const component = doc.components[componentId];
   const layerName = request.layer !== undefined && component ? (findLayer(component.layers, request.layer)?.layer.name ?? request.layer) : undefined;
@@ -325,7 +333,9 @@ function LinkSearchBody({ request, onClose, onPick }: { request: LinkSearchReque
     <SearchList<LinkCandidate>
       aria-label={layerName !== undefined ? `Properties of ${layerName}` : "Compatible patches and properties"}
       placeholder={placeholder}
-      items={items}
+      items={query.trim() ? typedItems : browseItems}
+      query={query}
+      onQueryChange={setQuery}
       keys={LINK_SEARCH_KEYS}
       getId={(item) => item.id}
       limit={80}
@@ -335,17 +345,20 @@ function LinkSearchBody({ request, onClose, onPick }: { request: LinkSearchReque
         onClose();
         onPick(item, request);
       }}
-      emptyState={(query) => (layerName !== undefined ? `${layerName} has no property that fits “${query}”.` : `Nothing that fits “${query}”.`)}
+      emptyState={(q) => (layerName !== undefined ? `${layerName} has no property that fits “${q}”.` : linkEmptyCopy(request.type, VALUE_TYPE_LABELS[request.type], q))}
       renderItem={(item, ctx) =>
         item.kind === "patch" ? <PatchCandidate item={item} ctx={ctx} side={request.side} /> : item.kind === "layer" ? <LayerCandidate item={item} ctx={ctx} singleLayer={layerName !== undefined} /> : <OutputCandidate item={item} ctx={ctx} />
       }
       footer={
-        <span className="sb-pe-picker__hint">
-          <Kbd>
-            <CornerDownLeft size={10} strokeWidth={2.25} />
-          </Kbd>
-          connect
-        </span>
+        <>
+          <span className="sb-pe-picker__hint">
+            <Kbd>
+              <CornerDownLeft size={10} strokeWidth={1.75} />
+            </Kbd>
+            connect
+          </span>
+          {layerName === undefined && !query.trim() && <span className="sb-pe-picker__hint sb-pe-picker__hint--end">Type to search every patch</span>}
+        </>
       }
       size="md"
     />
@@ -447,10 +460,10 @@ function InfoBody({ patchId, onClose }: { patchId: Id; onClose: () => void }) {
   const Icon = CATEGORY_ICONS[spec.category];
   const implemented = isPatchImplemented(registry, node.type);
   return (
-    <div className="sb-pe-info__body sb-scroll" style={{ "--sb-cat": categoryColorVar(spec.category) } as CSSProperties}>
+    <div className="sb-pe-info__body sb-scroll" data-autofocus tabIndex={-1} style={{ "--sb-cat": categoryColorVar(spec.category) } as CSSProperties}>
       <div className="sb-pe-picker__preview-head">
         <span className="sb-pe-picker__preview-icon" aria-hidden>
-          <Icon size={16} strokeWidth={2} />
+          <Icon size={16} strokeWidth={1.75} />
         </span>
         <div className="sb-pe-picker__preview-titles">
           <div className="sb-pe-picker__preview-title">{node.name || spec.name}</div>

@@ -256,6 +256,26 @@ export function linkCandidates(doc: SonobeDocument, componentId: Id, registry: R
   return request.drive ? [...outputs, ...patches, ...picked, ...others] : [...patches, ...outputs, ...picked, ...others];
 }
 
+/** How many new patches the browsing view suggests before the layers and outputs (typing searches all of them). */
+export const BROWSE_PATCH_LIMIT = 6;
+
+/** Browsing view: the best few patches, one row each (their best-ranked port), so layers and outputs show on the first screen. */
+export function browseLinkCandidates(items: readonly LinkCandidate[], patchLimit = BROWSE_PATCH_LIMIT): LinkCandidate[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind !== "patch") return true;
+    if (seen.has(item.spec.type) || seen.size >= patchLimit) return false;
+    seen.add(item.spec.type);
+    return true;
+  });
+}
+
+/** What the list says when nothing fits: the typed query, or the dragged cable's type when there is none. */
+export function linkEmptyCopy(type: ValueType, typeLabel: string, query = ""): string {
+  if (query.trim()) return `No match for “${query.trim()}”. Try a patch name, a layer or a property.`;
+  return `Nothing fits ${type === "any" ? "this cable" : `this ${typeLabel.replace(/^\p{Lu}(?=\p{Ll})/u, (c) => c.toLowerCase())} cable`}. Try a patch name, a layer or a property.`;
+}
+
 /** Section header for a candidate (empty query). */
 export function linkCandidateGroup(item: LinkCandidate): string {
   if (item.kind === "patch") return "New patch";
@@ -288,8 +308,18 @@ export const LINK_SEARCH_KEYS: readonly FuzzyKey<LinkCandidate>[] = [
   { name: "layer", get: (i) => (i.kind === "layer" ? i.layerName : i.kind === "output" ? i.nodeTitle : null), weight: 0.8 },
 ];
 
-/** Filter and rank link-search candidates for a query. */
+/**
+ * Filter and rank link-search candidates for a query. A patch shows once, at its best match; more of its
+ * ports show only when the query matches their own names ("progress" lists every Progress port).
+ */
 export function searchLinkItems<T extends LinkCandidate>(items: readonly T[], query: string, limit?: number): T[] {
   if (!query.trim()) return limit === undefined ? [...items] : items.slice(0, limit);
-  return fuzzySearch<LinkCandidate>(items, query, LINK_SEARCH_KEYS, limit === undefined ? {} : { limit }).map((r) => r.item as T);
+  const seen = new Set<string>();
+  const results = fuzzySearch<LinkCandidate>(items, query, LINK_SEARCH_KEYS).filter(({ item, matches }) => {
+    if (item.kind !== "patch") return true;
+    const first = !seen.has(item.spec.type);
+    seen.add(item.spec.type);
+    return first || (matches.port !== undefined && matches.name === undefined);
+  });
+  return (limit === undefined ? results : results.slice(0, limit)).map((r) => r.item as T);
 }

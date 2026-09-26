@@ -5,9 +5,9 @@ import { createDemoDocument } from "../../../state/demoDocument.ts";
 import { getRegistry } from "../../../state/registry.ts";
 import type { MenuEntry } from "../../../ui/Menu.tsx";
 import { deriveGraph } from "@sonobe/core/graph";
-import type { GraphNodeData, PortSide } from "../model/types.ts";
+import type { CableData, GraphNodeData, PortSide } from "../model/types.ts";
 import type { PatchEditorActions } from "../state/actions.ts";
-import { patchMenu, portMenu, type MenuContext } from "./menus.ts";
+import { cableMenu, patchMenu, portMenu, type MenuContext } from "./menus.ts";
 
 const registry = getRegistry();
 
@@ -85,6 +85,14 @@ describe("port menu", () => {
     const publish = find(portMenu(ctx, node("zoom_spring"), port("zoom_spring", "in", "bounciness")), "Publish as Component Input")!;
     expect(publish.disabled).toBe(true);
     expect(publish.description).toContain("inside a component");
+    expect(publish.description!.length).toBeLessThan(40);
+  });
+
+  it("lists Disconnect before Publish", () => {
+    const { ctx, node, port } = menuFixture(withComponent(), "heart_logic");
+    const ids = items(portMenu(ctx, node("like_spring"), port("like_spring", "in", "number"))).map((e) => e.id);
+    expect(ids.indexOf("disconnect")).toBe(0);
+    expect(ids.indexOf("publish")).toBe(1);
   });
 });
 
@@ -99,5 +107,25 @@ describe("patch menu", () => {
     const jump = find(patchMenu(ctx, node("reader") as Extract<GraphNodeData, { kind: "patch" }>), "Jump to Broadcaster")!;
     jump.onSelect!();
     expect(calls.jumpToBroadcaster).toHaveBeenCalledWith("reader");
+  });
+
+  it("leads a component patch's menu with Enter Component and keeps Component Info under Rename", () => {
+    const doc = withComponent();
+    const { ctx, node } = menuFixture(doc, "main");
+    const instance = Object.entries(doc.components.main!.patches).find(([, p]) => p.component === "heart_logic")![0];
+    const ids = items(patchMenu(ctx, node(instance) as Extract<GraphNodeData, { kind: "patch" }>)).map((e) => e.id);
+    expect(ids[0]).toBe("enter");
+    expect(ids.indexOf("componentInfo")).toBe(ids.indexOf("rename") + 1);
+  });
+});
+
+describe("cable menu", () => {
+  const cable = { from: "heart_color.output", to: "card_shadow.start", suggestions: [{ description: "Split a color into channels.", ops: [{ op: "addPatch", component: "main", patch: { type: "colorToRgb" } }] }] } as unknown as CableData;
+
+  it("inserts a converter at the cable's midpoint", () => {
+    const { ctx, calls } = menuFixture(createDemoDocument(registry), "main");
+    const geometry = new Map([["cable:card_shadow.start", { id: "cable:card_shadow.start", sx: 100, sy: 40, tx: 300, ty: 40 }]]);
+    find(cableMenu({ ...ctx, geometry }, cable), "Insert Color to RGB")!.onSelect!();
+    expect(calls.explainConnection).toHaveBeenCalledWith("heart_color.output", "card_shadow.start", { x: 200, y: 40 });
   });
 });

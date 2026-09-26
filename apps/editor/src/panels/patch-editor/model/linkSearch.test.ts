@@ -2,7 +2,7 @@
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { layerLinkItems, linkCandidateGroup, linkCandidates, outputLinkItems, searchLinkItems, type LinkCandidate } from "./linkSearch.ts";
+import { BROWSE_PATCH_LIMIT, browseLinkCandidates, layerLinkItems, linkCandidateGroup, linkCandidates, linkEmptyCopy, outputLinkItems, searchLinkItems, type LinkCandidate } from "./linkSearch.ts";
 
 const registry = createPatchRegistry();
 const doc = createDemoDocument(registry);
@@ -64,6 +64,53 @@ describe("linkCandidates", () => {
   it("lists only one layer's properties for a cable dropped on that layer", () => {
     const items = linkCandidates(doc, "main", registry, { side: "out", type: "number", layerId: "photo" });
     expect(items.every((i) => i.kind === "layer" && i.layerId === "photo")).toBe(true);
+  });
+});
+
+describe("browseLinkCandidates", () => {
+  const all = linkCandidates(doc, "main", registry, { side: "out", type: "number" });
+  const browse = browseLinkCandidates(all);
+  const patches = browse.filter((i) => i.kind === "patch");
+
+  it("suggests the best few patches, one row each, in model order", () => {
+    expect(patches).toHaveLength(BROWSE_PATCH_LIMIT);
+    expect(new Set(patches.map((i) => i.kind === "patch" && i.spec.type)).size).toBe(patches.length);
+    expect(browse.slice(0, patches.length)).toEqual(patches);
+    expect(patches[0]).toBe(all[0]);
+  });
+
+  it("keeps every layer property and puts the Layers group on the first screen", () => {
+    expect(browse.filter((i) => i.kind === "layer")).toHaveLength(all.filter((i) => i.kind === "layer").length);
+    expect(linkCandidateGroup(browse[0]!)).toBe("New patch");
+    expect(linkCandidateGroup(browse.at(-1)!)).toBe("Layers");
+    expect(browse.findIndex((i) => i.kind === "layer")).toBe(BROWSE_PATCH_LIMIT);
+  });
+
+  it("shows outputs in this graph right after the suggestions", () => {
+    const fromInput = browseLinkCandidates(linkCandidates(doc, "main", registry, { side: "in", type: "number" }));
+    expect(linkCandidateGroup(fromInput[BROWSE_PATCH_LIMIT]!)).toBe("In this graph");
+  });
+
+  it("searching lists a patch once, and its other ports only when the query names them", () => {
+    const byName = searchLinkItems(all, "Transition").filter((i) => i.kind === "patch" && i.spec.type === "transition");
+    expect(byName).toHaveLength(1);
+    const ports = searchLinkItems(all, "Progress").filter((i) => i.kind === "patch");
+    expect(ports.length).toBeGreaterThan(0);
+    const seen = new Set<string>();
+    for (const item of ports) {
+      if (item.kind !== "patch") continue;
+      if (seen.has(item.spec.type)) expect(item.port.name).toMatch(/progress/i);
+      seen.add(item.spec.type);
+    }
+  });
+});
+
+describe("linkEmptyCopy", () => {
+  it("names the query, or else the dragged cable's type", () => {
+    expect(linkEmptyCopy("number", "Number")).toBe("Nothing fits this number cable. Try a patch name, a layer or a property.");
+    expect(linkEmptyCopy("point3d", "Point 3D")).toBe("Nothing fits this point 3D cable. Try a patch name, a layer or a property.");
+    expect(linkEmptyCopy("any", "Any")).toBe("Nothing fits this cable. Try a patch name, a layer or a property.");
+    expect(linkEmptyCopy("number", "Number", " zzz ")).toBe("No match for “zzz”. Try a patch name, a layer or a property.");
   });
 });
 

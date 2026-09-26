@@ -5,8 +5,10 @@ import type { MenuEntry } from "../../../ui/Menu.tsx";
 import { VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { knobValueText, planUnlinkKnob } from "../../knobs/model.ts";
 import { COMMENT_COLORS } from "../model/editOps.ts";
+import { cablePoint } from "../model/geometry.ts";
+import type { CableGeometry } from "../model/knife.ts";
 import { publishedKeyOf } from "../model/publish.ts";
-import type { CableData, CommentNodeData, GraphNodeData, LayerNodeData, PatchNodeData, PortModel } from "../model/types.ts";
+import { cableId, type CableData, type CommentNodeData, type GraphNodeData, type LayerNodeData, type PatchNodeData, type PortModel } from "../model/types.ts";
 import type { PatchEditorActions } from "../state/actions.ts";
 
 export interface MenuContext {
@@ -22,6 +24,8 @@ export interface MenuContext {
   paste: () => void;
   /** Start editing a node's title. */
   rename: (nodeId: string) => void;
+  /** Where each cable is drawn, by cable id (a converter goes in at the cable's midpoint). */
+  geometry?: ReadonlyMap<string, CableGeometry>;
   /** Choose a property of a layer to drive. */
   chooseLayerProperty?: (layerId: Id) => void;
 }
@@ -36,9 +40,12 @@ export function patchMenu(ctx: MenuContext, data: PatchNodeData): MenuEntry[] {
   const allMuted = nodes.every((n) => n!.muted);
   const allCollapsed = nodes.every((n) => n!.ui.collapsed);
   const entries: MenuEntry[] = [];
+  const isComponent = single && data.componentTarget !== undefined;
+  if (isComponent) entries.push({ id: "enter", label: "Enter Component", shortcut: "Alt+Down", onSelect: () => actions.enterComponent(data.patchId) }, sep("s0"));
   if (single) {
     entries.push({ id: "info", label: "Patch Info", shortcut: "Mod+I", onSelect: () => actions.openInfo(data.patchId) });
     entries.push({ id: "rename", label: "Rename", shortcut: "Enter", onSelect: () => ctx.rename(data.patchId) });
+    if (isComponent) entries.push({ id: "componentInfo", label: "Component Info", onSelect: () => actions.openComponentInfo(data.patchId) });
     entries.push(sep("s1"));
     entries.push({ id: "replace", label: "Replace With…", onSelect: () => actions.openPicker({ replace: data.patchId }) });
     if (data.variants?.length) {
@@ -77,10 +84,6 @@ export function patchMenu(ctx: MenuContext, data: PatchNodeData): MenuEntry[] {
     });
     entries.push({ id: "tidy", label: "Tidy Up Selection", shortcut: "Ctrl+T", onSelect: () => void actions.tidyUp() });
   }
-  if (single && data.componentTarget) {
-    entries.push({ id: "enter", label: "Enter Component", shortcut: "Alt+Down", onSelect: () => actions.enterComponent(data.patchId) });
-    entries.push({ id: "componentInfo", label: "Component Info", description: "Name, notes, and published ports", onSelect: () => actions.openComponentInfo(data.patchId) });
-  }
   if (single && data.type === VARIABLE_RECEIVER_TYPE) entries.push({ id: "jump", label: "Jump to Broadcaster", onSelect: () => actions.jumpToBroadcaster(data.patchId) });
   if (single && data.layerRef) entries.push({ id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerRef!) });
   entries.push(sep("s3"));
@@ -111,6 +114,12 @@ export function portMenu(ctx: MenuContext, data: GraphNodeData, port: PortModel)
   const side = port.side;
   const published = component ? publishedKeyOf(component, port.address, side) : undefined;
   const entries: MenuEntry[] = [];
+  const knob = side === "in" && port.knob ? getKnob(ctx.doc.knobs, port.knob.id) : undefined;
+  if (knob && ctx.doc.knobs) {
+    // A knob-driven input unlinks to the knob's running value rather than to its default.
+    const [op] = planUnlinkKnob(ctx.doc.knobs, knob, ctx.componentId, [{ address: port.address, type: port.type }]);
+    entries.push({ id: "unlinkKnob", label: `Unlink from ${knob.name}`, description: `Keeps ${knobValueText(knob, knobLiteral(ctx.doc.knobs, knob))}`, onSelect: () => actions.apply([op!], `Unlink ${port.name} from ${knob.name}`) });
+  } else if (side === "in" && port.connected && published === undefined) entries.push({ id: "disconnect", label: "Disconnect", onSelect: () => actions.disconnect([port.address]) });
   if (published !== undefined) {
     entries.push({ id: "unpublish", label: side === "in" ? "Unpublish Input" : "Unpublish Output", shortcut: "Alt+P", onSelect: () => actions.unpublishPort(published, side) });
   } else {
@@ -121,27 +130,26 @@ export function portMenu(ctx: MenuContext, data: GraphNodeData, port: PortModel)
       label: side === "in" ? "Publish as Component Input" : "Publish as Component Output",
       shortcut: "Alt+P",
       disabled: inPrototype || driven,
-      ...(inPrototype ? { description: "Ports publish from inside a component. Group patches into a component first." } : driven ? { description: "Disconnect this input first" } : {}),
+      ...(inPrototype ? { description: "Only works inside a component" } : driven ? { description: "Disconnect this input first" } : {}),
       onSelect: () => void actions.publishPort(port.address, side),
     });
   }
-  const knob = side === "in" && port.knob ? getKnob(ctx.doc.knobs, port.knob.id) : undefined;
-  if (knob && ctx.doc.knobs) {
-    // A knob-driven input unlinks to the knob's running value rather than to its default.
-    const [op] = planUnlinkKnob(ctx.doc.knobs, knob, ctx.componentId, [{ address: port.address, type: port.type }]);
-    entries.push({ id: "unlinkKnob", label: `Unlink from ${knob.name}`, description: `Keeps ${knobValueText(knob, knobLiteral(ctx.doc.knobs, knob))}`, onSelect: () => actions.apply([op!], `Unlink ${port.name} from ${knob.name}`) });
-  } else if (side === "in" && port.connected && published === undefined) entries.push({ id: "disconnect", label: "Disconnect", onSelect: () => actions.disconnect([port.address]) });
   const rest = data.kind === "patch" ? patchMenu(ctx, data) : layerMenu(ctx, data);
   return rest.length ? [...entries, sep("port-sep"), ...rest] : entries;
 }
 
 export function cableMenu(ctx: MenuContext, data: CableData): MenuEntry[] {
   const { actions } = ctx;
+  const midpoint = () => {
+    const cable = ctx.geometry?.get(cableId(data.to));
+    const [x, y] = cable ? cablePoint(0.5, cable.sx, cable.sy, cable.tx, cable.ty) : [0, 0];
+    return { x: x!, y: y! };
+  };
   const entries: MenuEntry[] = [];
   for (const s of data.suggestions?.filter((x) => x.ops?.some((op) => op.op === "addPatch")) ?? []) {
     const added = s.ops!.find((op) => op.op === "addPatch");
     const name = added && added.op === "addPatch" ? (getPatchSpec(ctx.registry, added.patch.type)?.name ?? added.patch.type) : "converter";
-    entries.push({ id: `fix-${name}`, label: `Insert ${name}`, description: s.description, onSelect: () => actions.explainConnection(data.from, data.to, { x: 0, y: 0 }) });
+    entries.push({ id: `fix-${name}`, label: `Insert ${name}`, description: s.description, onSelect: () => actions.explainConnection(data.from, data.to, midpoint()) });
   }
   if (entries.length) entries.push(sep("s0"));
   entries.push({ id: "disconnect", label: "Disconnect", shortcut: "Backspace", danger: true, onSelect: () => actions.disconnect([data.to]) });
