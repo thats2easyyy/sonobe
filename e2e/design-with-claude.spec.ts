@@ -31,14 +31,17 @@ const draftPill = (page: Page): Locator => page.locator("[data-design-pill]");
 /** Nothing covers the pill: it's inside the canvas, below its ruler and above the box. (Hit testing can't tell: the pill, the ruler and the label take no pointer events.) */
 async function expectUncovered(pill: Locator): Promise<void> {
   await expect(pill).toBeInViewport();
-  const rects = await pill.evaluate((el) => {
-    const edges = (r: DOMRect | undefined) => (r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null);
-    return { pill: edges(el.getBoundingClientRect())!, canvas: edges(document.querySelector(".sb-cv")?.getBoundingClientRect())!, ruler: edges(document.querySelector('.sb-cv__ruler[data-axis="x"]')?.getBoundingClientRect()), box: edges(document.querySelector(".sb-design-box")?.getBoundingClientRect()) };
-  });
-  expect(rects.pill.top).toBeGreaterThanOrEqual(rects.ruler?.bottom ?? rects.canvas.top);
-  expect(rects.pill.bottom).toBeLessThanOrEqual(rects.box?.top ?? rects.canvas.bottom);
-  expect(rects.pill.left).toBeGreaterThanOrEqual(rects.canvas.left);
-  expect(rects.pill.right).toBeLessThanOrEqual(rects.canvas.right);
+  // The pill moves with the canvas's fit, which settles a few frames after the layout changes.
+  await expect(async () => {
+    const rects = await pill.evaluate((el) => {
+      const edges = (r: DOMRect | undefined) => (r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null);
+      return { pill: edges(el.getBoundingClientRect())!, canvas: edges(document.querySelector(".sb-cv")?.getBoundingClientRect())!, ruler: edges(document.querySelector('.sb-cv__ruler[data-axis="x"]')?.getBoundingClientRect()), box: edges(document.querySelector(".sb-design-box")?.getBoundingClientRect()) };
+    });
+    expect(rects.pill.top).toBeGreaterThanOrEqual(rects.ruler?.bottom ?? rects.canvas.top);
+    expect(rects.pill.bottom).toBeLessThanOrEqual(rects.box?.top ?? rects.canvas.bottom);
+    expect(rects.pill.left).toBeGreaterThanOrEqual(rects.canvas.left);
+    expect(rects.pill.right).toBeLessThanOrEqual(rects.canvas.right);
+  }).toPass({ timeout: 5000 });
 }
 
 /** The canvas's zoom, as its header shows it (percent). */
@@ -132,10 +135,12 @@ test.describe("Design with Claude", () => {
     await expect(draftPill(page)).toHaveText("Claude is writing “Profile”");
     await expectUncovered(draftPill(page));
     // Large enough to read as it's written.
-    expect(await canvasZoom(page)).toBeGreaterThanOrEqual(45);
-    const [frameBox, artboardBox] = await Promise.all([preview(page).boundingBox(), page.locator(".sb-cv__artboard").boundingBox()]);
-    expect(frameBox && artboardBox).toBeTruthy();
-    for (const key of ["x", "y", "width", "height"] as const) expect(Math.abs(frameBox![key] - artboardBox![key]), key).toBeLessThanOrEqual(2);
+    await expect.poll(() => canvasZoom(page)).toBeGreaterThanOrEqual(45);
+    await expect(async () => {
+      const [frameBox, artboardBox] = await Promise.all([preview(page).boundingBox(), page.locator(".sb-cv__artboard").boundingBox()]);
+      expect(frameBox && artboardBox).toBeTruthy();
+      for (const key of ["x", "y", "width", "height"] as const) expect(Math.abs(frameBox![key] - artboardBox![key]), key).toBeLessThanOrEqual(2);
+    }).toPass({ timeout: 5000 });
     const sent = await fakeAssistantSent(page);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toBe("a profile screen");
@@ -302,9 +307,11 @@ test.describe("Design with Claude", () => {
     await expect(designField(page)).toBeVisible();
     await expect(sheet).toHaveCount(0);
 
-    const canvas = await page.locator(".sb-cv").boundingBox();
-    const box = await designBox(page).boundingBox();
-    expect(box!.x + box!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width);
+    await expect(async () => {
+      const canvas = await page.locator(".sb-cv").boundingBox();
+      const box = await designBox(page).boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width);
+    }).toPass({ timeout: 5000 });
     expect(problems).toEqual([]);
   });
 
@@ -320,8 +327,13 @@ test.describe("Design with Claude", () => {
     await expect(learn).toBeVisible();
     await expect(designField(page)).toHaveCount(0);
     const viewportWidth = page.viewportSize()!.width;
-    const learnWidth = (await learn.boundingBox())!.width;
-    await expect.poll(async () => viewportWidth - (await learn.boundingBox())!.x).toBe(learnWidth);
+    // Learn's width, read with its left edge once it has slid in.
+    let learnWidth = 0;
+    await expect(async () => {
+      const { x, width } = (await learn.boundingBox())!;
+      expect(viewportWidth - x).toBe(width);
+      learnWidth = width;
+    }).toPass({ timeout: 5000 });
 
     await page.locator(".sb-cv__design").click();
     await expect(designField(page)).toHaveValue("a checkout screen");
@@ -330,8 +342,8 @@ test.describe("Design with Claude", () => {
     await designBox(page).getByRole("button", { name: "Open chat" }).click();
     const sheet = page.locator(".sb-assistant-sheet");
     await expect(sheet).toBeVisible();
-    expect((await sheet.boundingBox())!.width).toBe(learnWidth);
-    await expect.poll(async () => viewportWidth - (await sheet.boundingBox())!.x).toBe(learnWidth);
+    await expect.poll(async () => (await sheet.boundingBox())?.width).toBe(learnWidth);
+    await expect.poll(async () => viewportWidth - ((await sheet.boundingBox())?.x ?? NaN)).toBe(learnWidth);
     expect(problems).toEqual([]);
   });
 

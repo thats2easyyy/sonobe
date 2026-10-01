@@ -60,7 +60,8 @@ test.describe("welcome screen", () => {
     await welcome.getByLabel(/^Device for the new prototype/).click();
     const option = page.getByRole("option", { name: /iPhone SE/ });
     await expect(option).toBeVisible();
-    expect(await option.evaluate((el) => {
+    // The popover is placed again a frame or more after it opens, so ask until the option is what a click at its center would hit.
+    await expect.poll(() => option.evaluate((el) => {
       const box = el.getBoundingClientRect();
       return !!document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)?.closest(".sb-select-popover");
     })).toBe(true);
