@@ -156,7 +156,8 @@ describe("structuredContent carries the complete payload", () => {
     expect([...seen].sort()).toEqual([...TOOL_NAMES].sort());
     await client.close();
     await handle.close();
-  });
+    // Every tool once: 2.5 to 3.6 s on a CI runner, and past the default 5 s on a busy one.
+  }, 30_000);
 });
 
 /** Failing calls on tools that declare an outputSchema, one per shape of failure. */

@@ -220,5 +220,6 @@ describe("Streamable HTTP", () => {
     const before = updated.length;
     handler.documentChanged({ kind: "revision", docId: "test", revision: 99 });
     await waitFor(() => updated.length > before, "documentChanged hook");
-  });
+    // A server, a client and two round trips: over 4 s on a CI runner, too near the default 5 s.
+  }, 30_000);
 });
