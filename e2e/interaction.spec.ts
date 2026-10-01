@@ -146,8 +146,9 @@ test.describe("patch editor chrome and graph states", () => {
     await expect(canvas).toHaveAttribute("data-connecting", "out");
     await expect(page.locator(".sb-pe-port--in[data-armable='true']").first()).toBeVisible();
     await expect(flowNode(page, "zoom_spring").locator(".sb-pe-port--in[data-armable]")).toHaveCount(0);
-    const dimmed = await page.locator(".sb-pe-port--in:not([data-armable='true']):not([data-armable='convert']) .sb-pe-port__label").first().evaluate((el) => getComputedStyle(el).opacity);
-    expect(Number(dimmed)).toBeLessThan(0.5);
+    // The dim is a transition: read it until it lands.
+    const dimmed = page.locator(".sb-pe-port--in:not([data-armable='true']):not([data-armable='convert']) .sb-pe-port__label").first();
+    await expect.poll(async () => Number(await dimmed.evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.5);
     await page.mouse.up();
     await expect(canvas).not.toHaveAttribute("data-connecting", /.+/);
   });
@@ -161,11 +162,11 @@ test.describe("patch editor chrome and graph states", () => {
     await page.keyboard.press("Enter");
     await expect.poll(async () => newIds(before, await patchIds(page)).length).toBe(1);
     const [counter] = newIds(before, await patchIds(page));
-    const pane = (await page.locator(".sb-pe .react-flow__pane").boundingBox())!;
     await expect
       .poll(async () => {
+        const pane = await page.locator(".sb-pe .react-flow__pane").boundingBox();
         const box = await flowNode(page, counter!).boundingBox();
-        return !!box && box.x >= pane.x && box.y >= pane.y && box.x + box.width <= pane.x + pane.width && box.y + box.height <= pane.y + pane.height;
+        return !!pane && !!box && box.x >= pane.x && box.y >= pane.y && box.x + box.width <= pane.x + pane.width && box.y + box.height <= pane.y + pane.height;
       })
       .toBe(true);
   });
@@ -271,10 +272,13 @@ test.describe("patch editor chrome and graph states", () => {
     const hint = page.getByRole("alert", { name: "Can't connect" });
     await expect(hint).toBeVisible();
     await expect(hint).not.toContainText("like_spring");
-    const row = (await page.locator(":focus").boundingBox())!;
-    const box = (await hint.boundingBox())!;
-    expect(Math.abs(box.x - row.x)).toBeLessThan(60);
-    expect(Math.abs(box.y - (row.y + row.height))).toBeLessThan(40);
+    // The hint is placed after it mounts: measure it and the port together until they agree.
+    await expect(async () => {
+      const row = (await page.locator(":focus").boundingBox())!;
+      const box = (await hint.boundingBox())!;
+      expect(Math.abs(box.x - row.x)).toBeLessThan(60);
+      expect(Math.abs(box.y - (row.y + row.height))).toBeLessThan(40);
+    }).toPass({ timeout: 5000 });
   });
 
   test("a refused cable is explained where it was dropped, with the converter to insert", async ({ page }) => {
@@ -287,10 +291,12 @@ test.describe("patch editor chrome and graph states", () => {
     const hint = page.getByRole("alert", { name: "Can't connect" });
     await expect(hint).toBeVisible();
     await expect(hint).toContainText("needs a number");
-    const drop = (await target.boundingBox())!;
-    const box = (await hint.boundingBox())!;
-    expect(Math.abs(box.x - drop.x)).toBeLessThan(60);
-    expect(box.y - drop.y).toBeLessThan(60);
+    await expect(async () => {
+      const drop = (await target.boundingBox())!;
+      const box = (await hint.boundingBox())!;
+      expect(Math.abs(box.x - drop.x)).toBeLessThan(60);
+      expect(box.y - drop.y).toBeLessThan(60);
+    }).toPass({ timeout: 5000 });
     await page.keyboard.press("Escape");
     await expect(hint).toBeHidden();
     await dragCable(page, handle(page, "heart_color", "out:output"), target);
@@ -324,7 +330,8 @@ test.describe("patch editor chrome and graph states", () => {
     await openEditor(page);
     const canvas = page.locator(".sb-pe__canvas");
     for (const layout of ["Patches Only", "Canvas Only", "Patches Only"]) await runCommand(page, layout);
-    await expect.poll(async () => (await canvas.boundingBox())!.width).toBeLessThan(300);
+    // The canvas has no box while the patch editor remounts: keep polling instead of throwing.
+    await expect.poll(async () => (await canvas.boundingBox())?.width ?? Infinity).toBeLessThan(300);
     await expect(canvas).toHaveAttribute("data-narrow", "true");
     await expect(canvas).toHaveAttribute("data-compact", "true");
     await expect(page.getByRole("button", { name: "Zoom to fit" })).toBeHidden();
@@ -351,8 +358,7 @@ test.describe("patch editor chrome and graph states", () => {
     const crumbs = header.getByRole("navigation", { name: "Component path" });
     await expect(crumbs.locator("[aria-current]")).toHaveText("Nested inner component with a long name");
     await expect(crumbs.getByRole("button", { name: "Main" })).toBeVisible();
-    const fits = await crumbs.evaluate((nav) => nav.scrollWidth <= nav.clientWidth && nav.getBoundingClientRect().height <= 34);
-    expect(fits).toBe(true);
+    await expect.poll(() => crumbs.evaluate((nav) => nav.scrollWidth <= nav.clientWidth && nav.getBoundingClientRect().height <= 34)).toBe(true);
     await crumbs.getByRole("button", { name: "1 more level" }).click();
     await page.getByRole("menuitem", { name: "Swipe to dismiss card with rubber banding" }).click();
     await expect(crumbs.locator("[aria-current]")).toHaveText("Swipe to dismiss card with rubber banding");

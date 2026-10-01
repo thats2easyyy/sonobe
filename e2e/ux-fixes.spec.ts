@@ -188,6 +188,8 @@ test.describe("polish: patch graph chrome and inspector header", () => {
     await expect(chip).toBeVisible();
     await expect(page.locator(".sb-pe__canvas").getByRole("button", { name: /^(Zoom (in|out|to fit)|(Show|Hide) minimap)$/i })).toHaveCount(0);
     const percent = async () => parseInt(((await chip.getAttribute("aria-label")) ?? "").replace(/\D+/g, ""), 10);
+    // The chip reads 100% until the first fit lands, a frame or more after it shows: read the starting zoom from the fitted graph.
+    await expect(page.locator(".sb-pe__canvas")).not.toHaveAttribute("data-fitting");
     const start = await percent();
     await patchZoom(page, "Zoom Out");
     await expect.poll(percent).toBeLessThan(start);

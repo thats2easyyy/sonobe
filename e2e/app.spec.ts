@@ -86,20 +86,25 @@ test.describe("editor app", () => {
 
     const hideInspector = page.getByRole("button", { name: "Hide inspector" });
     await expect(hideInspector).toBeVisible();
-    const inspector = (await page.locator("#sb-inspector").boundingBox())!;
-    expect(inspector.x + inspector.width).toBeLessThanOrEqual(1024);
-    const hide = (await hideInspector.boundingBox())!;
-    expect(hide.x + hide.width).toBeLessThanOrEqual(1024);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
-    expect((await page.locator(".sb-shell__center").boundingBox())!.width).toBeGreaterThanOrEqual(400);
+    // Panel widths can settle a frame or more after the shell measures its row, so the layout reads retry together.
+    await expect(async () => {
+      const inspector = (await page.locator("#sb-inspector").boundingBox())!;
+      expect(inspector.x + inspector.width).toBeLessThanOrEqual(1024);
+      const hide = (await hideInspector.boundingBox())!;
+      expect(hide.x + hide.width).toBeLessThanOrEqual(1024);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+      expect((await page.locator(".sb-shell__center").boundingBox())!.width).toBeGreaterThanOrEqual(400);
+    }).toPass({ timeout: 5000 });
 
     // The Viewer is a rail the window made, not one the person chose: nothing is saved as collapsed, and the rail opens it.
     await expect(page.getByRole("region", { name: "Viewer (hidden)" })).toBeVisible();
     expect(await hook(page, (s) => s.layout().collapsed.viewer)).toBe(false);
     await page.getByRole("button", { name: "Show Viewer" }).click();
     await expect(page.locator("#sb-viewer")).toBeVisible();
-    const opened = (await page.locator("#sb-inspector").boundingBox())!;
-    expect(opened.x + opened.width).toBeLessThanOrEqual(1024);
+    await expect(async () => {
+      const opened = (await page.locator("#sb-inspector").boundingBox())!;
+      expect(opened.x + opened.width).toBeLessThanOrEqual(1024);
+    }).toPass({ timeout: 5000 });
     expect(problems).toEqual([]);
   });
 
