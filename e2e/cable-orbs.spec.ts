@@ -135,7 +135,7 @@ test("no orb sets off along a cable still drawing in, when the graph arrives wit
   await hook(page, (s, d) => s.session.document.getState().replaceDocument(d as never), doc);
   await expect.poll(async () => (await launches(page)).length, { timeout: 10_000 }).toBeGreaterThan(3);
   const seen = await launches(page);
-  expect(seen.filter((l) => l.undrawn > 0.02)).toEqual([]);
+  expect(seen.filter((l) => l.undrawn > 0)).toEqual([]);
   expect(problems).toEqual([]);
 });
 

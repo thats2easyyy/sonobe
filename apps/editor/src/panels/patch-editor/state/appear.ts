@@ -69,6 +69,8 @@ export const BRIEF_STEP_MS = 15;
 export const BRIEF_LAG_MS = 50;
 /** How long past its end an animation keeps its attributes, since CSS starts it on the next frame. */
 const SWEEP_SLACK_MS = 60;
+/** The keyframes that draw a cable's wire (patch-editor.css). */
+const DRAW_KEYFRAMES = "sb-pe-appear-draw";
 /** How much the wave weighs y against x, so a column cascades top to bottom. */
 const Y_WEIGHT = 0.15;
 /** The size assumed for a node React Flow hasn't measured (visibility at the first reveal). */
@@ -221,8 +223,17 @@ export interface AppearStore {
    * When a node or cable is all there (clock time): now once it has appeared, the end of its
    * appearance or of the viewport's fade while it's arriving, and Infinity while the viewport waits
    * for its first reveal. Cable orbs wait for it, so none flies along a wire that hasn't drawn yet.
+   * A cable whose wire is still drawing on screen (`drawing`) isn't there before that's over, whatever
+   * the plan said: it's later than now, by what the last frame left to draw.
    */
   readyAt(kind: "node" | "cable", id: string): number;
+  /**
+   * The animation drawing a cable's wire, until a frame has shown it whole. CSS starts it on the frame
+   * after the cable is painted and plays it by the frames' clock, so on a busy machine it's over later
+   * than the appearance's `end`, which is planned by the clock: its `finished` is when the wire is there.
+   * Looked up once per painted cable, so asking costs no style flush.
+   */
+  drawing(id: string): Animation | undefined;
   /** Milliseconds until nothing is appearing (0 when idle). */
   busyFor(): number;
   /** True until the first start, and again after a reset. */
@@ -245,6 +256,12 @@ interface CableEntry {
   gen: number;
 }
 
+/** A cable's wrapper painted to draw, and its wire's draw animation with when that ends on its own clock: undefined until looked up, null when CSS plays none. */
+interface DrawnWire {
+  wrapper: Element;
+  draw?: { animation: Animation; end: number } | null;
+}
+
 export function createAppearStore(options: AppearStoreOptions = {}): AppearStore {
   const now = options.now ?? (() => performance.now());
   const reduced = options.reducedMotion ?? (() => false);
@@ -258,6 +275,8 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
   const shown = new Map<string, Appearance>();
   /** Wrappers carrying data-appear, with the key of the appearance they show. */
   const styled = new Map<Element, string>();
+  /** Cables painted to draw, by key. */
+  const wires = new Map<string, DrawnWire>();
   let canvas: HTMLElement | null = null;
   let fadeUntil = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -287,8 +306,18 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     if (t >= a.end) return;
     el.setAttribute("data-appear", a.mode);
     (el as HTMLElement).style.setProperty("--sb-appear-delay", `${Math.round(a.start - t)}ms`);
-    if (a.mode === "draw" || a.mode === "brief") el.querySelector(".sb-pe-cable__wire")?.setAttribute("pathLength", "1");
+    const draws = (a.mode === "draw" || a.mode === "brief") && el.classList.contains("react-flow__edge");
+    if (draws) el.querySelector(".sb-pe-cable__wire")?.setAttribute("pathLength", "1");
     styled.set(el, key);
+    if (draws) wires.set(key, { wrapper: el });
+    else wires.delete(key);
+  };
+
+  /** A wrapper is cleared or gone. */
+  const forget = (el: Element) => {
+    const key = styled.get(el);
+    styled.delete(el);
+    if (key !== undefined && wires.get(key)?.wrapper === el) wires.delete(key);
   };
 
   /** Paint appearances that begin now on wrappers already mounted (a first reveal, a rerouted cable). */
@@ -320,7 +349,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     for (const [el, key] of styled) {
       if (shown.has(key)) continue;
       unpaint(el);
-      styled.delete(el);
+      forget(el);
     }
     if (fadeUntil && fadeUntil + SWEEP_SLACK_MS <= t) {
       canvas?.removeAttribute("data-appear-fade");
@@ -330,6 +359,40 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
     for (const a of shown.values()) next = Math.min(next, a.end);
     if (next < Infinity) schedule(next);
   }
+
+  /**
+   * Find the draw animations of the wires painted since the last look. One read of the canvas's
+   * animations (which flushes style) serves every cable painted by then, so a tick that sends an orb
+   * down each of many arriving cables doesn't flush once per cable.
+   */
+  const findDraws = () => {
+    const found = new Map<Element, Animation>();
+    for (const a of canvas?.getAnimations({ subtree: true }) ?? []) {
+      if (!("animationName" in a) || a.animationName !== DRAW_KEYFRAMES) continue;
+      const wrapper = (a.effect as KeyframeEffect | null)?.target?.closest(".react-flow__edge");
+      if (wrapper) found.set(wrapper, a);
+    }
+    for (const wire of wires.values()) {
+      if (wire.draw === null || (wire.draw && wire.draw.animation.currentTime !== null)) continue;
+      const animation = found.get(wire.wrapper);
+      wire.draw = animation ? { animation, end: Number(animation.effect?.getComputedTiming().endTime ?? 0) } : null;
+    }
+  };
+
+  /**
+   * The draw animation on the wrapper painted for a cable and how long it had left in the last frame,
+   * unless that frame finished it. Read off its current time, which costs no style flush.
+   */
+  const drawingOf = (key: string): { animation: Animation; left: number } | undefined => {
+    const wire = shown.has(key) ? wires.get(key) : undefined;
+    if (!wire) return undefined;
+    // Not looked up yet, or cancelled: its wire was replaced, or the cable painted again.
+    if (wire.draw === undefined || wire.draw?.animation.currentTime === null) findDraws();
+    const draw = wire.draw;
+    if (!draw) return undefined;
+    const left = draw.end - Number(draw.animation.currentTime);
+    return left > 0 ? { animation: draw.animation, left } : undefined;
+  };
 
   /** An end that's arriving: a node the person already saw where it is (placed) isn't. */
   const arriving = (nodeId: string, t: number) => {
@@ -513,6 +576,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         timerAt = Infinity;
         for (const wrapper of styled.keys()) unpaint(wrapper);
         styled.clear();
+        wires.clear();
         shown.clear();
         fadeUntil = 0;
         el.removeAttribute("data-appear-fade");
@@ -525,7 +589,7 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
         for (const record of records) {
           for (const node of record.removedNodes) {
             const wrapper = node instanceof Element ? wrapperOf(node) : null;
-            if (wrapper) styled.delete(wrapper);
+            if (wrapper) forget(wrapper);
           }
           for (const node of record.addedNodes) {
             const wrapper = node instanceof Element ? wrapperOf(node) : null;
@@ -551,8 +615,12 @@ export function createAppearStore(options: AppearStoreOptions = {}): AppearStore
       if (waiting) return Infinity;
       const t = now();
       const a = shown.get(kind === "node" ? nodeKey(id) : cableKey(id));
-      return Math.max(t, fadeUntil, a ? a.end : t);
+      const drawing = kind === "cable" ? drawingOf(cableKey(id)) : undefined;
+      // A wire still drawing on screen is as far off as the last frame left it, and never there yet.
+      return Math.max(t + (drawing ? Math.max(1, drawing.left) : 0), fadeUntil, a ? a.end : t);
     },
+
+    drawing: (id) => drawingOf(cableKey(id))?.animation,
 
     busyFor() {
       let end = fadeUntil;

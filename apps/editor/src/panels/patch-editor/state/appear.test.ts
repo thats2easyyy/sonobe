@@ -421,6 +421,101 @@ describe("the appear store", () => {
       expect(wrapper.querySelector(".sb-pe-cable__wire")!.hasAttribute("pathLength")).toBe(false);
     });
 
+    /** The canvas's animations as CSS would play them: a wire's draw, read as of the last frame, and looks counted. */
+    function playDraws(canvas: HTMLElement) {
+      const playing: unknown[] = [];
+      const looks = { count: 0 };
+      canvas.getAnimations = () => {
+        looks.count++;
+        return playing as Animation[];
+      };
+      const draw = (wire: Element, endTime: number) => {
+        const animation = { animationName: "sb-pe-appear-draw", currentTime: 0 as number | null, effect: { target: wire, getComputedTiming: () => ({ endTime }) } };
+        playing.push(animation);
+        return animation;
+      };
+      return { playing, looks, draw };
+    }
+
+    it("holds a cable whose wire is still drawing on screen, past the end it planned by the clock", () => {
+      const { canvas, edges } = mountCanvas();
+      edges.append(edgeEl("cable:b.in"));
+      store.observe(canvas);
+      store.sync([node("a", 0), node("b", 300)], [cable("a", "b")], human);
+      store.start();
+      const id = "cable:b.in";
+      const planned = store.appearance("cable", id)!;
+      const wire = edges.querySelector(".sb-pe-cable__wire")!;
+      const { playing, looks, draw } = playDraws(canvas);
+      // The animation CSS plays: started a frame after the paint, beside a hover transition on the same wire.
+      const endTime = planned.end - clock;
+      playing.push({ transitionProperty: "stroke-width", currentTime: 0, effect: { target: wire } });
+      const drawing = draw(wire, endTime);
+      expect(store.drawing(id)).toBe(drawing);
+      expect(store.readyAt("cable", id)).toBe(planned.end);
+      // The clock is 10 ms past the plan, and the last frame left the wire 45 ms from drawn.
+      drawing.currentTime = endTime - 45;
+      advance(endTime + 10);
+      expect(store.readyAt("cable", id)).toBe(clock + 45);
+      // Never now while it draws, however little is left.
+      drawing.currentTime = endTime - 0.2;
+      expect(store.readyAt("cable", id)).toBe(clock + 1);
+      drawing.currentTime = endTime;
+      expect(store.drawing(id)).toBeUndefined();
+      expect(store.readyAt("cable", id)).toBe(clock);
+      // However often it's asked, the canvas's animations were read once.
+      expect(looks.count).toBe(1);
+      // A wrapper cleared shows its wire whole, whatever its animation was doing.
+      drawing.currentTime = endTime - 45;
+      expect(store.drawing(id)).toBe(drawing);
+      advance(200);
+      expect(store.drawing(id)).toBeUndefined();
+      expect(store.readyAt("cable", id)).toBe(clock);
+      expect(store.drawing("cable:nothing.in")).toBeUndefined();
+      expect(looks.count).toBe(1);
+    });
+
+    it("finds every arriving cable's draw in one read, and looks again for a wire that was replaced or remounted", async () => {
+      const { canvas, edges } = mountCanvas();
+      edges.append(edgeEl("cable:b.in"), edgeEl("cable:c.in"));
+      store.observe(canvas);
+      store.sync([node("a", 0), node("b", 300), node("c", 600)], [cable("a", "b"), cable("b", "c")], human);
+      store.start();
+      const [b, c] = [...edges.querySelectorAll(".sb-pe-cable__wire")] as [Element, Element];
+      const { playing, looks, draw } = playDraws(canvas);
+      const drawB = draw(b, 500);
+      const drawC = draw(c, 500);
+      expect(store.drawing("cable:b.in")).toBe(drawB);
+      expect(store.drawing("cable:c.in")).toBe(drawC);
+      expect(store.readyAt("cable", "cable:c.in")).toBe(clock + 500);
+      expect(looks.count).toBe(1);
+
+      // React replaced b's wire: CSS cancelled its animation and plays a new one on the new wire.
+      drawB.currentTime = null;
+      playing.splice(playing.indexOf(drawB), 1);
+      const again = draw(b, 500);
+      expect(store.drawing("cable:b.in")).toBe(again);
+      expect(looks.count).toBe(2);
+      // Cancelled with nothing in its place (reduced motion switched on): the plan's clock decides, without looking each time.
+      drawC.currentTime = null;
+      playing.splice(playing.indexOf(drawC), 1);
+      expect(store.drawing("cable:c.in")).toBeUndefined();
+      expect(store.readyAt("cable", "cable:c.in")).toBe(store.appearance("cable", "cable:c.in")!.end);
+      expect(looks.count).toBe(3);
+
+      // Panned away and back: the new wrapper is painted partway along, and its animation looked up.
+      edges.firstElementChild!.remove();
+      await flush();
+      expect(store.drawing("cable:b.in")).toBeUndefined();
+      expect(looks.count).toBe(3);
+      playing.splice(playing.indexOf(again), 1);
+      edges.append(edgeEl("cable:b.in"));
+      await flush();
+      const remounted = draw(edges.lastElementChild!.querySelector(".sb-pe-cable__wire")!, 400);
+      expect(store.drawing("cable:b.in")).toBe(remounted);
+      expect(looks.count).toBe(4);
+    });
+
     it("stops with the editor: no timer left, and nothing painted or appearing", () => {
       const { canvas, nodes } = mountCanvas();
       const a = nodeEl("a");
