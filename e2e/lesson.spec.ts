@@ -109,6 +109,7 @@ test.describe("interactive lessons", () => {
     const learn = page.getByRole("complementary", { name: "Learn" });
     const step = (title: string) => learn.locator('.sb-lesson__step[aria-current="step"]').filter({ hasText: title });
     // The patch editor's room, measured against the docked drawer's left edge: nothing of it hides under the drawer.
+    // Polled where it's asserted: the panels fit themselves to the docked drawer a frame after it opens.
     const editorRoom = async () => {
       const editor = await page.locator(".sb-pe").boundingBox();
       const drawer = await learn.boundingBox();
@@ -120,7 +121,7 @@ test.describe("interactive lessons", () => {
     await learn.locator(".sb-lessoncard").filter({ hasText: "Your first prototype" }).click();
     await learn.getByRole("button", { name: "Start lesson" }).click();
     await expect(step("Make the photo listen for taps")).toBeVisible();
-    expect(await editorRoom()).toBeGreaterThanOrEqual(320);
+    await expect.poll(editorRoom).toBeGreaterThanOrEqual(320);
     await expect(flowNode(page, "photo_scale")).toBeInViewport({ ratio: 1 });
     await expect(page.locator("[data-lesson-spotlight]")).toBeVisible();
 
@@ -142,7 +143,7 @@ test.describe("interactive lessons", () => {
     await flowNode(page, "photo_scale").click({ position: { x: 48, y: 10 } });
     await expect(inspector).toBeVisible();
     await expect(page.locator("#sb-layers")).toHaveCount(0);
-    expect(await editorRoom()).toBeGreaterThanOrEqual(320);
+    await expect.poll(editorRoom).toBeGreaterThanOrEqual(320);
     await expect(flowNode(page, "photo_scale")).toBeInViewport({ ratio: 1 });
 
     // Resizing mid-step re-fits: a wide window keeps Layers, the narrow one folds it again.
