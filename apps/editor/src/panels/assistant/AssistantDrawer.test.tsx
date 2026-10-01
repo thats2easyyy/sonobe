@@ -69,6 +69,19 @@ const afterFrame = () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
+/** Holds every frame until run(): a slow machine, where the frame the drawer waits for comes after the person's next move. */
+function holdFrames() {
+  const held: FrameRequestCallback[] = [];
+  const spy = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => held.push(callback));
+  return {
+    run: () =>
+      act(async () => {
+        spy.mockRestore();
+        for (const callback of held.splice(0)) callback(performance.now());
+      }),
+  };
+}
+
 async function click(el: Element | null | undefined) {
   expect(el).toBeTruthy();
   await act(async () => {
@@ -254,6 +267,43 @@ describe("AssistantDrawer", () => {
     expect(container.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).toBe(buttonByText("Keep them"));
     outside.remove();
+  });
+
+  it("leaves focus where the person has put it by the time its frame comes, and never takes it from under a dialog", async () => {
+    const opener = document.createElement("button");
+    const palette = document.createElement("input");
+    document.body.append(opener, palette);
+    opener.focus();
+    let frames = holdFrames();
+    await mount(fakeAssistantHost());
+    expect(container.querySelector('input[type="password"]')).toBeTruthy();
+    palette.focus();
+    await frames.run();
+    expect(document.activeElement).toBe(palette);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    palette.blur();
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    document.body.appendChild(modal);
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
+    await afterFrame();
+    expect(document.activeElement).toBe(document.body);
+    modal.remove();
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }));
+    await afterFrame();
+    await click(buttonByText("Explain how this prototype works"));
+    frames = holdFrames();
+    await click(buttonByLabel("New chat"));
+    palette.focus();
+    await frames.run();
+    expect(document.activeElement).toBe(palette);
+    opener.remove();
+    palette.remove();
   });
 
   it("puts the key field first in the setup and focuses it", async () => {

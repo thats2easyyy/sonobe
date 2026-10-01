@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { detectPlatform, formatShortcutLabel, isEditableTarget } from "../../ui/commands/shortcutManager.ts";
 import { Tooltip } from "../../ui/Tooltip.tsx";
+import { isBehindModal } from "../../ui/lib/focus.ts";
 import { Markdown } from "../learn/Markdown.tsx";
 import "../learn/markdown.css";
 import type { ChatItem, ToolChip } from "./assistantStore.ts";
@@ -165,11 +166,12 @@ const isAllow = (option: AssistantConfirmOption) => option.kind === "allow_once"
 
 /**
  * A question just arrived. Someone typing in a field keeps their focus, so a stray space or Enter can't
- * answer it; the card scrolls into view instead. Otherwise focus goes to `target`, or to the card.
+ * answer it, and so does a dialog or the palette open over the card; the card scrolls into view instead.
+ * Otherwise focus goes to `target`, or to the card.
  */
 function claimFocus(card: HTMLElement | null, target?: HTMLElement | null) {
   if (!card) return;
-  if (isEditableTarget(document.activeElement)) card.scrollIntoView({ block: "nearest" });
+  if (isEditableTarget(document.activeElement) || isBehindModal(card)) card.scrollIntoView({ block: "nearest" });
   else (target ?? card).focus({ preventScroll: true });
 }
 

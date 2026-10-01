@@ -1,4 +1,4 @@
-/** Focus utilities for overlays: finding focusable descendants and trapping Tab inside a container. */
+/** Focus utilities for overlays: finding focusable descendants, trapping Tab inside a container, and holding focus in a modal. */
 
 const FOCUSABLE = [
   "a[href]",
@@ -37,6 +37,39 @@ export function trapFocus(event: { key: string; shiftKey: boolean; preventDefaul
     event.preventDefault();
     first.focus();
   }
+}
+
+/**
+ * Whether an open modal dialog covers `el`. Overlays portal to the end of <body> in the order they open, so a
+ * modal later in the document than `el` is over it; one that holds `el`, or opened before it, is not.
+ */
+export function isBehindModal(el: Element): boolean {
+  for (const modal of el.ownerDocument.querySelectorAll('[aria-modal="true"]')) {
+    if (modal.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) return true;
+  }
+  return false;
+}
+
+/**
+ * Keep focus in an open modal. Focus that lands behind it (a panel underneath focusing a field a frame late)
+ * goes back to where it was in the modal, or to `fallback()`. What the modal opened (a menu, a dialog over it)
+ * and the toaster keep theirs. Returns a function that stops it.
+ */
+export function holdFocus(modal: HTMLElement, fallback: () => HTMLElement): () => void {
+  const doc = modal.ownerDocument;
+  let last = modal.contains(doc.activeElement) ? (doc.activeElement as HTMLElement) : null;
+  const onFocusIn = (event: FocusEvent) => {
+    const target = event.target as Element | null;
+    if (!target || typeof target.closest !== "function") return;
+    if (modal.contains(target)) {
+      last = target as HTMLElement;
+      return;
+    }
+    if (!(modal.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_PRECEDING) || target.closest("[data-layer-ignore]")) return;
+    (last && modal.contains(last) ? last : fallback()).focus({ preventScroll: true });
+  };
+  doc.addEventListener("focusin", onFocusIn, true);
+  return () => doc.removeEventListener("focusin", onFocusIn, true);
 }
 
 export function isFocusVisible(el: Element): boolean {

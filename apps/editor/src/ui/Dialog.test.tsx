@@ -3,6 +3,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Dialog } from "./Dialog.tsx";
+import { isBehindModal } from "./lib/focus.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -98,6 +99,62 @@ describe("Dialog initial focus", () => {
   it("falls back to the panel when nothing else can take focus", () => {
     open(<Dialog.Header title="Empty" onClose={() => undefined} />);
     expect(focused().getAttribute("role")).toBe("dialog");
+  });
+});
+
+describe("Dialog focus hold", () => {
+  const behind = (attrs: Record<string, string> = {}) => {
+    const wrap = document.createElement("div");
+    for (const [name, value] of Object.entries(attrs)) wrap.setAttribute(name, value);
+    const button = document.createElement("button");
+    wrap.appendChild(button);
+    container.before(wrap);
+    return button;
+  };
+
+  it("takes focus back from something behind it, to where it was in the dialog", () => {
+    const late = behind();
+    open(
+      <>
+        <input aria-label="Search" />
+        <button>Done</button>
+      </>,
+    );
+    expect(focused().getAttribute("aria-label")).toBe("Search");
+    expect(isBehindModal(late)).toBe(true);
+    late.focus();
+    expect(focused().getAttribute("aria-label")).toBe("Search");
+
+    const done = [...document.querySelectorAll("button")].find((b) => b.textContent === "Done")!;
+    done.focus();
+    late.focus();
+    expect(focused()).toBe(done);
+    expect(isBehindModal(done)).toBe(false);
+  });
+
+  it("lets a layer opened over it, and the toaster, keep focus", () => {
+    const toast = behind({ "data-layer-ignore": "" });
+    open(<input aria-label="Search" />);
+    const menu = document.createElement("button");
+    document.body.appendChild(menu);
+    expect(isBehindModal(menu)).toBe(false);
+    menu.focus();
+    expect(focused()).toBe(menu);
+    toast.focus();
+    expect(focused()).toBe(toast);
+  });
+
+  it("lets go as it closes, so focus returns to what opened it", () => {
+    const opener = behind();
+    opener.focus();
+    open(<input aria-label="Search" />);
+    expect(focused().getAttribute("aria-label")).toBe("Search");
+    act(() => root.render(<Dialog open={false} onOpenChange={() => undefined}>{null}</Dialog>));
+    expect(focused()).toBe(opener);
+    expect(isBehindModal(opener)).toBe(false);
+    const other = behind();
+    other.focus();
+    expect(focused()).toBe(other);
   });
 });
 

@@ -1,5 +1,5 @@
 import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, TriangleAlert, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { appPanels } from "../../app/appPanels.ts";
 import { Badge } from "../../ui/Badge.tsx";
@@ -10,6 +10,7 @@ import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { cx } from "../../ui/lib/cx.ts";
+import { isBehindModal } from "../../ui/lib/focus.ts";
 import { connectClaudeStore } from "../connect/connectStore.ts";
 import { assistantStore as defaultStore, useAssistant, type AssistantState } from "./assistantStore.ts";
 import { Composer } from "./Composer.tsx";
@@ -38,6 +39,16 @@ export interface AssistantDrawerProps {
 
 /** "Quickest and cheapest, for small edits." → "Quickest and cheapest": the menu rows are one line. */
 const gist = (text: string) => text.split(/[.,]\s|\.$/)[0] ?? text;
+
+/**
+ * The drawer's focus lands late (a frame, a status read, a new chat), so each one asks first whether the person is
+ * still here: focus is in the drawer or nowhere, or still on `from`. Never behind an open dialog or the palette.
+ */
+function canTakeFocus(root: HTMLElement | null, from?: Element | null): boolean {
+  if (!root || isBehindModal(root)) return false;
+  const active = document.activeElement;
+  return !active || active === document.body || root.contains(active) || active === from;
+}
 
 /**
  * The Assistant drawer: chat with Claude using the person's own Anthropic API key (or, with the
@@ -118,14 +129,22 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
     void controller.send(text);
   };
 
-  const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
+  const focusComposer = () =>
+    requestAnimationFrame(() => {
+      if (canTakeFocus(rootRef.current)) composerRef.current?.focus({ preventScroll: true });
+    });
   const newChat = () => void controller.newChat().then(focusComposer);
 
   // Focus goes to the message field when the sheet opens (a frame later: the palette gives focus back as it closes),
-  // after New chat, and on returning from the setup; in the setup, to its first field or button. The first time is
-  // unconditional, since opening the sheet is the person asking for it; later, not over focus they put elsewhere,
-  // and never over a question waiting for their answer, whose card has taken focus itself.
+  // after New chat, and on returning from the setup; in the setup, to its first field or button. The first time it
+  // comes from what had focus as the sheet opened (the button that opened it), since opening the sheet is the person
+  // asking for it; later, not over focus they put elsewhere. Never over a question waiting for their answer, whose
+  // card has taken focus itself.
   const surface = !controller.available || status === null ? "other" : showSetup ? "setup" : "chat";
+  const openedFrom = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    openedFrom.current = document.activeElement;
+  }, []);
   const focusedOnce = useRef(false);
   useEffect(() => {
     if (surface === "other") return;
@@ -133,8 +152,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
       const first = !focusedOnce.current;
       focusedOnce.current = true;
       if (surface === "chat" && store.getState().items.some((item) => item.kind === "confirm" && item.status === "pending")) return;
-      const active = document.activeElement;
-      if (!first && active && active !== document.body && !rootRef.current?.contains(active)) return;
+      if (!canTakeFocus(rootRef.current, first ? openedFrom.current : null)) return;
       const target = surface === "chat" ? composerRef.current : (rootRef.current?.querySelector<HTMLElement>("input:not(:disabled)") ?? rootRef.current?.querySelector<HTMLElement>(".sb-assistant__scroll .sb-btn:not(:disabled)"));
       target?.focus({ preventScroll: true });
     });

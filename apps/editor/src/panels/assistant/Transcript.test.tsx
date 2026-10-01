@@ -85,6 +85,21 @@ describe("ConfirmCard", () => {
     scroll.mockRestore();
   });
 
+  it("leaves focus in a dialog or the palette open over it", () => {
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    const search = document.createElement("button");
+    modal.appendChild(search);
+    document.body.appendChild(modal);
+    search.focus();
+    const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    act(() => root.render(<ConfirmCard item={replace} onConfirm={() => undefined} />));
+    expect(document.activeElement).toBe(search);
+    expect(scroll).toHaveBeenLastCalledWith({ block: "nearest" });
+    modal.remove();
+    scroll.mockRestore();
+  });
+
   it("collapses to one line once answered, with the question on hover", () => {
     act(() => root.render(<ConfirmCard item={{ ...replace, status: "approved" }} onConfirm={() => undefined} />));
     const card = container.querySelector(".sb-assistant-confirm")!;

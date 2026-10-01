@@ -20,7 +20,7 @@ import { useOptionalCommands } from "./commands/CommandProvider.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { Portal } from "./Portal.tsx";
 import { cx } from "./lib/cx.ts";
-import { getFocusable, trapFocus } from "./lib/focus.ts";
+import { getFocusable, holdFocus, trapFocus } from "./lib/focus.ts";
 import { useLatest } from "./lib/hooks.ts";
 import { useDismissableLayer } from "./lib/layerStack.ts";
 import "./Surface.css";
@@ -61,7 +61,7 @@ export interface DialogProps {
   style?: CSSProperties;
 }
 
-/** Modal dialog: overlay, focus trap, Escape to close, focus restored on close. */
+/** Modal dialog: overlay, focus trap (Tab stays inside, and nothing behind it can take focus), Escape to close, focus restored on close. */
 export function Dialog(props: DialogProps) {
   if (!props.open) return null;
   return <DialogContent {...props} />;
@@ -108,6 +108,9 @@ function DialogContent({
     },
     [panelRef],
   );
+
+  // Declared before the effect that gives focus back, so closing lets go first.
+  useLayoutEffect(() => (panel ? holdFocus(panel, () => initialTarget(panel)) : undefined), [panel]);
 
   useLayoutEffect(() => {
     previouslyFocused.current = document.activeElement;
