@@ -2,20 +2,26 @@
  * The live preview over the artboard: the page Claude is writing, drawn in a sandboxed iframe where
  * the screen will land, with a pill saying who is doing what. The pill stays in view: in the
  * artboard's label row over a frame at its top, else above the frame, else just inside its top edge.
- * The page comes from the in-app Assistant or from an MCP client such as Claude Code. Once it's added,
- * it fades out onto the real layers: it is that import's reveal, so the import hologram doesn't build
- * the screen again (designStore's previewedImport).
+ * The page comes from the in-app Assistant or from an MCP client such as Claude Code. The screen is
+ * built in front of the person (DesignBuild): from the moment the box sends a request for a new
+ * screen, rain falls and the laser sweeps over where it will land; loader boxes trace in as Claude
+ * writes the page's elements; and once the page is complete and every box is in, the laser sweeps up
+ * one last time and reveals it. An added page stays until that reveal is done, then fades onto the
+ * real layers: it is that import's reveal, so the import hologram doesn't build the screen again
+ * (designStore's previewedImport).
  */
 
 import type { Author } from "@sonobe/core";
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useLatest } from "../../ui/lib/hooks.ts";
 import type { Rect } from "../canvas/geometry.ts";
 import { rectToScreen, type Viewport } from "../canvas/viewport.ts";
+import { addPageBoxes, createBuild, readPageBoxes, type BuildState, type PageBox } from "./buildPlan.ts";
+import { DesignBuild } from "./DesignBuild.tsx";
 import type { DesignTarget } from "./context.ts";
 import { activeDraft, assistantDraft, designStore, draftComponent, draftRequest, mcpDraftIdleAt, useDesign, type DesignData, type DesignDraft, type DesignRequest } from "./designStore.ts";
-import { PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
+import { PREVIEW_BOXES_TYPE, PREVIEW_MESSAGE_TYPE, previewShellHtml, renderablePrefix } from "./previewShell.ts";
 import "./design.css";
 import "./design-layout.css";
 
@@ -28,6 +34,17 @@ const LABEL_CLEARANCE = 22;
 /** The pill's height, and its gap from the frame's edge (design.css). */
 const PILL_HEIGHT = 24;
 const PILL_GAP = 8;
+/** After the whole page is posted, the build waits this long for the page's last measure (previewShell's is at 450 ms). */
+const SETTLE_MS = 520;
+
+const requestIds = new WeakMap<object, number>();
+let nextRequestId = 1;
+/** A request's id for its build: its context is the same object while it runs. */
+function requestId(request: Pick<DesignRequest, "context">): number {
+  let id = requestIds.get(request.context);
+  if (id === undefined) requestIds.set(request.context, (id = nextRequestId++));
+  return id;
+}
 
 const isLive = (draft: DesignDraft) => draft.status === "writing" || draft.status === "adding";
 
@@ -97,46 +114,92 @@ export function DesignPreview({ viewport, bounds, componentId, rootId, artboard,
   const request = useDesign((s) => s.request);
   // Re-render once a finished draft's fade window ends, or an MCP client's draft goes idle.
   const [, setTick] = useState(0);
-  const draft = drafts.length ? activeDraft(designStore.getState(), Date.now()) : null;
-  const leaving = draft !== null && !isLive(draft);
+  /** The build that has revealed its page, and when (epoch ms). */
+  const [built, setBuilt] = useState<{ key: string; at: number } | null>(null);
+  const held = useRef<DesignDraft | null>(null);
+  const build = useRef<{ key: string; state: BuildState; completeAt: number | null } | null>(null);
+  const frameEl = useRef<HTMLIFrameElement | null>(null);
+  const now = Date.now();
+  const buildKey = (d: DesignDraft): string => {
+    const r = draftRequest(d, request);
+    return r ? `request:${requestId(r)}` : `draft:${d.key}`;
+  };
+
+  let draft = drafts.length ? activeDraft(designStore.getState(), now) : null;
+  if (draft) held.current = isLive(draft) || draft.status === "added" ? draft : null;
+  else if (held.current) {
+    // An added page stays until its build has revealed it and faded.
+    const h = held.current;
+    const revealedAt = built?.key === buildKey(h) ? built.at : null;
+    if ((h.status === "added" || h.status === "adding") && (revealedAt === null || now - revealedAt < FADE_WINDOW_MS)) draft = h;
+    else held.current = null;
+  }
+  // Before Claude writes anything, a request for a new screen builds where it will land.
+  const pending = !draft && request && request.outcome === undefined && !request.context.target && request.context.component.id === componentId && !drafts.some((d) => draftRequest(d, request)) ? request : null;
+  const key = draft ? buildKey(draft) : pending ? `request:${requestId(pending)}` : null;
+  if (key && build.current?.key !== key) build.current = { key, state: createBuild(), completeAt: null };
+  const complete = !!draft && draft.status !== "writing" && !draft.resync;
+  if (build.current && complete && build.current.completeAt === null) build.current.completeAt = performance.now();
+  const revealed = key !== null && built?.key === key;
+  const leaving = draft !== null && ((!isLive(draft) && draft.status !== "added") || (draft.status === "added" && revealed));
 
   useEffect(() => {
     if (!draft) return;
-    const until = !isLive(draft) ? draft.since + FADE_WINDOW_MS : mcpDraftIdleAt(draft);
+    const until = leaving ? Math.max(draft.since, built?.at ?? 0) + FADE_WINDOW_MS : isLive(draft) ? mcpDraftIdleAt(draft) : null;
     if (until === null) return;
     const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, until - Date.now()) + 1);
     return () => clearTimeout(timer);
-  }, [draft]);
+  }, [draft, leaving, built]);
 
-  if (!draft) return null;
-  const fromRequest = draftRequest(draft, request);
+  if (!draft && !pending) return null;
+  const fromRequest = draft ? draftRequest(draft, request) : pending;
   // The box's target is the Assistant's to draw over; an MCP client's draft names what it replaces.
-  const target = !assistantDraft(draft) ? null : box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
+  const target = draft && !assistantDraft(draft) ? null : box !== undefined ? (box?.id ?? null) : (fromRequest?.context.target?.id ?? null);
   // Claude writes the small fields before the html, so once html streams, a missing replace means a new screen.
-  const frame = previewFrame(draft, { componentId, rootId, artboard, bounds, fallbackReplace: draft.html ? null : target, request });
+  const frame = draft ? previewFrame(draft, { componentId, rootId, artboard, bounds, fallbackReplace: draft.html ? null : target, request }) : { x: 0, y: 0, width: artboard[0], height: artboard[1] };
   if (!frame) return null;
   const screen = rectToScreen(viewport, frame);
   const x = Math.round(screen.x);
   const y = Math.round(screen.y);
   const atTop = Math.abs(y - Math.round(viewport.y)) < LABEL_CLEARANCE;
-  const text = previewPillText(draft);
+  const text = draft ? previewPillText(draft) : "Claude is designing the screen";
+  const status = draft?.status ?? "writing";
   const labelInView = Math.round(viewport.y) - LABEL_CLEARANCE >= insetTop;
   const roomAbove = y - (atTop ? LABEL_CLEARANCE : 0) - PILL_GAP - PILL_HEIGHT >= insetTop;
   const place = atTop && labelSlot && labelInView ? "label" : roomAbove ? "above" : "inside";
   // Inside, it keeps below the ruler while the frame's top is scrolled under it.
   const insideTop = Math.min(Math.max(0, insetTop - y), Math.max(0, screen.height - PILL_HEIGHT - PILL_GAP * 2)) + PILL_GAP;
+  const building = !revealed && !leaving && build.current !== null;
+  const onBoxes = (boxes: PageBox[]) => {
+    if (build.current) addPageBoxes(build.current.state, boxes, performance.now());
+  };
+  const doneKey = key;
+  const onDone = () => setBuilt({ key: doneKey ?? "", at: Date.now() });
 
   return (
-    <div className="sb-design-preview" data-state={leaving ? "leaving" : "live"} style={{ transform: `translate(${x}px, ${y}px)`, width: screen.width, height: screen.height }}>
-      <PreviewFrame key={draft.key} html={draft.html} complete={draft.status !== "writing"} hold={draft.resync && draft.status === "writing"} width={frame.width} height={frame.height} zoom={viewport.zoom} />
+    <div className="sb-design-preview" data-state={leaving ? "leaving" : "live"} data-building={building || undefined} style={{ transform: `translate(${x}px, ${y}px)`, width: screen.width, height: screen.height }}>
+      {draft && <PreviewFrame key={draft.key} html={draft.html} complete={draft.status !== "writing"} hold={draft.resync && draft.status === "writing"} width={frame.width} height={frame.height} zoom={viewport.zoom} covered={!revealed} frameEl={frameEl} onBoxes={onBoxes} />}
+      {building && build.current && (
+        <DesignBuild
+          key={build.current.key}
+          width={screen.width}
+          height={screen.height}
+          pageWidth={frame.width}
+          pageHeight={frame.height}
+          build={build.current.state}
+          completeAt={build.current.completeAt === null ? null : build.current.completeAt + SETTLE_MS}
+          frame={frameEl}
+          onDone={onDone}
+        />
+      )}
       {place !== "label" ? (
-        <div className="sb-design-preview__pill" data-design-pill="" data-status={draft.status} data-place={place} data-lift={(place === "above" && atTop) || undefined} style={place === "inside" ? { top: insideTop } : undefined}>
+        <div className="sb-design-preview__pill" data-design-pill="" data-status={status} data-place={place} data-lift={(place === "above" && atTop) || undefined} style={place === "inside" ? { top: insideTop } : undefined}>
           <span className="sb-design-preview__dot" aria-hidden />
           {text}
         </div>
       ) : labelSlot && !leaving ? (
         createPortal(
-          <span className="sb-cv__label-agent" data-design-pill="" data-status={draft.status} data-place="label">
+          <span className="sb-cv__label-agent" data-design-pill="" data-status={status} data-place="label">
             <span className="sb-cv__label-agent-dot" aria-hidden />
             {text}
           </span>,
@@ -161,13 +224,41 @@ const freshPostState = (): PostState => ({ loaded: false, at: -Infinity, sent: n
  * The sandboxed frame. It posts the renderable part of the html once the shell has loaded, then at most
  * every PREVIEW_POST_MS, and the whole page when it's complete; `hold` pauses posts (a draft waiting to
  * resync). A second load means the frame navigated away from the shell: it's reset with a new nonce.
+ * It passes on the boxes the page posts back (from this frame, with its nonce). While `covered`, it
+ * starts clipped away: the build uncovers it (DesignBuild sets its clip-path).
  */
-function PreviewFrame({ html, complete, hold, width, height, zoom }: { html: string; complete: boolean; hold: boolean; width: number; height: number; zoom: number }) {
+interface PreviewFrameProps {
+  html: string;
+  complete: boolean;
+  hold: boolean;
+  width: number;
+  height: number;
+  zoom: number;
+  covered?: boolean;
+  frameEl?: RefObject<HTMLIFrameElement | null>;
+  onBoxes?(boxes: PageBox[]): void;
+}
+
+function PreviewFrame({ html, complete, hold, width, height, zoom, covered = false, frameEl, onBoxes }: PreviewFrameProps) {
   const [nonce, setNonce] = useState(newNonce);
   const srcDoc = useMemo(() => previewShellHtml(nonce), [nonce]);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const post = useRef<PostState>(freshPostState());
-  const latest = useLatest({ html, nonce });
+  const latest = useLatest({ html, nonce, onBoxes });
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data: unknown = event.data;
+      const frame = frameRef.current;
+      if (!frame || event.source !== frame.contentWindow || !data || typeof data !== "object") return;
+      const message = data as { type?: unknown; nonce?: unknown; boxes?: unknown };
+      if (message.type !== PREVIEW_BOXES_TYPE || message.nonce !== latest.current.nonce) return;
+      const boxes = readPageBoxes(message.boxes);
+      if (boxes) latest.current.onBoxes?.(boxes);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [latest]);
 
   const send = () => {
     const state = post.current;
@@ -213,7 +304,10 @@ function PreviewFrame({ html, complete, hold, width, height, zoom }: { html: str
   return (
     <iframe
       key={nonce}
-      ref={frameRef}
+      ref={(el) => {
+        frameRef.current = el;
+        if (frameEl) frameEl.current = el;
+      }}
       className="sb-design-preview__frame"
       title="Design preview"
       sandbox="allow-scripts"
@@ -224,7 +318,8 @@ function PreviewFrame({ html, complete, hold, width, height, zoom }: { html: str
       tabIndex={-1}
       srcDoc={srcDoc}
       onLoad={onLoad}
-      style={{ width, height, transform: `scale(${zoom})`, transformOrigin: "0 0", pointerEvents: "none" }}
+      // Only its first value applies: the build changes the clip-path from there.
+      style={{ width, height, transform: `scale(${zoom})`, transformOrigin: "0 0", pointerEvents: "none", ...(covered ? { clipPath: "inset(100% 0 0 0)" } : {}) }}
     />
   );
 }

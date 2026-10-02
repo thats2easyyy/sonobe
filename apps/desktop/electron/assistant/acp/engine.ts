@@ -908,7 +908,7 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
               // The adapter takes the starting mode from the person's own settings; this keeps it out of bypassPermissions.
               allowDangerouslySkipPermissions: false,
               model: model.id,
-              maxTurns: limits.maxTurns,
+              // No step cap: the plan's own usage limits apply, and a design can take many steps.
               allowedTools: toolNames.filter((name) => !ASKING_TOOLS.has(name)).map((name) => `${TOOL_PREFIX}${name}`),
               env: { ENABLE_TOOL_SEARCH: "false", MCP_TOOL_TIMEOUT: "1800000", CLAUDE_AGENT_SDK_CLIENT_APP: `sonobe/${options.version}` },
             },
