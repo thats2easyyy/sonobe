@@ -28,7 +28,7 @@ The outputs:
 ## Tips
 - Metering works whenever the microphone is on; you don't need to record.
 - Voices are noisy, so smooth Audio Metering's Volume with Pop Animation or Smooth Value before it drives a layer.
-- On a phone, the web player needs an HTTPS address to use the microphone, and Preview on Phone's is plain http://, so test the microphone in the desktop app.
+- On an iPhone, open the preview in the Sonobe Viewer app to use the microphone. A phone's browser can't: the microphone needs a secure address, and Preview on Phone's is plain http://.
 
 ## Coming from Origami
 Enable is Enabled and Record is Recording. Metering no longer needs Record on. Available and Recorded are new.
@@ -78,7 +78,7 @@ patch memo soundPlayer sound←mic.sound play←tap_play.tap
 
 - Audio Metering reads 0: Enabled is still off, since the microphone starts off. Turn Enabled on and allow the permission prompt.
 - The recording is always empty: a pulse is wired into Recording, so recording lasts one frame and is discarded. Wire a state that stays on while recording, such as an Interaction's Down.
-- The microphone works on the computer but not on the phone: the web player was opened over plain http://, and browsers only allow the microphone on HTTPS or localhost. Sonobe has no HTTPS preview yet, so test it in the desktop viewer or the pop-out window.
+- The microphone works on the computer but not on the phone: the browser opened the web player over plain http://, and browsers only allow the microphone on HTTPS or localhost. On an iPhone, open the preview in the Sonobe Viewer app; otherwise test it in the desktop viewer or the pop-out window.
 
 ## Pairs well with
 
@@ -89,7 +89,7 @@ patch memo soundPlayer sound←mic.sound play←tap_play.tap
 
 ## Availability
 
-**Web-limited.** Uses getUserMedia, which needs microphone permission and a secure page (HTTPS or localhost), so the LAN web player over plain HTTP can't use it; headless simulation has no microphone.
+**Web-limited.** Uses getUserMedia, which needs microphone permission and a secure page (HTTPS or localhost): the Sonobe Viewer iPhone app loads the preview as one, and a phone's browser on the plain-HTTP LAN player can't use it; headless simulation has no microphone.
 
 Works in the desktop app, the web player in desktop browsers, and the web player on phones and tablets.
 

@@ -30,7 +30,7 @@ The outputs:
 ## Tips
 - Selfie feeds look natural mirrored: give the viewfinder layer a Scale XYZ of -1, 1, 1.
 - Face, Hand, Object, and QR Code Detection can watch the viewfinder layer.
-- On a phone, the web player needs an HTTPS address to use the camera, and Preview on Phone's is plain http://, so test the camera in the desktop app.
+- On an iPhone, open the preview in the Sonobe Viewer app to use the camera. A phone's browser can't: the camera needs a secure address, and Preview on Phone's is plain http://.
 
 ## Coming from Origami
 Record Video is Recording, and Capture Image is Capture. Quality, Record Audio, Available, Captured, and Recorded are new.
@@ -95,7 +95,7 @@ patch cam camera enabled=true recording←press_record.down recordAudio=true
 ## Common mistakes
 
 - The viewfinder stays black everywhere: Enabled is still off, since the camera starts off. Turn Enabled on and allow the permission prompt.
-- The viewfinder stays black on a phone: the web player was opened from a plain http:// address, and browsers only allow the camera on HTTPS or localhost. Sonobe has no HTTPS preview yet, so test it in the desktop viewer or the pop-out window.
+- The viewfinder stays black on a phone: the browser opened the web player from a plain http:// address, and browsers only allow the camera on HTTPS or localhost. On an iPhone, open the preview in the Sonobe Viewer app; otherwise test it in the desktop viewer or the pop-out window.
 - Available stays off: camera permission was denied earlier, so the browser doesn't ask again. Allow the camera in the browser's site settings (or in System Settings on a Mac), then restart the prototype.
 - Capture gives nothing: the pulse arrives before the camera is running, for example from When Prototype Starts. Capture from a tap, or wait until Available turns on.
 
@@ -109,7 +109,7 @@ patch cam camera enabled=true recording←press_record.down recordAudio=true
 
 ## Availability
 
-**Web-limited.** Uses getUserMedia, which needs camera permission and a secure page (HTTPS or localhost), so the LAN web player over plain HTTP can't use it; headless simulation has no camera.
+**Web-limited.** Uses getUserMedia, which needs camera permission and a secure page (HTTPS or localhost): the Sonobe Viewer iPhone app loads the preview as one, and a phone's browser on the plain-HTTP LAN player can't use it; headless simulation has no camera.
 
 Works in the desktop app, the web player in desktop browsers, and the web player on phones and tablets.
 

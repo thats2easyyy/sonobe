@@ -21,7 +21,7 @@ Device Motion reads the motion sensors in a phone or tablet. Its axes follow the
 - **Available** is true once motion data arrives.
 - **Enabled** turns the sensors off to save battery.
 
-Computers have no motion sensors, so open the web player on a phone to try it. The first time, the player asks permission to use motion.
+Computers have no motion sensors, so open the web player on a phone to try it; on an iPhone, use the Sonobe Viewer app. The first time, the player asks permission to use motion.
 
 ## Tips
 - Sensor values jitter. Pass them through Smooth Value before they drive a layer.
@@ -75,7 +75,7 @@ patch shakes counter increase←shake_pulse.turnedOn
 
 - Nothing moves in the desktop viewer: computers have no motion sensors. Open the web player on a phone, or send deviceMotion events in a simulation.
 - The layer trembles even when the phone lies still: raw sensor values jitter. Put a Smooth Value with a hysteresis around 0.9 between the sensor and the layer.
-- Available stays false on an iPhone: iOS asks permission first and only on secure (https) pages, and Preview on Phone's address is plain http://. Test motion on an Android phone for now, or open the prototype from an https link you set up, such as a tunnel, and tap it once so iOS can ask.
+- Available stays false on an iPhone: iOS gives motion only to secure pages, and only after a tap. Safari opens Preview on Phone's plain http:// address, so open the preview in the Sonobe Viewer app, which loads it as a secure page, and tap the prototype once.
 
 ## Pairs well with
 
@@ -87,7 +87,7 @@ patch shakes counter increase←shake_pulse.turnedOn
 
 ## Availability
 
-**Web-limited.** Uses the DeviceMotionEvent and DeviceOrientationEvent web APIs, which only phones and tablets provide. iOS Safari also asks permission and only allows it on secure (https) pages, so the http:// LAN player can't read motion on iPhones.
+**Web-limited.** Uses the DeviceMotionEvent and DeviceOrientationEvent web APIs, which only phones and tablets provide. iOS also asks permission and only allows it on secure pages: the Sonobe Viewer iPhone app loads the preview as one, and Safari on the http:// LAN player can't read motion.
 
 Works in the web player on phones and tablets.
 

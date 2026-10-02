@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { syncUrl } from "../player/platform.ts";
 import { previewUrl } from "./lan-preview.ts";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -74,8 +75,11 @@ describe("§12 quality gates", () => {
 });
 
 describe("§9.2 web player", () => {
-  it("doesn't promise the phone the camera: Preview on Phone is plain http://, which browsers don't trust with it", () => {
+  it("promises the camera only on a secure page: Preview on Phone is plain http://, and Sonobe Viewer loads it from its own scheme", () => {
     expect(previewUrl("192.168.1.20", 8421, "t")).toMatch(/^http:\/\//);
+    expect(read("../../ios/SonobeViewer/PlayerProxy.swift")).toContain('static let scheme = "sonobe-player"');
+    expect(syncUrl("sonobe-player://192.168.1.20:8421/p/t/")).toBe("ws://192.168.1.20:8421/p/t/sync");
+    expect(section(architecture, "9.2")).toContain("`sonobe-player://<host>:<port>/p/<token>/`");
     const claims = [
       section(architecture, "9.2").split("\n").find((line) => line.startsWith("- **Platform services.**")),
       read("../../../README.md").split("\n").find((line) => line.startsWith("- **Phone preview")),
