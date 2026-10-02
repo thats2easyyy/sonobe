@@ -7,7 +7,9 @@
  *   automated browser or `?mute=1` keeps the player silent.
  * - A native host (the Sonobe Viewer iPhone app, a WKWebView) defines `window.sonobeNative` before the
  *   page loads and registers a script message handler named "sonobe". Haptic and Vibrate then go to
- *   the host, which plays them with UIFeedbackGenerator and Core Haptics.
+ *   the host, which plays them with UIFeedbackGenerator and Core Haptics. Sonobe Viewer loads the page
+ *   as sonobe-player://, a secure page, so the browser's location, motion, camera and microphone
+ *   work there (`syncUrl`).
  *
  * The bridge is one-way: the page posts `{ kind: "haptic", type, pattern? }` or
  * `{ kind: "vibrate", pattern }` (milliseconds on and off; 0 or [] stops), and from version 2 the
@@ -79,6 +81,16 @@ export function readNativeHost(win: PlayerWindow): NativeHost | null {
       }
     },
   };
+}
+
+/**
+ * The sync socket's address for a player page: `sync` beside it, wss:// under https:// and ws://
+ * otherwise. Sonobe Viewer loads the page as sonobe-player://<host>:<port>/p/<token>/, which stands
+ * for the same http:// server.
+ */
+export function syncUrl(page: string): string {
+  const url = new URL("sync", page);
+  return `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}${url.pathname}`;
 }
 
 /**
