@@ -1,8 +1,12 @@
 # Sonobe Viewer for iPhone
 
-Sonobe Viewer plays the prototype you have open in Sonobe, full screen on your iPhone, with real haptics. Safari can't play haptics, so in the browser the Haptic and Vibrate patches do nothing on an iPhone. In Sonobe Viewer they tap and buzz the way the finished app would.
+Sonobe Viewer plays the prototype you have open in Sonobe, full screen on your iPhone, with real haptics and the phone's camera, microphone, location and motion. Safari can't play haptics, so in the browser the Haptic and Vibrate patches do nothing on an iPhone. In Sonobe Viewer they tap and buzz the way the finished app would.
 
-The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound and network requests, reaches the phone through the web player with no change to the app. The player loads from a plain http:// address, so the camera, microphone, location and device motion, which WebKit keeps for secure pages, don't work from Preview on Phone's link. They need a secure (https) link, such as a tunnel you set up, in Safari and in the app alike.
+The app is a small shell around the same web player that Preview on Phone serves. It loads the player in a WKWebView and adds a bridge that the player uses for Haptic and Vibrate, and for the menu's Open Another Prototype. Everything else, including new patch features, sound and network requests, reaches the phone through the web player with no change to the app.
+
+Preview on Phone serves a plain http:// address, and WebKit keeps the camera, microphone, location and device motion for secure pages. So the app loads the player as a page of its own, `sonobe-player://<computer>:<port>/p/<token>/`, and fetches each file from your computer itself. WebKit treats that page as secure, so the Camera, Microphone, Location and Device Motion patches work in the app. In Safari they don't: there the link is still plain http://.
+
+iOS asks for the camera, the microphone and location the first time a prototype uses them, and WebKit asks about location again each time the app starts. Device Motion starts after the first tap on the prototype.
 
 It isn't on the App Store or TestFlight yet, so you build it yourself with Xcode.
 
@@ -62,7 +66,7 @@ This needs macOS with Xcode and isn't part of CI. The script (`scripts/test.mjs`
 
 1. Serves a test prototype, Haptic Check, with the real web player and preview server (`apps/desktop/player/testing.ts`).
 2. Runs the Swift unit tests (link parsing, which hosts are on the local network, bridge messages, vibration limits, the remembered tip) and the UI tests (taps reach the prototype, the three-finger menu, deep links, a link off the local network, expired links, bad links) on a simulator, with no signing.
-3. Reads the app's log to check what three taps played: Notification Success at start, then three Impact Medium haptics and three 50 ms vibrations. In the menu test, the three-finger taps play nothing and Restart plays Notification Success again.
+3. Reads the app's log to check what three taps played: Notification Success at start, then three Impact Medium haptics and three 50 ms vibrations. In the menu test, the three-finger taps play nothing and Restart plays Notification Success again. The log also has to say that the player page is secure and has the camera and microphone API.
 
 It uses a booted iPhone simulator, or the first available one. Set `SONOBE_IOS_SIMULATOR` to a simulator's name or UDID to choose. The full `xcodebuild` output goes to `build/test.log`.
 
@@ -75,7 +79,8 @@ The web player's side of the bridge is tested with the rest of the repo in `npm 
 | `SonobeViewer/SonobeViewerApp.swift` | The app, what the player menu asks of it, the banner that explains a failed load, and the question before opening a link off the local network |
 | `SonobeViewer/ConnectView.swift` | Scan (VisionKit), paste, and the most recent link |
 | `SonobeViewer/ViewerModel.swift` | Accepts only preview links: `http(s)://<computer>:<port>/p/<token>/` or `sonobe-viewer://open?url=…`, and holds one whose host is off the local network until the person confirms it |
-| `SonobeViewer/PlayerView.swift` | The full-screen WKWebView, pinned to the preview's address; other links open in Safari. It routes the bridge's messages |
+| `SonobeViewer/PlayerView.swift` | The full-screen WKWebView, pinned to the preview's address; other links open in Safari. It routes the bridge's messages and lets the preview's page use the camera, microphone and motion |
+| `SonobeViewer/PlayerProxy.swift` | Serves the player as `sonobe-player://`, a secure page, by fetching each request from the preview's http:// server |
 | `SonobeViewer/Haptics.swift` | The bridge's announcement and messages: UIFeedbackGenerator for the Haptic types, Core Haptics for Custom Pattern and Vibrate |
 | `SonobeViewer-Info.plist` | Local network access, the camera, microphone and location prompts, and the `sonobe-viewer` URL scheme |
 | `Config/Base.xcconfig` | Shared build settings; includes your `Local.xcconfig` |
@@ -85,6 +90,6 @@ The bridge is one-way. At document start, the app defines a read-only `window.so
 
 ## Limits
 
-- The app has only been tested in the Simulator. How the haptics feel, the Local Network prompt, and QR scanning need a real iPhone.
+- The app has only been tested in the Simulator. How the haptics feel, the Local Network prompt, QR scanning, and the real camera, microphone, location and motion sensors need a real iPhone. The Simulator has a stand-in camera and microphone and no motion sensors.
 - Frame pacing is WKWebView's, which is likely 60 Hz even on ProMotion iPhones. The app adds haptics, not 120 Hz.
 - The trackpad Haptic types (Alignment, Level Change) have no iPhone equivalent and do nothing.

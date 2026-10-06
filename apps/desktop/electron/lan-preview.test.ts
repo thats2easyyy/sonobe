@@ -281,6 +281,15 @@ describe("startLanPreview", () => {
     ws.terminate();
   });
 
+  it("takes Sonobe Viewer's socket: its page is this server's, loaded as sonobe-player://", async () => {
+    const s = server!;
+    await expect(open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`, { origin: "sonobe-player://evil.example" })).rejects.toThrow(/404/);
+    await expect(open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`, { origin: `sonobe-player://127.0.0.1:${s.port + 1}` })).rejects.toThrow(/404/);
+    const { ws, next } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`, { origin: `sonobe-player://127.0.0.1:${s.port}` });
+    expect(await next((m) => m.type === "hello")).toEqual({ type: "hello", version: "9.9.9" });
+    ws.terminate();
+  });
+
   it("says goodbye to players on close, and cuts off one that doesn't answer", async () => {
     const s = server!;
     const { ws } = await open(`ws://127.0.0.1:${s.port}/p/${s.token}/sync`);

@@ -7,6 +7,7 @@
  * then reads the app's log to check what the UI tests played in the app: for three taps, one
  * Notification Success at start, and three Impact Medium haptics and three 50 ms vibrations; for the
  * player menu, nothing from its three-finger taps, and Notification Success again after Restart.
+ * The log also says whether the page is one WebKit trusts with the camera and the sensors.
  *
  *   npm run test:ios
  *   SONOBE_IOS_SIMULATOR="iPhone 17" npm run test:ios    pick a simulator by name or UDID
@@ -153,6 +154,14 @@ try {
     } else {
       failed = true;
       console.error(`\nThe app didn't play what three taps should: expected Notification Success, then 3 Impact Medium and 3 × "vibrate [50]" in one launch; got ${JSON.stringify(played)}.`);
+      console.error(hint);
+    }
+    // The Simulator has no camera or motion sensors, so this is as far as the script can check them.
+    if (tapped?.includes("page secure=true media=true")) {
+      log("the player page is secure and has the camera and microphone API (loaded as sonobe-player://)");
+    } else {
+      failed = true;
+      console.error(`\nThe player page isn't one WebKit trusts with the camera, the microphone, location and motion: expected "page secure=true media=true" in the app's log; got ${JSON.stringify(tapped?.find((m) => m.startsWith("page ")) ?? null)}.`);
       console.error(hint);
     }
     if (menuPlayed && menuPlayed.starts >= 2 && menuPlayed.taps === 1 && menuPlayed.tip >= 1) {

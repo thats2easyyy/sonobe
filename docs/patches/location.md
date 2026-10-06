@@ -84,7 +84,7 @@ patch drop popAnimation number←where.available bounciness=8 speed=14
 
 ## Common mistakes
 
-- Latitude and Longitude stay 0 on a phone: the web player opened over http://, and browsers only share location with secure pages. Sonobe has no HTTPS preview yet, so use an override city on the phone.
+- Latitude and Longitude stay 0 on a phone: the browser opened the web player over http://, and browsers only share location with secure pages. On an iPhone, open the preview in the Sonobe Viewer app; elsewhere, use an override city.
 - A permission prompt interrupts every demo: Current Location asks for access. Pick an override city for presentations.
 - The map shows the wrong spot: many map and weather services want longitude first. Check which order the URL expects.
 
@@ -98,7 +98,7 @@ patch drop popAnimation number←where.available bounciness=8 speed=14
 
 ## Availability
 
-**Web-limited.** Uses the Geolocation API, which needs the person's permission and a secure page, so the http:// LAN player can't use it, and Linux desktops have no location service. Override cities work everywhere.
+**Web-limited.** Uses the Geolocation API, which needs the person's permission and a secure page: the Sonobe Viewer iPhone app loads the preview as one, a phone's browser on the http:// LAN player can't use it, and Linux desktops have no location service. Override cities work everywhere.
 
 Works in the desktop app, the web player in desktop browsers, and the web player on phones and tablets.
 

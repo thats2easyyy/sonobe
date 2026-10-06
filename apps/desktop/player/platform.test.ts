@@ -5,7 +5,7 @@ import { runFrames, sequence, tap } from "@sonobe/engine/testing";
 import { createPatchRegistry, getSpec } from "@sonobe/patches";
 import { createMuteStore } from "@sonobe/renderer";
 import { describe, expect, it, vi } from "vitest";
-import { playerPlatform, readNativeHost, type PlayerWindow } from "./platform.ts";
+import { playerPlatform, readNativeHost, syncUrl, type PlayerWindow } from "./platform.ts";
 import { hapticCheckDocument } from "./testing.ts";
 
 const IOS_TYPES = ["vibrate", "selection", "impactLight", "impactMedium", "impactHeavy", "notificationSuccess", "notificationWarning", "notificationError"];
@@ -132,6 +132,19 @@ describe("playerPlatform", () => {
     });
     expect(() => platform.haptic!.play("selection")).not.toThrow();
     expect(() => platform.vibrate!(0)).not.toThrow();
+  });
+});
+
+describe("the sync socket's address", () => {
+  it("is ws:// beside the page, and wss:// under https://", () => {
+    expect(syncUrl("http://192.168.1.20:52345/p/token/")).toBe("ws://192.168.1.20:52345/p/token/sync");
+    expect(syncUrl("http://127.0.0.1:52345/p/token/?mute=1#top")).toBe("ws://127.0.0.1:52345/p/token/sync");
+    expect(syncUrl("https://tunnel.example/p/token/")).toBe("wss://tunnel.example/p/token/sync");
+  });
+
+  it("is the computer's ws:// address for Sonobe Viewer's sonobe-player:// page", () => {
+    expect(syncUrl("sonobe-player://192.168.1.20:52345/p/token/")).toBe("ws://192.168.1.20:52345/p/token/sync");
+    expect(syncUrl("sonobe-player://macbook.local/p/token/")).toBe("ws://macbook.local/p/token/sync");
   });
 });
 

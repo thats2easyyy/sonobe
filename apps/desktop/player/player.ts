@@ -15,7 +15,7 @@ import { clientToPrototype, createDomRenderer, createFontAssetRegistry, createLi
 import { isMobileDevice, playerDevice, type Insets, type PlayerStage } from "./device.ts";
 import { createMenuGesture, type GestureDecision } from "./gesture.ts";
 import { createPlayerMenu, showTip, type PlayerMenuItem } from "./menu.ts";
-import { playerPlatform, readNativeHost } from "./platform.ts";
+import { playerPlatform, readNativeHost, syncUrl } from "./platform.ts";
 import { withPausableScripts } from "./scripts.ts";
 
 let lottiePlayer: Promise<LottiePlayerLike> | null = null;
@@ -298,9 +298,7 @@ for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"]) windo
 let attempt = 0;
 
 function connect(): void {
-  const url = new URL("sync", window.location.href);
-  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(url);
+  const socket = new WebSocket(syncUrl(window.location.href));
   socket.addEventListener("open", () => {
     attempt = 0;
     connected = true;
