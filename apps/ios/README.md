@@ -90,6 +90,6 @@ The bridge is one-way. At document start, the app defines a read-only `window.so
 
 ## Limits
 
-- The app has only been tested in the Simulator. How the haptics feel, the Local Network prompt, QR scanning, and the real camera, microphone, location and motion sensors need a real iPhone. The Simulator has a stand-in camera and microphone and no motion sensors.
+- The app's tests run only in the Simulator, which has a stand-in camera and microphone and no motion sensors. On a real iPhone (a 14 Pro Max) a prototype has shown the live camera, followed the phone's roll with Device Motion, and played a haptic on a tap. The microphone and location haven't been tried on a real iPhone yet.
 - Frame pacing is WKWebView's, which is likely 60 Hz even on ProMotion iPhones. The app adds haptics, not 120 Hz.
 - The trackpad Haptic types (Alignment, Level Change) have no iPhone equivalent and do nothing.
