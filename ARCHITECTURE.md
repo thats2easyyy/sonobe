@@ -586,7 +586,7 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
   - `haptic.supports(type)` is "the type is in `haptics`", so Haptic's Available output stays driven by the catalog's Type keys. The player ignores a malformed announcement.
   - The app plays messages only from the main frame on the preview's origin, ignores unknown kinds and types, and caps a vibration at 10 s. UIFeedbackGenerator plays the Haptic types; Core Haptics plays AHAP as is and turns vibrate patterns into continuous events. The app logs each one under the `dev.sonobe.viewer` subsystem, which `npm run test:ios` reads.
 - **Signing.** `apps/ios/Config/Base.xcconfig` holds the shared settings and includes an ignored `Local.xcconfig` with the developer's team and bundle id. Simulator builds pass `CODE_SIGNING_ALLOWED=NO`.
-- **Limits.** Frame pacing is WKWebView's, likely 60 Hz on ProMotion iPhones. The camera, microphone, location and motion are checked only as far as the Simulator goes, not on a real iPhone. Nothing in CI builds the app.
+- **Limits.** Frame pacing is WKWebView's, likely 60 Hz on ProMotion iPhones. The camera has been seen working on a real iPhone; the microphone, location and motion are checked only as far as the Simulator goes. Nothing in CI builds the app.
 
 ---
 
