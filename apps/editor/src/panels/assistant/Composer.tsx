@@ -1,5 +1,5 @@
 import { ArrowUp, Square } from "lucide-react";
-import { forwardRef, useRef, useState, type KeyboardEvent } from "react";
+import { forwardRef, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { TextArea } from "../../ui/TextField.tsx";
@@ -29,6 +29,8 @@ export interface ComposerProps {
   /** The text in the field, when the parent keeps it (the drawer does, so a draft outlives the sheet). Omit it and the field keeps its own. */
   value?: string;
   onValueChange?: (value: string) => void;
+  /** What goes with the message, shown over the field (the drawer's selection chips). */
+  context?: ReactNode;
 }
 
 /** What the budget counts: billed-weight tokens, or the plain total from older hosts. */
@@ -80,7 +82,7 @@ export function UsageMeter({ usage, limits, provider = "api_key", billedTo = nul
 }
 
 /** Message field with Send and Stop. Enter sends; Shift+Enter adds a line. */
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key", billedTo = null, value, onValueChange }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ running, disabled = false, onSend, onStop, usage, limits, placeholder, ariaLabel, ariaDescribedBy, sendLabel = "Send", usageThreshold = 0, provider = "api_key", billedTo = null, value, onValueChange, context }, ref) {
   const [own, setOwn] = useState("");
   const text = value ?? own;
   const current = useRef(text);
@@ -115,6 +117,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
 
   return (
     <div className="sb-assistant-composer">
+      {context}
       <div className="sb-assistant-composer__field" data-disabled={disabled || undefined}>
         <TextArea
           ref={ref}

@@ -221,6 +221,11 @@
   opacity: 1;
 }
 
+/* Its name in the Assistant's chat is under the pointer: the selection ring, fainter. */
+.sb-pe-node[data-pointed]:not([data-selected])::after {
+  opacity: 0.6;
+}
+
 /*
  * Far zoom (FAR_ZOOM in model/geometry.ts): text is a few pixels tall, so port labels, values and icons
  * stop painting. Their boxes stay, so handles, cables and hit targets don't move. With hundreds of nodes

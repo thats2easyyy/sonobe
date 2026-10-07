@@ -135,11 +135,18 @@ function useFlash(id: string): boolean {
   return flashing;
 }
 
+/** The pointer or focus is on this item's name in the Assistant's chat. */
+function usePointedAt(kind: "patch" | "layer", id: string): boolean {
+  const { session, componentId } = usePatchEditor();
+  return useStore(session.selection, (s) => s.hovered !== null && s.hovered.source === "assistant" && s.hovered.kind === kind && s.hovered.id === id && s.hovered.component === componentId);
+}
+
 /** A patch: category-colored header, ports, inline values, live values, badges. */
 export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }: NodeProps<PatchFlowNode>) {
   const { actions, ui, liveEnabled } = usePatchEditor();
   const editing = useUi((s) => s.editingTitle === id);
   const flashing = useFlash(id);
+  const pointed = usePointedAt("patch", id);
   const loopOutput = data.looped || data.outputs.some((o) => o.wholeLoop) ? data.outputs.find((o) => o.loop)?.address : undefined;
   const liveLoop = loopLengthOf(useLiveValue(liveEnabled ? loopOutput : null) as never);
   const loopLength = liveLoop ?? data.loopLength;
@@ -156,6 +163,7 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
       data-issue={data.issues.some((i) => i.severity === "error") ? "error" : data.issues.length ? "warning" : undefined}
       data-working={data.working.length > 0 || undefined}
       data-flash={flashing || undefined}
+      data-pointed={pointed || undefined}
       data-unknown={!data.known || undefined}
       style={{ "--sb-cat": categoryColorVar(data.category) } as CSSProperties}
       aria-label={`${data.title}${data.customName ? ` (${data.specName})` : ""}`}
@@ -227,11 +235,13 @@ export const PatchNodeView = memo(function PatchNodeView({ id, data, selected }:
 export const LayerNodeView = memo(function LayerNodeView({ id, data, selected }: NodeProps<LayerFlowNode>) {
   const { actions } = usePatchEditor();
   const Icon = LAYER_ICONS[data.layerType] ?? Layers;
+  const pointed = usePointedAt("layer", data.layerId);
   return (
     <div
       className="sb-pe-node sb-pe-node--layer"
       data-kind="layer"
       data-selected={selected || undefined}
+      data-pointed={pointed || undefined}
       data-issue={data.issues.length ? (data.issues.some((i) => i.severity === "error") ? "error" : "warning") : undefined}
       style={{ "--sb-cat": "var(--category-layers)" } as CSSProperties}
       aria-label={`Layer ${data.title}`}

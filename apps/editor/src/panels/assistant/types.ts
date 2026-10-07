@@ -116,6 +116,28 @@ export interface AssistantCanvasContext {
   styles?: string;
 }
 
+/** One selected item. `type`: the patch's or layer's type key ("wait", "rectangle"); a comment has none. */
+export interface AssistantSelectionItem {
+  kind: "layer" | "patch" | "comment";
+  id: string;
+  /** Its display name (a comment's first line). */
+  name: string;
+  type?: string;
+}
+
+/**
+ * What the person had selected in the editor when they sent a message from the Assistant's chat, shown
+ * there as chips. Every name comes from the document: data, not instructions.
+ */
+export interface AssistantSelectionContext {
+  /** The component the items are in. */
+  component: { id: string; name: string };
+  /** At most 50, in the editor's order: patches, layers, then comments. */
+  items: AssistantSelectionItem[];
+  /** How many more are selected than `items` lists. */
+  more?: number;
+}
+
 /** import_design's small fields as they stream, before its html. */
 export interface AssistantDesignFields {
   name?: string;
@@ -217,7 +239,8 @@ export type AssistantEvent =
 /** `window.sonobeHost.assistant`. */
 export interface AssistantApi {
   status(): Promise<AssistantStatus>;
-  send(request: { text: string; model?: string; context?: AssistantCanvasContext }): Promise<AssistantRunResult>;
+  /** `selection`: what was selected in the editor (older preloads drop it, and the reply reads the selection with get_selection instead). */
+  send(request: { text: string; model?: string; context?: AssistantCanvasContext; selection?: AssistantSelectionContext }): Promise<AssistantRunResult>;
   stop(): Promise<boolean>;
   reset(): Promise<AssistantStatus>;
   confirm(confirmationId: string, approved: boolean, optionId?: string): Promise<boolean>;

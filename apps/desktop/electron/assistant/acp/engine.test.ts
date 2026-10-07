@@ -13,7 +13,8 @@ import { RequestError, type InitializeResponse, type NewSessionRequest, type New
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { systemPrompt } from "../agent.ts";
 import { canvasContextBlock } from "../design.ts";
-import type { AssistantCanvasContext, AssistantEvent, AssistantSendRequest } from "../protocol.ts";
+import type { AssistantCanvasContext, AssistantEvent, AssistantSelectionContext, AssistantSendRequest } from "../protocol.ts";
+import { selectionContextBlock } from "../selection.ts";
 import { FAKE_TOOLS, fakeBridge, text } from "../testing.ts";
 import type { AssistantToolInfo, LocalTools, ToolCallResult } from "../toolBridge.ts";
 import { accountBlockedMessage, createSubscriptionAgent, orgNotAllowedMessage, exitDetail, MODE_NOT_SET, modelValue, NO_RUN, NOT_INSTALLED, parseCliLogin, permissionPrompt, RATE_LIMITED, readCliLogin, RESTARTED, SESSION_ENDED, TOOL_NAMES_NOTE, UNANNOUNCED, usageLimitMessage, type SubscriptionAgentOptions } from "./engine.ts";
@@ -408,6 +409,33 @@ describe("subscription engine: sessions", () => {
       [2, "Added a checkout."],
     ]);
     expect(ofType(h.events, "thinking_delta")).toEqual([{ type: "thinking_delta", runId: "id1", turn: 1, delta: "Plan the screen" }]);
+  });
+
+  it("leads a message sent with a selection with the selection, after the canvas context when it has both", async () => {
+    const context: AssistantCanvasContext = { component: { id: "main", name: "Main", size: [402, 874] }, screens: [] };
+    const selection: AssistantSelectionContext = { component: { id: "main", name: "Main" }, items: [{ kind: "patch", id: "flight_timer", name: "Flight Timer", type: "wait" }] };
+    const h = harness({
+      script: async (turn) => {
+        turn.say("It times the flight.", "msg_1");
+        return END;
+      },
+    });
+    await h.send("what does this do?", { selection });
+    await h.send("and now?");
+    await h.send("redesign it", { context, selection });
+    const prompts = h.last().prompts.map((p) => p.prompt);
+    expect(prompts).toEqual([
+      [
+        { type: "text", text: selectionContextBlock(selection) },
+        { type: "text", text: "what does this do?" },
+      ],
+      [{ type: "text", text: "and now?" }],
+      [
+        { type: "text", text: canvasContextBlock(context, { codeFolder: null }) },
+        { type: "text", text: selectionContextBlock(selection) },
+        { type: "text", text: "redesign it" },
+      ],
+    ]);
   });
 });
 

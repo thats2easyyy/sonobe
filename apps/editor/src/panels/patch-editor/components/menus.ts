@@ -28,7 +28,12 @@ export interface MenuContext {
   geometry?: ReadonlyMap<string, CableGeometry>;
   /** Choose a property of a layer to drive. */
   chooseLayerProperty?: (layerId: Id) => void;
+  /** Ask the Assistant what the selection does (the app's Explain with Claude), where the app has it. */
+  explain?: () => void;
 }
+
+/** The menu's item is the selection by the time it opens, so the app's command asks about the right thing. */
+const explainEntry = (ctx: MenuContext): MenuEntry[] => (ctx.explain ? [{ id: "explain", label: "Explain with Claude", shortcut: "Mod+E", onSelect: ctx.explain }] : []);
 
 const sep = (id: string): MenuEntry => ({ type: "separator", id });
 
@@ -44,6 +49,7 @@ export function patchMenu(ctx: MenuContext, data: PatchNodeData): MenuEntry[] {
   if (isComponent) entries.push({ id: "enter", label: "Enter Component", shortcut: "Alt+Down", onSelect: () => actions.enterComponent(data.patchId) }, sep("s0"));
   if (single) {
     entries.push({ id: "info", label: "Patch Info", shortcut: "Mod+I", onSelect: () => actions.openInfo(data.patchId) });
+    entries.push(...explainEntry(ctx));
     entries.push({ id: "rename", label: "Rename", shortcut: "Enter", onSelect: () => ctx.rename(data.patchId) });
     if (isComponent) entries.push({ id: "componentInfo", label: "Component Info", onSelect: () => actions.openComponentInfo(data.patchId) });
     entries.push(sep("s1"));
@@ -65,7 +71,7 @@ export function patchMenu(ctx: MenuContext, data: PatchNodeData): MenuEntry[] {
       });
     }
     entries.push(sep("s2"));
-  }
+  } else if (ctx.explain) entries.push(...explainEntry(ctx), sep("s2"));
   entries.push({ id: "mute", label: allMuted ? "Unmute" : "Mute", shortcut: "M", onSelect: () => actions.toggleMute(ids) });
   entries.push({ id: "collapse", label: allCollapsed ? "Expand" : "Collapse", shortcut: "H", onSelect: () => actions.toggleCollapse(ids) });
   entries.push({ id: "duplicate", label: "Duplicate", shortcut: "Mod+D", onSelect: () => actions.duplicateSelection() });
@@ -175,7 +181,7 @@ export function layerMenu(ctx: MenuContext, data: LayerNodeData): MenuEntry[] {
   const { actions } = ctx;
   const driven = data.inputs.filter((p) => p.connected);
   const undriven = data.inputs.length - driven.length;
-  const entries: MenuEntry[] = [{ id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerId) }];
+  const entries: MenuEntry[] = [{ id: "reveal", label: "Reveal Layer", onSelect: () => actions.revealLayer(data.layerId) }, ...explainEntry(ctx)];
   if (ctx.chooseLayerProperty) entries.push({ id: "drive", label: "Drive a Property…", description: "Show another property here and pick a patch for it", onSelect: () => ctx.chooseLayerProperty!(data.layerId) });
   if (undriven > 0) entries.push({ id: "hide", label: undriven === 1 ? "Hide Undriven Property" : "Hide Undriven Properties", onSelect: () => actions.removeLayerTargets(data.layerId) });
   if (driven.length) entries.push(sep("s1"), { id: "disconnect", label: "Disconnect All Properties", danger: true, onSelect: () => actions.disconnect(driven.map((p) => p.address), `Disconnect ${data.title}`) });

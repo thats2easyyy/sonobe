@@ -7,7 +7,8 @@ import { createAssistantAgent, resolveLimits, toAssistantError, type AssistantAg
 import { DESIGN_GUIDE } from "./design.ts";
 import type { ReplaceCheck, ReplaceGuard, ReplaceImpact } from "./designGuard.ts";
 import { FALLBACK_BETA } from "./models.ts";
-import type { AssistantCanvasContext, AssistantEvent } from "./protocol.ts";
+import type { AssistantCanvasContext, AssistantEvent, AssistantSelectionContext } from "./protocol.ts";
+import { SELECTION_GUIDE, selectionContextBlock } from "./selection.ts";
 import { FAKE_TOOLS, fakeBridge, fakeDraftStreams, scriptedClient, text, tick, type FakeBridge, type FakeDraftStreams, type FakeTurn, type ScriptedClient } from "./testing.ts";
 import type { AssistantToolInfo, LocalTools, LocalToolScope, ToolCallResult } from "./toolBridge.ts";
 
@@ -640,8 +641,29 @@ describe("assistant agent: the canvas context and the cached prefix", () => {
     expect(JSON.stringify(sheet!.system)).toBe(JSON.stringify(box!.system));
     expect(JSON.stringify(other!.system)).toBe(JSON.stringify(box!.system));
     expect(JSON.stringify(sheet!.tools)).toBe(JSON.stringify(box!.tools));
-    expect((box!.system as { text: string }[])[0]!.text.endsWith(`\n\n${DESIGN_GUIDE}`)).toBe(true);
+    expect((box!.system as { text: string }[])[0]!.text.endsWith(`\n\n${DESIGN_GUIDE}\n\n${SELECTION_GUIDE}`)).toBe(true);
     expect((sheet!.messages.at(-1)!.content as BetaTextBlockParam[]).map((b) => b.text)).toEqual(["what's on this screen?"]);
+  });
+
+  it("leads a message sent with a selection with <selection>, after the canvas context when it has both", async () => {
+    const h = harness([done("one"), done("two"), done("three")]);
+    const selection: AssistantSelectionContext = { component: { id: "main", name: "<Main>" }, items: [{ kind: "patch", id: "flight_timer", name: "Flight Timer", type: "wait" }] };
+    await h.agent.run("w1", { text: "what does this do?", selection }, h.emit);
+    await h.agent.run("w1", { text: "and now?" }, h.emit);
+    await h.agent.run("w2", { text: "redesign it", context: CONTEXT, selection }, h.emit);
+
+    const [asked, plain, both] = h.api.requests;
+    const first = asked!.messages[0]!.content as BetaTextBlockParam[];
+    expect(first.map((b) => b.text)).toEqual([selectionContextBlock(selection), "what does this do?"]);
+    expect(first[0]!.text).toContain('"name":"\\u003cMain\\u003e"');
+    expect(first[0]!.text).not.toContain("<Main>");
+    // The selection is that message's alone: the next one says nothing about it.
+    expect((plain!.messages.at(-1)!.content as BetaTextBlockParam[]).map((b) => b.text)).toEqual(["and now?"]);
+    const mixed = (both!.messages[0]!.content as BetaTextBlockParam[]).map((b) => b.text);
+    expect(mixed.map((t) => t.split("\n")[0])).toEqual(["<canvas_context>", "<selection>", "redesign it"]);
+    // A selection changes the message, never the cached prefix.
+    expect(JSON.stringify(plain!.system)).toBe(JSON.stringify(asked!.system));
+    expect(JSON.stringify(both!.system)).toBe(JSON.stringify(asked!.system));
   });
 });
 

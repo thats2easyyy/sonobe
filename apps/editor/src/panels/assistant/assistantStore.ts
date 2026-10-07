@@ -7,7 +7,7 @@
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { readString, writeString } from "../../ui/lib/storage.ts";
-import { DEFAULT_MODEL_ID, FALLBACK_MODELS, type AssistantConfirmOption, type AssistantEvent, type AssistantLimits, type AssistantStatus, type AssistantToolStatus, type AssistantUsage } from "./types.ts";
+import { DEFAULT_MODEL_ID, FALLBACK_MODELS, type AssistantConfirmOption, type AssistantEvent, type AssistantLimits, type AssistantSelectionContext, type AssistantStatus, type AssistantToolStatus, type AssistantUsage } from "./types.ts";
 
 export const MODEL_STORAGE_KEY = "sonobe.assistant.model";
 
@@ -23,7 +23,8 @@ export interface ToolChip {
 }
 
 export type ChatItem =
-  | { kind: "user"; id: string; text: string; origin?: "canvas" }
+  /** `selection`: what was selected in the editor when it was sent (its chips). */
+  | { kind: "user"; id: string; text: string; origin?: "canvas"; selection?: AssistantSelectionContext }
   | { kind: "assistant"; id: string; runId: string; turn: number; text: string; thinking: string; tools: ToolChip[] }
   | { kind: "notice"; id: string; tone: "info" | "warn" | "error"; text: string; code?: string }
   | {
@@ -65,6 +66,10 @@ export interface AssistantState {
   keyCheck: KeyCheckState;
   /** The unsent message in the composer: it outlives the sheet closing and a visit to the setup. */
   draft: string;
+  /** The selection (selectionKey) the person took off the message field with ×. Another selection shows again. */
+  selectionOff: string | null;
+  /** Bumped to ask the open drawer to put focus in the message field. */
+  focusRequest: number;
   show: () => void;
   hide: () => void;
   toggle: () => void;
@@ -74,9 +79,12 @@ export interface AssistantState {
   setSetup: (setup: boolean) => void;
   setModel: (model: string) => void;
   setDraft: (draft: string) => void;
+  setSelectionOff: (key: string | null) => void;
+  /** Open the drawer on its chat with focus in the message field. */
+  ask: () => void;
 }
 
-export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "showSetup" | "setSetup" | "setModel" | "setDraft">;
+export type AssistantData = Omit<AssistantState, "show" | "hide" | "toggle" | "setOpen" | "showSetup" | "setSetup" | "setModel" | "setDraft" | "setSelectionOff" | "ask">;
 
 let itemCounter = 0;
 /** Local ids for transcript items. */
@@ -246,7 +254,7 @@ function storedModel(): string {
 }
 
 export function initialAssistantData(model: string = DEFAULT_MODEL_ID): AssistantData {
-  return { open: false, setup: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" }, draft: "" };
+  return { open: false, setup: false, status: null, statusError: null, items: [], running: false, runId: null, thinking: false, model, usage: null, limits: null, keyCheck: { state: "idle" }, draft: "", selectionOff: null, focusRequest: 0 };
 }
 
 export function createAssistantStore(options: { persistModel?: boolean } = {}): StoreApi<AssistantState> {
@@ -265,6 +273,8 @@ export function createAssistantStore(options: { persistModel?: boolean } = {}): 
       set({ model });
     },
     setDraft: (draft) => set({ draft }),
+    setSelectionOff: (selectionOff) => set({ selectionOff }),
+    ask: () => set((s) => ({ open: true, setup: false, focusRequest: s.focusRequest + 1 })),
   }));
 }
 

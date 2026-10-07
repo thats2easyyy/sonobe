@@ -3,7 +3,7 @@
 import { findLayer, getPatchSpec, resolveNodePorts, type Id, type PatchSpec, type ValueType } from "@sonobe/core";
 import { isPatchImplemented } from "../../../state/registry.ts";
 import { singleKeyFor } from "../model/singleKey.ts";
-import { ArrowRight, Layers } from "lucide-react";
+import { ArrowRight, Layers, Sparkles } from "lucide-react";
 import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { CATEGORY_LABELS, categoryColorVar } from "../../../theme/tokens.ts";
@@ -16,6 +16,7 @@ import { Popover } from "../../../ui/Popover.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../../ui/PortGlyph.tsx";
 import { SearchHints, SearchList, type SearchListRenderContext } from "../../../ui/SearchList.tsx";
 import { Tooltip } from "../../../ui/Tooltip.tsx";
+import { useOptionalCommands } from "../../../ui/commands/CommandProvider.tsx";
 import type { SpliceOption } from "../model/editOps.ts";
 import { browseLinkCandidates, LINK_SEARCH_KEYS, linkCandidateGroup, linkCandidates, linkEmptyCopy, searchLinkItems, type LayerLinkItem, type LinkCandidate, type LinkSearchItem, type OutputLinkItem } from "../model/linkSearch.ts";
 import { docsExcerpt, PICKER_KEYS, pickerBrowseItems, pickerGroup, pickerItems, type PickerItem } from "../model/picker.ts";
@@ -425,8 +426,12 @@ export function PatchInfoDialog({ patchId, onClose }: { patchId: Id | null; onCl
   );
 }
 
+/** The app's command that asks the Assistant about the selection (panels/assistant/commands.ts). */
+const EXPLAIN_COMMAND = "ai.explain";
+
 function InfoBody({ patchId, onClose }: { patchId: Id; onClose: () => void }) {
   const { session, registry, componentId } = usePatchEditor();
+  const commands = useOptionalCommands();
   const doc = useStore(session.document, (s) => s.doc);
   const node = doc.components[componentId]?.patches[patchId];
   const spec: PatchSpec | undefined = node ? getPatchSpec(registry, node.type) : undefined;
@@ -448,6 +453,21 @@ function InfoBody({ patchId, onClose }: { patchId: Id; onClose: () => void }) {
             Preview only
           </Badge>
         )}
+        {/* This dialog says what the patch type does. What this patch does here is the Assistant's to say. */}
+        {commands?.registry.get(EXPLAIN_COMMAND) ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Sparkles size={13} />}
+            onClick={() => {
+              session.selection.getState().select({ patches: [patchId], layers: [], comments: [] });
+              onClose();
+              commands.registry.run(EXPLAIN_COMMAND);
+            }}
+          >
+            Explain with Claude
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={onClose}>
           Close
         </Button>

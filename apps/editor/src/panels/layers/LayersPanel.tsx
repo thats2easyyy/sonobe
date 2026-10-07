@@ -408,6 +408,21 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
           run("ai.redesign", () => designStore.getState().openBox());
         },
       },
+      // Asks the Assistant what these layers do (panels/assistant/commands.ts), where the app has it.
+      ...(commands?.registry.get("ai.explain")
+        ? [
+            {
+              id: "explain",
+              label: "Explain with Claude",
+              icon: <Sparkles size={14} />,
+              shortcut: keyOf("ai.explain"),
+              onSelect: () => {
+                sel().select({ layers: targets.map((l) => l.id) });
+                commands.registry.run("ai.explain");
+              },
+            } satisfies MenuEntry,
+          ]
+        : []),
       { id: "visibility", label: hidden ? "Show" : "Hide", icon: hidden ? <Eye size={14} /> : <EyeOff size={14} />, shortcut: keyOf("layer.toggleVisibility"), onSelect: () => toggleVisibility(node) },
       { id: "lock", label: node.locked ? "Unlock" : "Lock", icon: node.locked ? <LockOpen size={14} /> : <Lock size={14} />, shortcut: keyOf("layer.toggleLock"), onSelect: () => toggleLock(node) },
       {

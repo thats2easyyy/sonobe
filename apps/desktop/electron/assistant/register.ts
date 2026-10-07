@@ -52,6 +52,7 @@ import {
   type HandoffRequest,
   type HandoffResult,
 } from "./protocol.ts";
+import { sanitizeSelectionContext } from "./selection.ts";
 import { ASSISTANT_HIDDEN_TOOLS, createMcpToolBridge, type LocalTools, type ToolBridge } from "./toolBridge.ts";
 
 /** The webContents that sent a request (Electron's IpcMainInvokeEvent.sender). */
@@ -328,7 +329,8 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
       const sender = event.sender;
       const body = request && typeof request === "object" ? (request as Partial<AssistantSendRequest>) : {};
       const context = body.context === undefined ? null : sanitizeCanvasContext(body.context);
-      const run = { text: typeof body.text === "string" ? body.text : "", ...(typeof body.model === "string" ? { model: body.model } : {}), ...(context ? { context } : {}) };
+      const selection = body.selection === undefined ? null : sanitizeSelectionContext(body.selection);
+      const run = { text: typeof body.text === "string" ? body.text : "", ...(typeof body.model === "string" ? { model: body.model } : {}), ...(context ? { context } : {}), ...(selection ? { selection } : {}) };
       return send(id, run, (e) => {
         if (!sender.isDestroyed()) sender.send(ASSISTANT_IPC.event, e);
       });

@@ -94,6 +94,8 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "viewer.previewOnDevice": { label: "Preview on Phone…" },
 
   "help.learn": { label: "Learn Sonobe", accelerator: "CmdOrCtrl+/" },
+  // Asks the Assistant about the selected layers and patches (the editor's ai.explain).
+  "help.explain": { label: "Explain with Claude", accelerator: "CmdOrCtrl+E" },
   "help.connectClaude": { label: "Connect Claude…" },
   "help.shortcuts": { label: "Keyboard Shortcuts", accelerator: { mac: "Cmd+Alt+/", other: "Ctrl+Shift+/" } },
   "help.reportIssue": { label: "Report an Issue…" },

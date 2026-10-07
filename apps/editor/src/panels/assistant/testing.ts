@@ -13,6 +13,7 @@ import {
   type AssistantHostLike,
   type AssistantProvider,
   type AssistantRunResult,
+  type AssistantSelectionContext,
   type AssistantSignInResult,
   type AssistantStatus,
   type AssistantSubscriptionStatus,
@@ -33,7 +34,7 @@ export const SIGNED_OUT_MESSAGE = "Claude isn't signed in on this computer. Choo
 export const SIGNED_OUT_ERROR = "Claude isn't signed in on this computer. Choose Sign in… (it opens Terminal), or run claude-agent-acp --cli auth login in Terminal, then send your message again.";
 export const NOT_INSTALLED_MESSAGE = "Sonobe couldn't find Claude's agent adapter. It needs Node.js 22 or later: in Terminal, run npm install -g @agentclientprotocol/claude-agent-acp, then try again.";
 
-type SendRequest = { text: string; model?: string; context?: AssistantCanvasContext };
+type SendRequest = { text: string; model?: string; context?: AssistantCanvasContext; selection?: AssistantSelectionContext };
 
 export interface FakeAssistantHost extends AssistantHostLike {
   secretsMap: Map<string, string>;

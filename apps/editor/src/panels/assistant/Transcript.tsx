@@ -1,12 +1,18 @@
 import { ArrowRight, Ban, Check, ChevronRight, CircleAlert, Info, KeyRound, LoaderCircle, MessageSquarePlus, RefreshCw, ShieldQuestion, SkipForward, TriangleAlert, Trash2, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useStore } from "zustand";
 import { Button } from "../../ui/Button.tsx";
 import { detectPlatform, formatShortcutLabel, isEditableTarget } from "../../ui/commands/shortcutManager.ts";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { isBehindModal } from "../../ui/lib/focus.ts";
 import { Markdown } from "../learn/Markdown.tsx";
+import { parseMarkdown } from "../learn/markdown.ts";
 import "../learn/markdown.css";
 import type { ChatItem, ToolChip } from "./assistantStore.ts";
+import { assistantEditor } from "./editorLink.ts";
+import { MentionChip, SelectionChips } from "./MentionChip.tsx";
+import { linkMentions, withoutOpenLink } from "./mentions.ts";
+import { selectionLabel } from "./selectionContext.ts";
 import type { AssistantConfirmOption } from "./types.ts";
 
 export interface TranscriptProps {
@@ -21,6 +27,8 @@ export interface TranscriptProps {
   onNewChat?: () => void;
   /** Starter prompts for an empty chat. */
   onSuggestion: (text: string) => void;
+  /** The starters to show. Default SUGGESTIONS. */
+  suggestions?: readonly string[];
 }
 
 export const SUGGESTIONS = ["Explain how this prototype works", "Make the photo zoom in when I tap it", "Add a like button with a bouncy animation"];
@@ -277,8 +285,29 @@ function YesNoCard({ item, onConfirm }: { item: Extract<ChatItem, { kind: "confi
   );
 }
 
+/**
+ * A reply's text. The layers, patches and knobs it names are chips that show the item in the editor:
+ * the ones the Assistant linked by id, and names found by name (mentions.ts). `streaming`: the reply is
+ * still arriving, so a link that's half written at its end waits.
+ */
+const ReplyText = memo(function ReplyText({ text, streaming }: { text: string; streaming: boolean }) {
+  const index = useStore(assistantEditor, (s) => s.index);
+  const blocks = useMemo(() => {
+    const parsed = parseMarkdown(streaming ? withoutOpenLink(text) : text);
+    return index ? linkMentions(parsed, index) : parsed;
+  }, [text, streaming, index]);
+  const renderLink = useCallback(
+    (href: string, children: ReactNode) => {
+      const target = index?.resolve(href);
+      return target ? <MentionChip target={target}>{children}</MentionChip> : undefined;
+    },
+    [index],
+  );
+  return <Markdown blocks={blocks} renderLink={renderLink} copyCode={false} headingOffset={2} className="sb-assistant-msg__md" />;
+});
+
 /** The chat: messages, streamed replies with tool chips, notices, and confirmations. */
-export function Transcript({ items, running, thinking, onConfirm, onManageKey, onNewChat, onSuggestion }: TranscriptProps) {
+export function Transcript({ items, running, thinking, onConfirm, onManageKey, onNewChat, onSuggestion, suggestions = SUGGESTIONS }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastId = useRef<string | undefined>(undefined);
@@ -298,7 +327,7 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
         <p className="sb-assistant-empty__title">What should we build?</p>
         <p className="sb-assistant-empty__body">Describe a change and Claude makes it. It shows in AI Activity as Assistant and can be undone with {formatShortcutLabel("Mod+Z", detectPlatform())}.</p>
         <div className="sb-assistant-suggestions">
-          {SUGGESTIONS.map((text) => (
+          {suggestions.map((text) => (
             <button key={text} type="button" className="sb-assistant-suggestion" onClick={() => onSuggestion(text)}>
               <span>{text}</span>
               <ArrowRight size={12} strokeWidth={1.75} className="sb-assistant-suggestion__arrow" aria-hidden />
@@ -330,13 +359,18 @@ export function Transcript({ items, running, thinking, onConfirm, onManageKey, o
             return (
               <div key={item.id} className="sb-assistant-msg" data-role="user" data-origin={item.origin}>
                 {item.origin === "canvas" ? <span className="sb-assistant-msg__origin">From the canvas</span> : null}
+                {item.selection ? (
+                  <div className="sb-assistant-msg__about" role="group" aria-label={`Sent with ${selectionLabel(item.selection)} selected`}>
+                    <SelectionChips context={item.selection} />
+                  </div>
+                ) : null}
                 <p className="sb-assistant-msg__user">{item.text}</p>
               </div>
             );
           case "assistant":
             return (
               <div key={item.id} className="sb-assistant-msg" data-role="assistant" data-textless={!item.text || undefined}>
-                {item.text ? <Markdown source={item.text} copyCode={false} headingOffset={2} className="sb-assistant-msg__md" /> : null}
+                {item.text ? <ReplyText text={item.text} streaming={running && item === last} /> : null}
                 <ToolChips tools={item.tools} />
               </div>
             );

@@ -258,6 +258,17 @@ The Connect Claude screen has more of these under **Try asking**. Click one to c
 - Ask for one feature per request, and read the AI Activity row when it's done.
 - If you can't explain the graph Claude built, ask it to walk you through it before you move on.
 
+## Ask the Assistant about what you selected
+
+Patch Info (⌘I) says what a kind of patch does. To ask what a patch does here, in your prototype, use the Assistant, the chat inside the desktop app (⌘6).
+
+- Select layers or patches, then open the Assistant. They show as chips over the message field and go with your next message, so "what does this do?" is about them. An empty chat offers that question and two more.
+- **Explain** in that row asks in one press. So does **Explain with Claude** (⌘E), which is also in a patch's or a layer's right-click menu, in Patch Info, and in the Help menu. If the Assistant isn't set up yet, it opens the setup first.
+- × takes the selection off the message. Selecting something else brings the chips back.
+- In a reply, the names of your layers, patches and knobs are chips. Point at one and the item lights up on the canvas and in the patch editor. Press it and Sonobe selects it and brings it into view at the zoom you're at, opening the component it's in if needed. That selection is what your next question is about.
+
+This is the in-app Assistant, with your own API key ([Privacy](#privacy)). Claude Code and Claude Desktop read your selection too: say "this" and they look it up.
+
 ## Experimental: the Assistant on your Claude subscription
 
 The desktop app's own Assistant, and its Design with Claude box, use your Anthropic API key. An experimental switch lets them run on your Claude subscription instead, through Claude's agent adapter. It's off by default and awaiting Anthropic's permission. Anthropic's support article on [using the Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says: "For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." But Claude Code's [legal page](https://code.claude.com/docs/en/legal-and-compliance) says Anthropic "does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users", and the Agent SDK docs allow claude.ai login in other products only when "previously approved". So Sonobe will ask Anthropic two things: to approve this option's **Sign in…**, which opens Claude's login for Sonobe's Assistant, and whether running your own copy of Claude's adapter on your plan counts as routing requests on your behalf. Until Anthropic agrees, no release offers it. Only Sonobe run from a checkout shows the switch; packaged builds, like the DMG, never do.

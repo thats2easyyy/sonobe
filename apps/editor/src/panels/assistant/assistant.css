@@ -984,6 +984,163 @@
   background: var(--danger);
 }
 
+/* --- Mentions: a layer, patch, comment or knob named in the chat -------------------------------- */
+
+/* In a reply's text it reads as a link (the accent) with the item's glyph, and moves to the next line as one piece. */
+.sb-mention {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text-accent);
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.4;
+  text-align: left;
+  vertical-align: baseline;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .sb-mention:hover {
+    background: var(--accent-soft-hover);
+  }
+}
+
+/* The item is selected in the editor: the chip is too. */
+.sb-mention[data-selected] {
+  background: var(--bg-selected-hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--selection) 70%, transparent);
+}
+
+.sb-mention:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* An item that's gone since the message: its name, and nothing to press. */
+.sb-mention[data-gone] {
+  background: var(--bg-field);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* A patch's category color, as on its node's header. */
+.sb-mention__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: var(--radius-full);
+  background: var(--text-tertiary);
+  vertical-align: 1px;
+}
+
+.sb-mention__icon {
+  display: inline-block;
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+
+.sb-mention__icon > svg {
+  display: block;
+}
+
+/* Bold around a name adds nothing to a chip. */
+.sb-md strong > .sb-mention {
+  font-weight: var(--font-weight-medium);
+}
+
+/* A row of chips: the selection over the message field, and on a message it was sent with. */
+.sb-assistant-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sb-assistant-chips > .sb-mention {
+  max-width: 160px;
+  padding-inline: 5px;
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sb-assistant-chips__more {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The selection a message was sent with, over its bubble. */
+.sb-assistant-msg__about {
+  display: flex;
+  justify-content: flex-end;
+  max-width: 88%;
+  margin-bottom: calc(var(--space-2) - var(--space-3));
+}
+
+.sb-assistant-msg__about > .sb-assistant-chips {
+  justify-content: flex-end;
+}
+
+/* What's selected in the editor, over the message field: it goes with the next message. */
+.sb-assistant-selection {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sb-assistant-selection > .sb-assistant-chips {
+  min-height: 24px;
+}
+
+/* Everything in this row is selected: the ring would say nothing. */
+.sb-assistant-selection .sb-mention[data-selected] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: none;
+}
+
+@media (hover: hover) {
+  .sb-assistant-selection .sb-mention[data-selected]:hover {
+    background: var(--accent-soft-hover);
+  }
+}
+
+.sb-assistant-selection__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  --control-h-xs: 24px;
+  --control-h-sm: 24px;
+}
+
+.sb-assistant-selection__actions .sb-btn {
+  padding-inline: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-assistant-selection__actions .sb-btn:hover {
+  color: var(--text-primary);
+}
+
+.sb-assistant-selection__actions .sb-btn .sb-btn__icon {
+  color: var(--ai-text);
+}
+
 /* --- Standalone sheet (AssistantHost) ----------------------------------------------------------- */
 
 .sb-assistant-sheet {
