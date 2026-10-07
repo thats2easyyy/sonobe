@@ -28,6 +28,7 @@ import { canvasContextBlock } from "../design.ts";
 import type { ReplaceGuard } from "../designGuard.ts";
 import { emptyUsage, MODELS, resolveModel, type ModelSpec } from "../models.ts";
 import type { AssistantConfirmOption, AssistantError, AssistantEvent, AssistantLimits, AssistantOutcome, AssistantRunResult, AssistantSendRequest, AssistantSignInResult, AssistantSubscriptionStatus, AssistantUsage } from "../protocol.ts";
+import { selectionContextBlock } from "../selection.ts";
 import { describeToolInput, type AssistantToolInfo, type LocalTools, type ToolBridge, type ToolCallResult } from "../toolBridge.ts";
 import { createToolRunner, REPLACE_GUARD, type PreviewDraft, type ReplaceGuardKit, type RunGuards, type ToolRunScope, type WindowDocument } from "../toolRunner.ts";
 import { locateClaudeAgent } from "./locate.ts";
@@ -1081,8 +1082,9 @@ export function createSubscriptionAgent(options: SubscriptionAgentOptions): Subs
       readOnlyNoticeSent: { value: false },
     };
 
-    // A message from the canvas's Design with Claude box leads with what the canvas shows.
+    // A message from the canvas's Design with Claude box leads with what the canvas shows, and one sent with items selected in the editor with the selection.
     const prompt: ContentBlock[] = [{ type: "text", text }];
+    if (request.selection) prompt.unshift({ type: "text", text: selectionContextBlock(request.selection) });
     if (request.context) {
       let codeFolder: string | null = null;
       try {

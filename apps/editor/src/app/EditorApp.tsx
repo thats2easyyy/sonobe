@@ -14,7 +14,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
 import { registerRpcHandlers } from "../host/rpcHandlers.ts";
 import { assistantStore, useAssistant } from "../panels/assistant/assistantStore.ts";
-import { assistantCommand } from "../panels/assistant/commands.ts";
+import { assistantCommand, explainCommand } from "../panels/assistant/commands.ts";
 import { CanvasPanel } from "../panels/canvas/CanvasPanel.tsx";
 import { ConnectClaudeButton } from "../panels/connect/ConnectClaudeButton.tsx";
 import { connectClaudeStore, useConnectClaude } from "../panels/connect/connectStore.ts";
@@ -184,7 +184,7 @@ function Workspace() {
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
 
   // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
-  useRegisterCommands(() => [assistantCommand(), ...designCommands(session)], [session]);
+  useRegisterCommands(() => [assistantCommand(), explainCommand(session), ...designCommands(session)], [session]);
   useAppCommands(session);
   // Design with Claude: imported screens are selected and revealed, and the canvas makes room for the box.
   useEffect(() => attachDesign(session), [session]);

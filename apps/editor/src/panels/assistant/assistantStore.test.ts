@@ -306,6 +306,26 @@ describe("assistant store", () => {
     expect(store.getState().draft).toBe("Make the heart pop");
   });
 
+  it("opens on the chat for a question, asking for focus each time", () => {
+    const store = createAssistantStore({ persistModel: false });
+    store.getState().showSetup();
+    store.getState().ask();
+    expect(store.getState()).toMatchObject({ open: true, setup: false, focusRequest: 1 });
+    store.getState().ask();
+    expect(store.getState().focusRequest).toBe(2);
+  });
+
+  it("remembers which selection was taken off the message", () => {
+    const store = createAssistantStore({ persistModel: false });
+    expect(store.getState().selectionOff).toBeNull();
+    store.getState().setSelectionOff("main\np:flight_timer:wait:Flight Timer\n0");
+    store.getState().hide();
+    store.getState().show();
+    expect(store.getState().selectionOff).toBe("main\np:flight_timer:wait:Flight Timer\n0");
+    store.getState().setSelectionOff(null);
+    expect(store.getState().selectionOff).toBeNull();
+  });
+
   it("opens on the setup, and closing leaves it", () => {
     const store = createAssistantStore({ persistModel: false });
     store.getState().showSetup();

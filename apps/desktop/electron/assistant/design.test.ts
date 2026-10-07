@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { ASSISTANT_SYSTEM_PROMPT, systemPrompt } from "./agent.ts";
 import { canvasContextBlock, DESIGN_GUIDE, DESIGN_GUIDE_PREVIEW, designGuide, sanitizeCanvasContext } from "./design.ts";
+import { SELECTION_GUIDE } from "./selection.ts";
 import type { AssistantCanvasContext } from "./protocol.ts";
 
 const context: AssistantCanvasContext = {
@@ -149,14 +150,14 @@ describe("systemPrompt", () => {
 
   it("keeps the API key's prompt byte for byte (the cached prefix)", () => {
     const prompt = systemPrompt(instructions);
-    expect(prompt).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE}`);
+    expect(prompt).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE}\n\n${SELECTION_GUIDE}`);
     expect(systemPrompt(instructions, { drawing: "stream" })).toBe(prompt);
     // Pinned: any change to this text invalidates every chat's prompt cache, so change it on purpose.
-    expect(createHash("sha256").update(prompt).digest("hex")).toBe("5ac706a7f8709e5de9678071064a78623d89425eb8ade6bf12c7aed4a597413e");
+    expect(createHash("sha256").update(prompt).digest("hex")).toBe("3507b1c4fc67c5e6952961a98e1f54e65fdde73708a9121aad99ca12da75645f");
   });
 
   it("gives the subscription the same prompt with the preview guide", () => {
-    expect(systemPrompt(instructions, { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE_PREVIEW}`);
-    expect(systemPrompt("  ", { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\n${DESIGN_GUIDE_PREVIEW}`);
+    expect(systemPrompt(instructions, { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${instructions}\n\n${DESIGN_GUIDE_PREVIEW}\n\n${SELECTION_GUIDE}`);
+    expect(systemPrompt("  ", { drawing: "preview" })).toBe(`${ASSISTANT_SYSTEM_PROMPT}\n\n${DESIGN_GUIDE_PREVIEW}\n\n${SELECTION_GUIDE}`);
   });
 });

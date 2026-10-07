@@ -1,5 +1,5 @@
 import { Check, Copy, Maximize2 } from "lucide-react";
-import { createElement, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { createElement, Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { cx } from "../../ui/lib/cx.ts";
@@ -19,11 +19,14 @@ export interface MarkdownProps {
   copyCode?: boolean;
   /** Render headings this many levels deeper (1: "#" becomes h2). Default 0. */
   headingOffset?: number;
+  /** Draw a link yourself (the Assistant's mentions of layers and patches). Return undefined for the usual link. */
+  renderLink?: (href: string, children: ReactNode) => ReactNode | undefined;
   className?: string;
 }
 
 interface RenderContext {
   onNavigate?: (href: string) => void;
+  renderLink?: (href: string, children: ReactNode) => ReactNode | undefined;
   idPrefix: string;
   copyCode: boolean;
   headingOffset: number;
@@ -33,9 +36,9 @@ interface RenderContext {
  * Renders Markdown as React elements (never innerHTML): raw HTML in the source shows as text, and
  * unsafe link targets render as plain text. External links open in a new window.
  */
-export function Markdown({ source, blocks, onNavigate, idPrefix = "", copyCode = true, headingOffset = 0, className }: MarkdownProps) {
+export function Markdown({ source, blocks, onNavigate, idPrefix = "", copyCode = true, headingOffset = 0, renderLink, className }: MarkdownProps) {
   const parsed = useMemo(() => blocks ?? parseMarkdown(source ?? ""), [blocks, source]);
-  const ctx: RenderContext = { idPrefix, copyCode, headingOffset, ...(onNavigate ? { onNavigate } : {}) };
+  const ctx: RenderContext = { idPrefix, copyCode, headingOffset, ...(onNavigate ? { onNavigate } : {}), ...(renderLink ? { renderLink } : {}) };
   return <div className={cx("sb-md", className)}>{renderBlocks(parsed, ctx)}</div>;
 }
 
@@ -139,12 +142,16 @@ function renderInlines(nodes: readonly MdInline[], ctx: RenderContext): ReactNod
         return <del key={i}>{renderInlines(node.children, ctx)}</del>;
       case "break":
         return <br key={i} />;
-      case "link":
+      case "link": {
+        const children = renderInlines(node.children, ctx);
+        const custom = node.href ? ctx.renderLink?.(node.href, children) : undefined;
+        if (custom !== undefined) return <Fragment key={i}>{custom}</Fragment>;
         return (
           <LinkNode key={i} href={node.href} ctx={ctx}>
-            {renderInlines(node.children, ctx)}
+            {children}
           </LinkNode>
         );
+      }
     }
   });
 }

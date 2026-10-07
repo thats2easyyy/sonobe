@@ -46,18 +46,23 @@ describe("assistant preload bridge", () => {
     ]);
   });
 
-  it("passes the canvas context and the code folder calls through, and strips extras", async () => {
+  it("passes the canvas context, the selection and the code folder calls through, and strips extras", async () => {
     const { ipc, invocations } = fakeIpcRenderer();
     const api = createAssistantApi(ipc);
     const context = { component: { id: "main", name: "Main", size: [402, 874] }, screens: [], anything: "main sanitizes it" };
     await api.send({ text: "a profile screen", context, extra: "dropped" } as unknown as Parameters<typeof api.send>[0]);
     for (const junk of ["main", ["main"], null, 7]) await api.send({ text: "hi", context: junk } as unknown as Parameters<typeof api.send>[0]);
+    const selection = { component: { id: "main", name: "Main" }, items: [{ kind: "patch", id: "pop", name: "Pop", type: "popAnimation" }], anything: "main sanitizes it" };
+    await api.send({ text: "what does this do?", selection } as unknown as Parameters<typeof api.send>[0]);
+    for (const junk of ["pop", ["pop"], null, 7]) await api.send({ text: "hello", selection: junk } as unknown as Parameters<typeof api.send>[0]);
     await api.codeFolder();
     await api.linkCodeFolder();
     await api.unlinkCodeFolder();
     expect(invocations).toEqual([
       { channel: ASSISTANT_IPC.send, args: [{ text: "a profile screen", context }] },
       ...Array.from({ length: 4 }, () => ({ channel: ASSISTANT_IPC.send, args: [{ text: "hi" }] })),
+      { channel: ASSISTANT_IPC.send, args: [{ text: "what does this do?", selection }] },
+      ...Array.from({ length: 4 }, () => ({ channel: ASSISTANT_IPC.send, args: [{ text: "hello" }] })),
       { channel: ASSISTANT_IPC.codeFolder, args: [] },
       { channel: ASSISTANT_IPC.linkCodeFolder, args: [] },
       { channel: ASSISTANT_IPC.unlinkCodeFolder, args: [] },

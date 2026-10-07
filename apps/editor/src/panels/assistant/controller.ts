@@ -19,6 +19,7 @@ import {
   type AssistantConnectionUpdate,
   type AssistantHostLike,
   type AssistantRunResult,
+  type AssistantSelectionContext,
   type AssistantSignInResult,
   type AssistantStatus,
   type AssistantSubscriptionStatus,
@@ -41,8 +42,11 @@ export interface AssistantController {
   saveKey(raw: string): Promise<SaveKeyResult>;
   removeKey(): Promise<void>;
   checkKey(): Promise<void>;
-  /** With `context`, the message comes from the canvas's Design with Claude box (its transcript item says so). */
-  send(text: string, options?: { context?: AssistantCanvasContext }): Promise<AssistantRunResult | null>;
+  /**
+   * With `context`, the message comes from the canvas's Design with Claude box (its transcript item says so).
+   * With `selection`, it goes with what's selected in the editor, and its transcript item keeps the chips.
+   */
+  send(text: string, options?: { context?: AssistantCanvasContext; selection?: AssistantSelectionContext }): Promise<AssistantRunResult | null>;
   stop(): Promise<void>;
   newChat(): Promise<void>;
   /** `optionId`: the choice on a permission card. */
@@ -157,14 +161,18 @@ export function createAssistantController(host: AssistantHostLike | null, store:
     if (status.connection?.active === "subscription" && (state === "unknown" || state === "checking")) void checkSubscription();
   };
 
+  /** Messages sent so far: a status that was asked for before the latest one can't say whether its reply is running. */
+  let sends = 0;
+
   /** Main's status into the store. `check`: then read the login when it isn't known yet (checkIfUnknown). */
   const readStatus = async ({ check }: { check: boolean }) => {
+    const sent = sends;
     try {
       const status = await assistant.status();
       if (disposed) return;
       store.setState((s) => {
         const model = status.models.some((m) => m.id === s.model) ? s.model : status.defaultModel;
-        return { status, statusError: null, usage: status.usage, limits: status.limits, model, ...(status.running ? {} : s.runId === null ? { running: false } : {}) };
+        return { status, statusError: null, usage: status.usage, limits: status.limits, model, ...(status.running || sent !== sends ? {} : s.runId === null ? { running: false } : {}) };
       });
       if (check) checkIfUnknown(status);
     } catch (err) {
@@ -227,11 +235,12 @@ export function createAssistantController(host: AssistantHostLike | null, store:
       const text = raw.trim();
       const state = store.getState();
       if (!text || state.running) return null;
-      const { context } = options;
-      store.setState((s) => ({ items: [...s.items, { kind: "user", id: nextItemId("user"), text, ...(context ? { origin: "canvas" as const } : {}) }], running: true, runId: null }));
+      sends++;
+      const { context, selection } = options;
+      store.setState((s) => ({ items: [...s.items, { kind: "user", id: nextItemId("user"), text, ...(context ? { origin: "canvas" as const } : {}), ...(selection ? { selection } : {}) }], running: true, runId: null }));
       let result: AssistantRunResult;
       try {
-        result = await assistant.send({ text, model: store.getState().model, ...(context ? { context } : {}) });
+        result = await assistant.send({ text, model: store.getState().model, ...(context ? { context } : {}), ...(selection ? { selection } : {}) });
       } catch (err) {
         store.setState({ running: false, runId: null, thinking: false });
         addNotice("error", `The Assistant couldn't start: ${messageOf(err)}`);

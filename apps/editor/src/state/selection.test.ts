@@ -98,5 +98,9 @@ describe("selection store", () => {
     s.getState().requestReveal("main", ["card"]);
     expect(s.getState()).toMatchObject({ focusedPanel: "patchEditor", canvasViewports: { main: { x: 10, y: 20, zoom: 2 } }, reveal: { component: "main", ids: ["card"] } });
     expect(s.getState().reveal!.nonce).toBe(first + 1);
+    // A plain reveal fits the view to the items; a gentle one (someone following along) says so.
+    expect("gentle" in s.getState().reveal!).toBe(false);
+    s.getState().requestReveal("main", ["card"], { gentle: true });
+    expect(s.getState().reveal).toEqual({ component: "main", ids: ["card"], nonce: first + 2, gentle: true });
   });
 });

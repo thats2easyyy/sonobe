@@ -4,7 +4,9 @@
  * of the editor stays in browser mode. Each send() plays one design reply the way the desktop agent
  * streams it: import_design's html arrives as design_draft events (held at a gate when asked), then
  * the page is imported through the test hook's importHtml, as the Assistant's import_design would, and
- * the run finishes with a short reply. No test uses an API key or the network.
+ * the run finishes with a short reply. With `answer`, a message from the chat (one without the canvas's
+ * context) gets a chat reply instead: two reads, then the answer streamed as text. No test uses an API
+ * key or the network.
  *
  * With the experimental subscription switch on and the subscription picked (`connection`), a send plays
  * what the desktop's ACP engine sends instead: the page arrives as the Assistant's own preview_design
@@ -26,6 +28,7 @@ import type {
   AssistantModelInfo,
   AssistantProvider,
   AssistantRunResult,
+  AssistantSelectionContext,
   AssistantStatus,
   AssistantSubscriptionStatus,
   AssistantUsage,
@@ -48,6 +51,10 @@ export interface FakeAssistantOptions {
   subscriptionReply?: "design" | "permission";
   /** The pieces the subscription's design sends with preview_design (html, then appends); they join to `html`. Default: `html` in thirds. */
   previewParts?: string[];
+  /** What a message from the chat gets back (Markdown), streamed after two reads. Without it, every send designs a screen. */
+  answer?: string;
+  /** With `answer`: the reply waits at window.__fakeGate once this many characters of it have streamed. */
+  answerHold?: number;
 }
 
 /** What the box sent: AssistantApi.send's request. */
@@ -55,6 +62,7 @@ export interface FakeSendRequest {
   text: string;
   model?: string;
   context?: AssistantCanvasContext;
+  selection?: AssistantSelectionContext;
 }
 
 /** design_draft events per reply; the last one is done and carries the whole html. */
@@ -304,6 +312,57 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
     return finish("completed");
   };
 
+  /** One chat reply, as the desktop agent streams it: it looks at the prototype (two reads), then says `answer` a few characters at a time. */
+  const chatReply = async (request: FakeSendRequest, answer: string): Promise<AssistantRunResult> => {
+    const runId = `fake-run-${++runs}`;
+    let stopped = false;
+    let onStop: () => void = () => undefined;
+    const stopSignal = new Promise<void>((resolve) => {
+      onStop = () => {
+        stopped = true;
+        resolve();
+      };
+    });
+    stopRun = onStop;
+    messageCount++;
+    const finish = (outcome: AssistantRunResult["outcome"]): AssistantRunResult => {
+      stopRun = null;
+      emit({ type: "usage", runId, usage, limits: LIMITS });
+      emit({ type: "run_finished", runId, outcome, usage });
+      return { runId, outcome, usage: copy(usage) };
+    };
+    await pause(0);
+    emit({ type: "run_started", runId, model: request.model ?? MODELS[0]!.id });
+    emit({ type: "turn_started", runId, turn: 1 });
+    const names = (request.selection?.items ?? []).map((item) => item.name).join(", ");
+    for (const [name, title] of [
+      ["get_items", "Get items"],
+      ["get_outline", "Get outline"],
+    ] as const) {
+      const toolUseId = `toolu_fake_${runs}_${name}`;
+      emit({ type: "tool_started", runId, toolUseId, name, title, detail: name === "get_items" ? names : "" });
+      await Promise.race([pause(16), stopSignal]);
+      if (stopped) return finish("stopped");
+      emit({ type: "tool_finished", runId, toolUseId, name, status: "done", detail: "", changedDocument: false });
+    }
+    addUsage(9_000, Math.round(answer.length / 3));
+    emit({ type: "turn_started", runId, turn: 2 });
+    const STEP = 7;
+    let held = options.answerHold === undefined;
+    for (let at = 0; at < answer.length; at += STEP) {
+      // The hold is a point in the text: the piece that reaches it ends there.
+      const end = !held && at + STEP >= options.answerHold! ? options.answerHold! : Math.min(answer.length, at + STEP);
+      emit({ type: "text_delta", runId, turn: 2, delta: answer.slice(at, end) });
+      if (!held && end === options.answerHold) {
+        held = true;
+        await Promise.race([window.__fakeGate, stopSignal]);
+        at = end - STEP;
+      } else await Promise.race([pause(2), stopSignal]);
+      if (stopped) return finish("stopped");
+    }
+    return finish("completed");
+  };
+
   /** Splits the page into the three pieces Claude sends with preview_design (html, then two appends), never inside a surrogate pair. */
   const previewParts = (html: string): string[] => {
     const cuts = [0, Math.round(html.length / 3), Math.round((html.length * 2) / 3), html.length].map((at) => (at > 0 && at < html.length && /[\uD800-\uDBFF]/.test(html[at - 1]!) ? at + 1 : at));
@@ -446,6 +505,7 @@ function fakeAssistant(options: FakeAssistantOptions & { draftEvents: number; co
         }
         if (!key) return { runId: "", outcome: "error", error: { code: "no_key", message: "Add your Anthropic API key to use the Assistant." }, usage: copy(usage) };
         chatProvider = "api_key";
+        if (options.answer !== undefined && !request.context) return chatReply(request, options.answer);
         return reply(request);
       },
       stop: async () => {

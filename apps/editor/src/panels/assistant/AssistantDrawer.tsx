@@ -1,5 +1,6 @@
-import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, TriangleAlert, X } from "lucide-react";
+import { CircleUserRound, KeyRound, LoaderCircle, MessageSquarePlus, Monitor, ScanLine, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { appPanels } from "../../app/appPanels.ts";
 import { Badge } from "../../ui/Badge.tsx";
@@ -15,11 +16,14 @@ import { connectClaudeStore } from "../connect/connectStore.ts";
 import { assistantStore as defaultStore, useAssistant, type AssistantState } from "./assistantStore.ts";
 import { Composer } from "./Composer.tsx";
 import { createAssistantController, sharedAssistantController, type AssistantController } from "./controller.ts";
+import { assistantEditor } from "./editorLink.ts";
 import { KeySetup } from "./KeySetup.tsx";
+import { SelectionChips } from "./MentionChip.tsx";
 import { activeProvider, billedElsewhere, chatProvider, providerName, providerReady, providerSubtitle, subscriptionSwitchedOff } from "./provider.ts";
+import { explainPrompt, selectionKey, selectionLabel, selectionStarters } from "./selectionContext.ts";
 import { SubscriptionSetup } from "./SubscriptionSetup.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { FALLBACK_MODELS, getAssistantHost, type AssistantHostLike, type AssistantProvider, type AssistantSubscriptionState } from "./types.ts";
+import { FALLBACK_MODELS, getAssistantHost, type AssistantHostLike, type AssistantProvider, type AssistantSelectionContext, type AssistantSubscriptionState } from "./types.ts";
 import "./assistant.css";
 
 export interface AssistantDrawerProps {
@@ -51,11 +55,36 @@ function canTakeFocus(root: HTMLElement | null, from?: Element | null): boolean 
 }
 
 /**
+ * What's selected in the editor, over the message field: it goes with the next message, so "this" means
+ * these items. Explain asks about them in one press, and × leaves them out until the selection changes.
+ */
+function SelectionRow({ context, running, onExplain, onDismiss }: { context: AssistantSelectionContext; running: boolean; onExplain: () => void; onDismiss: () => void }) {
+  return (
+    <div className="sb-assistant-selection" role="group" aria-label={`Goes with your message: ${selectionLabel(context)}`}>
+      <SelectionChips context={context} />
+      <span className="sb-assistant-selection__actions">
+        {/* One reply at a time: while Claude answers, there's nothing to ask yet. */}
+        {running ? null : (
+          <Tooltip content={`Asks “${explainPrompt(context)}”`} placement="top">
+            <Button size="sm" variant="ghost" icon={<Sparkles size={12} />} onClick={onExplain}>
+              Explain
+            </Button>
+          </Tooltip>
+        )}
+        <IconButton icon={<X size={12} />} label="Leave the selection out of the message" size="xs" onClick={onDismiss} />
+      </span>
+    </div>
+  );
+}
+
+/**
  * The Assistant drawer: chat with Claude using the person's own Anthropic API key (or, with the
  * experimental switch on, their Claude subscription), with streamed replies, tool activity chips, Stop,
  * a model picker, confirmations (deleting items, replacing a screen, permissions), and a usage meter.
- * When what the chat runs on isn't ready it shows the setup; in the browser, a desktop-only notice that
- * points to Import Design. Fills its container.
+ * What's selected in the editor shows over the message field and goes with the message, and the layers,
+ * patches and knobs a reply names are chips that show the item in the editor (editorLink.ts). When what
+ * the chat runs on isn't ready it shows the setup; in the browser, a desktop-only notice that points to
+ * Import Design. Fills its container.
  */
 export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host, store = defaultStore, controller: providedController, className }: AssistantDrawerProps) {
   const [api] = useState<AssistantHostLike | null>(() => (host === undefined ? getAssistantHost() : host));
@@ -79,6 +108,11 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   const keyCheck = useAssistant((s) => s.keyCheck, store);
   const managing = useAssistant((s) => s.setup, store);
   const draft = useAssistant((s) => s.draft, store);
+  const selectionOff = useAssistant((s) => s.selectionOff, store);
+  const focusRequest = useAssistant((s) => s.focusRequest, store);
+  const selected = useStore(assistantEditor, (s) => s.selection);
+  // The selection goes with the message unless the person took it off; a different selection shows again.
+  const selection = selected && selectionKey(selected) !== selectionOff ? selected : null;
   const setManaging = (setup: boolean) => store.getState().setSetup(setup);
   const rootRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -126,7 +160,12 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
   };
 
   const send = (text: string) => {
-    void controller.send(text);
+    void controller.send(text, selection ? { selection } : {});
+  };
+  const explain = () => {
+    if (!selection) return;
+    send(explainPrompt(selection));
+    composerRef.current?.focus({ preventScroll: true });
   };
 
   const focusComposer = () =>
@@ -158,6 +197,15 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
     });
     return () => cancelAnimationFrame(frame);
   }, [surface, store]);
+
+  // Explain with Claude and the like open the chat for typing: focus goes to the message field, even with the sheet already open.
+  useEffect(() => {
+    if (focusRequest === 0 || surface !== "chat") return;
+    const frame = requestAnimationFrame(() => {
+      if (rootRef.current && !isBehindModal(rootRef.current)) composerRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest, surface]);
 
   const subtitle = providerSubtitle(status, provider);
   // With only the API key there is one answer to "what does this run on", so its hint waits in the key button's tooltip; the strip is for telling a plan from a key.
@@ -249,6 +297,7 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             send(text);
             composerRef.current?.focus();
           }}
+          {...(selection ? { suggestions: selectionStarters(selection) } : {})}
         />
         {provider !== active ? (
           <p className="sb-assistant-provider-note">
@@ -258,7 +307,24 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             </button>
           </p>
         ) : null}
-        <Composer ref={composerRef} running={running} onSend={send} onStop={() => void controller.stop()} usage={usage} limits={limits} provider={provider} billedTo={billedTo} value={draft} onValueChange={store.getState().setDraft} />
+        <Composer
+          ref={composerRef}
+          running={running}
+          onSend={send}
+          onStop={() => void controller.stop()}
+          usage={usage}
+          limits={limits}
+          provider={provider}
+          billedTo={billedTo}
+          value={draft}
+          onValueChange={store.getState().setDraft}
+          {...(selection
+            ? {
+                context: <SelectionRow context={selection} running={running} onExplain={explain} onDismiss={() => store.getState().setSelectionOff(selectionKey(selection))} />,
+                ...(running ? {} : { placeholder: "Ask about the selection or describe a change…" }),
+              }
+            : {})}
+        />
       </>
     );
   }

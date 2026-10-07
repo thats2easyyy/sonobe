@@ -10,10 +10,11 @@ export interface RevealTarget {
 }
 
 /**
- * Select `ids` in `component` (entering it when needed) and publish a reveal request. Returns false
- * when the component is gone or none of the ids exist anymore.
+ * Select `ids` in `component` (entering it when needed) and publish a reveal request (`gentle`: one
+ * that keeps the patch editor's zoom, selection.ts). Returns false when the component is gone or none
+ * of the ids exist anymore.
  */
-export function revealItems(session: RevealTarget, component: Id | undefined, ids: readonly Id[]): boolean {
+export function revealItems(session: RevealTarget, component: Id | undefined, ids: readonly Id[], options?: { gentle?: boolean }): boolean {
   const doc = session.document.getState().doc;
   const componentId = component ?? doc.project.root;
   const target = doc.components[componentId];
@@ -38,6 +39,6 @@ export function revealItems(session: RevealTarget, component: Id | undefined, id
   }
   if (existing.length === 0) return false;
   session.selection.getState().select({ layers, patches, comments });
-  session.selection.getState().requestReveal(componentId, existing);
+  session.selection.getState().requestReveal(componentId, existing, options);
   return true;
 }

@@ -35,6 +35,7 @@ import { createDraftStreams, type DraftStreams } from "./draftStream.ts";
 import { DELETE_CONFIRM_THRESHOLD } from "./guardrails.ts";
 import { addUsage, emptyUsage, FALLBACK_BETA, resolveModel, type ModelSpec } from "./models.ts";
 import type { AssistantError, AssistantEvent, AssistantKeyCheck, AssistantLimits, AssistantOutcome, AssistantRunResult, AssistantSendRequest, AssistantUsage } from "./protocol.ts";
+import { SELECTION_GUIDE, selectionContextBlock } from "./selection.ts";
 import { toAnthropicTools, toolResultContent, type AssistantToolInfo, type LocalTools, type ToolBridge } from "./toolBridge.ts";
 import { createToolRunner, REPLACE_GUARD, type PreviewDraft, type ReplaceGuardKit, type RunGuards, type ToolRunResult } from "./toolRunner.ts";
 
@@ -89,13 +90,15 @@ export const ASSISTANT_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * The system prompt: the same for every message (sheet or canvas box), so the cached prefix holds.
- * `drawing`: how the canvas draws a design as Claude writes it (design.ts designGuide): "stream" for
- * the API key's import_design html, "preview" for preview_design on the subscription.
+ * The system prompt: the same for every message (sheet or canvas box, with or without a selection),
+ * so the cached prefix holds. `drawing`: how the canvas draws a design as Claude writes it (design.ts
+ * designGuide): "stream" for the API key's import_design html, "preview" for preview_design on the
+ * subscription. It ends with the guide to the <selection> block and to naming items as links
+ * (selection.ts).
  */
 export function systemPrompt(toolInstructions: string, options: { drawing?: DesignDrawing } = {}): string {
   const prompt = toolInstructions.trim() ? `${ASSISTANT_SYSTEM_PROMPT}\n\nSonobe's tool guide:\n${toolInstructions.trim()}` : ASSISTANT_SYSTEM_PROMPT;
-  return `${prompt}\n\n${designGuide(options.drawing ?? "stream")}`;
+  return `${prompt}\n\n${designGuide(options.drawing ?? "stream")}\n\n${SELECTION_GUIDE}`;
 }
 
 /** Makes the DraftStreams for one turn's stream (draftStream.ts createDraftStreams). */
@@ -339,9 +342,10 @@ export function createAssistantAgent(options: AssistantAgentOptions): AssistantA
       return fail({ code: "no_document", message: "Sonobe's editing tools aren't ready yet. Open a prototype and try again." });
     }
 
-    // A message from the canvas's Design with Claude box leads with what the canvas shows; the
-    // system prompt stays the same either way.
+    // A message from the canvas's Design with Claude box leads with what the canvas shows, and one
+    // sent with items selected in the editor with the selection; the system prompt stays the same.
     const content: BetaTextBlockParam[] = [{ type: "text", text }];
+    if (request.selection) content.unshift({ type: "text", text: selectionContextBlock(request.selection) });
     if (request.context) {
       let codeFolder: string | null = null;
       try {

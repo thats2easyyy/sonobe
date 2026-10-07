@@ -2,13 +2,17 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyOps, createEmptyDocument, type Op } from "@sonobe/core";
 import { appPanels } from "../../app/appPanels.ts";
+import { getRegistry } from "../../state/registry.ts";
 import { createAssistantStore } from "./assistantStore.ts";
 import { AssistantDrawer } from "./AssistantDrawer.tsx";
 import type { AssistantController } from "./controller.ts";
+import { assistantEditor } from "./editorLink.ts";
+import { createMentionIndex, mentionKey, type MentionTarget } from "./mentions.ts";
 import { SubscriptionSetup } from "./SubscriptionSetup.tsx";
 import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage, type FakeAssistantHost } from "./testing.ts";
-import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET } from "./types.ts";
+import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantSelectionContext } from "./types.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -746,5 +750,184 @@ describe("SubscriptionSetup", () => {
     });
     await flush();
     expect(checks).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("AssistantDrawer and the editor's selection", () => {
+  const KEY = "sk-ant-api03-abcdefgh1234";
+  const registry = getRegistry();
+  const ops: Op[] = [
+    { op: "addKnob", knob: { id: "flight_time", name: "Flight Time", type: "number", value: 0.6 } },
+    { op: "addLayer", layer: { id: "level_line", type: "rectangle", name: "Level Line", props: {} } },
+    { op: "addPatch", patch: { id: "flight_timer", type: "wait", name: "Flight Timer", inputs: {} } },
+    { op: "addPatch", patch: { id: "flight_ease", type: "curve", name: "Flight Easing", inputs: {} } },
+  ];
+  const built = applyOps(createEmptyDocument({ name: "Camera Demo" }), ops, { registry });
+  if (!built.ok) throw new Error(built.errors[0]?.message);
+  const doc = built.doc;
+  const main = doc.project.root;
+  const timer: AssistantSelectionContext = { component: { id: main, name: "Main" }, items: [{ kind: "patch", id: "flight_timer", name: "Flight Timer", type: "wait" }] };
+  const both: AssistantSelectionContext = { ...timer, items: [...timer.items, { kind: "layer", id: "level_line", name: "Level Line", type: "rectangle" }] };
+
+  let shown: MentionTarget[];
+  let pointed: (MentionTarget | null)[];
+  /** What attachAssistantEditor keeps in the store, set by hand: the drawer reads only the store. */
+  const editor = (selection: AssistantSelectionContext | null) =>
+    act(() => {
+      assistantEditor.setState({
+        selection,
+        index: createMentionIndex({ doc, registry, current: main }),
+        selected: new Set((selection?.items ?? []).map((i) => mentionKey({ kind: i.kind, id: i.id, component: main }))),
+        show: (target) => shown.push(target),
+        point: (target) => pointed.push(target),
+      });
+    });
+  const row = () => container.querySelector(".sb-assistant-selection");
+  const chips = (root: Element | null) => [...(root?.querySelectorAll(".sb-mention") ?? [])].map((chip) => chip.textContent);
+  const field = () => container.querySelector("textarea")!;
+  const send = async (text: string) => {
+    typeInto(field(), text);
+    await act(async () => {
+      field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await flush();
+  };
+
+  beforeEach(() => {
+    shown = [];
+    pointed = [];
+  });
+  afterEach(() => {
+    act(() => assistantEditor.setState({ selection: null, index: null, selected: new Set(), show: () => undefined, point: () => undefined }, true));
+  });
+
+  it("shows nothing over the message field without a selection, or without an editor", async () => {
+    await mount(fakeAssistantHost({ key: KEY }));
+    expect(row()).toBeNull();
+    expect(field().placeholder).toBe("Describe what to build or ask a question…");
+    editor(null);
+    expect(row()).toBeNull();
+  });
+
+  it("shows what's selected over the message field, and sends it with the message", async () => {
+    const host = fakeAssistantHost({ key: KEY });
+    editor(both);
+    await mount(host);
+    expect(row()?.getAttribute("aria-label")).toBe("Goes with your message: Flight Timer and Level Line");
+    expect(chips(row())).toEqual(["Flight Timer", "Level Line"]);
+    expect(field().placeholder).toBe("Ask about the selection or describe a change…");
+
+    await send("why two of them?");
+    expect(host.sent).toEqual([{ text: "why two of them?", model: "claude-sonnet-5", selection: both }]);
+    // The message keeps the chips it went with, and they still show the items.
+    const about = container.querySelector(".sb-assistant-msg[data-role='user'] .sb-assistant-msg__about");
+    expect(about?.getAttribute("aria-label")).toBe("Sent with Flight Timer and Level Line selected");
+    expect(chips(about)).toEqual(["Flight Timer", "Level Line"]);
+    await click(about?.querySelector(".sb-mention"));
+    expect(shown).toEqual([expect.objectContaining({ kind: "patch", id: "flight_timer", component: main, typeName: "Wait" })]);
+  });
+
+  it("asks about the selection from the starters and from Explain", async () => {
+    const host = fakeAssistantHost({ key: KEY });
+    editor(timer);
+    await mount(host);
+    expect([...container.querySelectorAll(".sb-assistant-suggestion")].map((b) => b.textContent)).toEqual(["What does this do?", "How does this work?", "What's happening here?"]);
+    await click(buttonByText("How does this work?"));
+    expect(host.sent[0]).toEqual({ text: "How does this work?", model: "claude-sonnet-5", selection: timer });
+
+    expect(tooltipOf(buttonByText("Explain")!)).toBe("Asks “What does this do, and how does it work?”");
+    await click(buttonByText("Explain"));
+    expect(host.sent[1]).toEqual({ text: "What does this do, and how does it work?", model: "claude-sonnet-5", selection: timer });
+
+    editor(both);
+    await click(buttonByText("Explain"));
+    expect(host.sent[2]).toEqual({ text: "What do these do, and how do they work together?", model: "claude-sonnet-5", selection: both });
+  });
+
+  it("leaves the selection out after ×, until something else is selected", async () => {
+    const host = fakeAssistantHost({ key: KEY });
+    editor(timer);
+    const store = await mount(host);
+    await click(buttonByLabel("Leave the selection out of the message"));
+    expect(row()).toBeNull();
+    expect([...container.querySelectorAll(".sb-assistant-suggestion")].map((b) => b.textContent)).toContain("Explain how this prototype works");
+    await send("add a counter");
+    expect(host.sent).toEqual([{ text: "add a counter", model: "claude-sonnet-5" }]);
+    expect(container.querySelector(".sb-assistant-msg__about")).toBeNull();
+
+    // The same selection again (a re-render) stays off; another one shows.
+    editor({ ...timer, items: [{ ...timer.items[0]! }] });
+    expect(row()).toBeNull();
+    editor(both);
+    expect(chips(row())).toEqual(["Flight Timer", "Level Line"]);
+    editor(timer);
+    expect(row()).toBeNull();
+    // Asking about it (Explain with Claude) puts it back.
+    act(() => store.getState().setSelectionOff(null));
+    expect(chips(row())).toEqual(["Flight Timer"]);
+  });
+
+  it("hides Explain while a reply runs, and keeps the chips", async () => {
+    const host = fakeAssistantHost({ key: KEY });
+    let finish: () => void = () => undefined;
+    host.nextResult = (_request, emit) => {
+      emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+      return new Promise((resolve) => {
+        finish = () => {
+          emit({ type: "run_finished", runId: "r1", outcome: "completed", usage: usage(10) });
+          resolve({ runId: "r1", outcome: "completed", usage: usage(10) });
+        };
+      });
+    };
+    editor(timer);
+    await mount(host);
+    await send("what is this?");
+    expect(chips(row())).toEqual(["Flight Timer"]);
+    expect(buttonByText("Explain")).toBeUndefined();
+    expect(field().placeholder).toBe("Claude is working… Esc to stop");
+    await act(async () => finish());
+    await flush();
+    expect(buttonByText("Explain")).toBeTruthy();
+  });
+
+  it("draws the names in a reply as chips that select and point at the item", async () => {
+    const host = fakeAssistantHost({ key: KEY });
+    host.nextResult = (_request, emit) => {
+      emit({ type: "run_started", runId: "r1", model: "claude-sonnet-5" });
+      emit({ type: "turn_started", runId: "r1", turn: 1 });
+      emit({ type: "text_delta", runId: "r1", turn: 1, delta: "[Flight Timer](#flight_timer) runs for the [Flight Time](#$knob.flight_time) knob, then Flight Easing smooths it and the [Level Line](#@level_line) turns. [Gone](#gone) and [docs](https://example.com)." });
+      emit({ type: "run_finished", runId: "r1", outcome: "completed", usage: usage(10) });
+      return { runId: "r1", outcome: "completed", usage: usage(10) };
+    };
+    editor(timer);
+    await mount(host);
+    await send("how does it work?");
+    const reply = container.querySelector(".sb-assistant-msg[data-role='assistant']")!;
+    expect(chips(reply)).toEqual(["Flight Timer", "Flight Time", "Flight Easing", "Level Line"]);
+    expect([...reply.querySelectorAll(".sb-mention")].map((chip) => chip.getAttribute("data-kind"))).toEqual(["patch", "knob", "patch", "layer"]);
+    // The selected item's chip says so; a link to nothing is its text, and a web link stays a link.
+    expect([...reply.querySelectorAll(".sb-mention[data-selected]")].map((chip) => chip.textContent)).toEqual(["Flight Timer"]);
+    expect(reply.textContent).toContain("Gone and docs.");
+    expect([...reply.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["https://example.com"]);
+
+    const [, knob, easing, line] = [...reply.querySelectorAll<HTMLElement>(".sb-mention")];
+    expect(tooltipOf(easing!)).toBe("Select this Curve patch in the patch editor");
+    expect(pointed.at(-1)).toMatchObject({ kind: "patch", id: "flight_ease" });
+    act(() => easing!.blur());
+    expect(pointed.at(-1)).toBeNull();
+    await click(line);
+    await click(knob);
+    expect(shown).toEqual([expect.objectContaining({ kind: "layer", id: "level_line" }), { kind: "knob", id: "flight_time", name: "Flight Time" }]);
+  });
+
+  it("puts focus in the message field when something asks for it with the sheet already open", async () => {
+    const store = await mount(fakeAssistantHost({ key: KEY }));
+    await afterFrame();
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(document.activeElement).not.toBe(field());
+    act(() => store.getState().ask());
+    await afterFrame();
+    expect(document.activeElement).toBe(field());
+    expect(store.getState()).toMatchObject({ open: true, setup: false });
   });
 });

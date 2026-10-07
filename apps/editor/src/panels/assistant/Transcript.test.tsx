@@ -193,6 +193,34 @@ describe("Transcript", () => {
     expect(messages[1]?.querySelector(".sb-assistant-msg__origin")).toBeNull();
   });
 
+  it("holds back a name that's half written at the end of a streaming reply, and shows it once the reply is done", () => {
+    const reply = (text: string): ChatItem => ({ kind: "assistant", id: "a1", runId: "r1", turn: 1, text, thinking: "", tools: [] });
+    const render = (text: string, running: boolean) => act(() => root.render(<Transcript items={[reply(text)]} running={running} thinking={false} onConfirm={() => undefined} onManageKey={() => undefined} onSuggestion={() => undefined} />));
+    const shown = () => container.querySelector(".sb-assistant-msg__md")?.textContent;
+    render("It feeds [Flight Eas", true);
+    expect(shown()).toBe("It feeds");
+    render("It feeds [Flight Easing](#flight_", true);
+    expect(shown()).toBe("It feeds");
+    // Stopped there: what was written shows as it is.
+    render("It feeds [Flight Easing](#flight_", false);
+    expect(shown()).toBe("It feeds [Flight Easing](#flight_");
+  });
+
+  it("leaves a reply's links as they are without an editor to show their items in", () => {
+    const items: ChatItem[] = [{ kind: "assistant", id: "a1", runId: "r1", turn: 1, text: "[Flight Timer](#flight_timer) and Flight Easing, see [the docs](https://example.com).", thinking: "", tools: [] }];
+    act(() => root.render(<Transcript items={items} running={false} thinking={false} onConfirm={() => undefined} onManageKey={() => undefined} onSuggestion={() => undefined} />));
+    expect(container.querySelector(".sb-mention")).toBeNull();
+    expect([...container.querySelectorAll(".sb-assistant-msg__md a")].map((a) => a.getAttribute("href"))).toEqual(["#flight_timer", "https://example.com"]);
+  });
+
+  it("shows the starters it's given, and its own without them", () => {
+    const render = (suggestions?: string[]) => act(() => root.render(<Transcript items={[]} running={false} thinking={false} onConfirm={() => undefined} onManageKey={() => undefined} onSuggestion={() => undefined} {...(suggestions ? { suggestions } : {})} />));
+    render(["What does this do?", "How does this work?"]);
+    expect(buttons()).toEqual(["What does this do?", "How does this work?"]);
+    render();
+    expect(buttons()).toHaveLength(3);
+  });
+
   it("offers the setup for Claude subscription errors, and the key for key errors", () => {
     const onManageKey = vi.fn();
     const items: ChatItem[] = [

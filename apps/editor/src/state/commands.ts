@@ -77,6 +77,7 @@ export const DESKTOP_COMMAND_MAP: Readonly<Record<string, string>> = {
   "view.toggleConsole": "view.toggleHud",
   "view.toggleAssistant": "ai.assistant",
   "help.connectClaude": "ai.connectClaude",
+  "help.explain": "ai.explain",
 };
 
 /** Commands that edit text instead when focus is in a text field. */

@@ -15,6 +15,11 @@
  *
  *   <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} />
  *   useRegisterCommands([assistantCommand()])   // id "ai.assistant", replaces the hidden alias that opens Connect Claude
+ *   useRegisterCommands([explainCommand(session)])   // id "ai.explain": asks about the selection
+ *
+ * The chat follows the editor it's in (editorLink.ts): what's selected shows over the message field
+ * and goes with the message, and the layers, patches and knobs a reply names are chips that select
+ * the item (mentions.ts, MentionChip.tsx).
  *
  * AssistantDrawer props (all optional): onClose, onConnectClaude (default connectClaudeStore.show()),
  * onImportDesign (default appPanels.show("importDesign")), host (default window.sonobeHost; null =
@@ -25,7 +30,7 @@
 export { AssistantDrawer, type AssistantDrawerProps } from "./AssistantDrawer.tsx";
 export { AssistantHost } from "./AssistantHost.tsx";
 export { assistantStore, createAssistantStore, draftKb, initialAssistantData, MODEL_STORAGE_KEY, reduceEvent, useAssistant, type AssistantData, type AssistantState, type ChatItem, type KeyCheckState, type ToolChip } from "./assistantStore.ts";
-export { ASSISTANT_COMMAND_ID, assistantCommand } from "./commands.ts";
+export { ASSISTANT_COMMAND_ID, assistantCommand, EXPLAIN_COMMAND_ID, explainCommand, explainSelection } from "./commands.ts";
 export { Composer, UsageMeter, type ComposerProps } from "./Composer.tsx";
 export { createAssistantController, openLink, sharedAssistantController, type AssistantController, type ConnectionResult, type SaveKeyResult } from "./controller.ts";
 export { budgetFraction, formatCost, formatTokens, validateApiKey, type KeyValidation } from "./format.ts";

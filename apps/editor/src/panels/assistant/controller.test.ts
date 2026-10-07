@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAssistantStore } from "./assistantStore.ts";
 import { createAssistantController } from "./controller.ts";
 import { fakeAssistantHost, NOT_INSTALLED_MESSAGE, SIGNED_OUT_ERROR, SIGNED_OUT_MESSAGE, signedIn, subscriptionStatus, usage } from "./testing.ts";
-import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantCanvasContext } from "./types.ts";
+import { ANTHROPIC_CONSOLE_KEYS_URL, ASSISTANT_KEY_SECRET, type AssistantCanvasContext, type AssistantSelectionContext } from "./types.ts";
 
 describe("assistant controller", () => {
   it("is unavailable in the browser and does nothing", async () => {
@@ -107,6 +107,38 @@ describe("assistant controller", () => {
     expect(host.sent).toHaveLength(1);
   });
 
+  it("doesn't take a status it asked for before a message as word that the reply stopped", async () => {
+    const host = fakeAssistantHost();
+    // The reply hasn't said it started yet.
+    let finish!: () => void;
+    host.nextResult = () =>
+      new Promise((resolve) => {
+        finish = () => resolve({ runId: "r1", outcome: "completed", usage: usage() });
+      });
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    const read = host.assistant!.status;
+    let answer!: () => void;
+    host.assistant!.status = () =>
+      new Promise((resolve) => {
+        answer = () => void read().then(resolve);
+      });
+    // The drawer reads the status as it opens, and Explain with Claude sends before the answer is back.
+    const refreshing = controller.refresh();
+    const pending = controller.send("What does this do?");
+    expect(store.getState()).toMatchObject({ running: true, runId: null });
+    answer();
+    await refreshing;
+    expect(store.getState()).toMatchObject({ running: true, status: { running: false } });
+
+    // A status asked for since then still clears a reply that isn't coming.
+    host.assistant!.status = read;
+    await controller.refresh();
+    expect(store.getState().running).toBe(false);
+    finish();
+    await pending;
+  });
+
   it("answers confirmations optimistically, starts new chats, and opens the Console", async () => {
     const host = fakeAssistantHost();
     const store = createAssistantStore({ persistModel: false });
@@ -157,6 +189,21 @@ describe("assistant controller", () => {
     await controller.send("and a promo code");
     expect(host.sent[1]).toEqual({ text: "and a promo code", model: "claude-sonnet-5" });
     expect(store.getState().items.filter((i) => i.kind === "user")[1]).toEqual({ kind: "user", id: expect.any(String), text: "and a promo code" });
+  });
+
+  it("sends the selection with a message, and keeps it on the message for its chips", async () => {
+    const host = fakeAssistantHost();
+    const store = createAssistantStore({ persistModel: false });
+    const controller = createAssistantController(host, store);
+    const selection: AssistantSelectionContext = { component: { id: "main", name: "Main" }, items: [{ kind: "patch", id: "flight_timer", name: "Flight Timer", type: "wait" }] };
+    await controller.send("what does this do?", { selection });
+    expect(host.sent).toEqual([{ text: "what does this do?", model: "claude-sonnet-5", selection }]);
+    expect(store.getState().items[0]).toEqual({ kind: "user", id: expect.any(String), text: "what does this do?", selection });
+
+    // The next message has its own selection, or none.
+    await controller.send("thanks");
+    expect(host.sent[1]).toEqual({ text: "thanks", model: "claude-sonnet-5" });
+    expect(store.getState().items.filter((i) => i.kind === "user")[1]).toEqual({ kind: "user", id: expect.any(String), text: "thanks" });
   });
 
   it("reads, links and unlinks the code folder into the status", async () => {

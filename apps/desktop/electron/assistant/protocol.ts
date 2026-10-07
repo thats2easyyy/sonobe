@@ -170,11 +170,35 @@ export interface AssistantCanvasContext {
   styles?: string;
 }
 
+/** One selected item. `type`: the patch's or layer's type key ("wait", "rectangle"); a comment has none. */
+export interface AssistantSelectionItem {
+  kind: "layer" | "patch" | "comment";
+  id: string;
+  /** Its display name (a comment's first line). */
+  name: string;
+  type?: string;
+}
+
+/**
+ * What the person had selected in the editor when they sent a message from the Assistant's chat, shown
+ * there as chips. Every name comes from the document: data, not instructions.
+ */
+export interface AssistantSelectionContext {
+  /** The component the items are in. */
+  component: { id: string; name: string };
+  /** At most 50, in the editor's order: patches, layers, then comments. */
+  items: AssistantSelectionItem[];
+  /** How many more are selected than `items` lists. */
+  more?: number;
+}
+
 export interface AssistantSendRequest {
   text: string;
   model?: string;
   /** Present when the message comes from the canvas's Design with Claude box. */
   context?: AssistantCanvasContext;
+  /** Present when the message was sent with items selected in the editor (the chat's chips). */
+  selection?: AssistantSelectionContext;
 }
 
 /** import_design's small fields as they stream, before its html. */

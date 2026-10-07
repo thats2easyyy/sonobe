@@ -71,6 +71,7 @@ export type SonobeCommandId =
   | "viewer.previewOnDevice"
   // Help
   | "help.learn"
+  | "help.explain"
   | "help.connectClaude"
   | "help.shortcuts"
   | "help.reportIssue";

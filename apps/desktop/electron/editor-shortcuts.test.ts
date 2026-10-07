@@ -32,6 +32,7 @@ const COMPONENT_SHORTCUTS: Partial<Record<string, Shortcut>> = {
   "view.toggleInspector": "Mod+7",
   "view.toggleConsole": "Mod+J", // view.toggleHud
   "help.learn": "Mod+/",
+  "help.explain": "Mod+E", // panels/assistant/commands.ts ai.explain
   "help.shortcuts": ["Mod+Alt+/", "Ctrl+Shift+/"], // app/useAppCommands.tsx (macOS first, then Windows and Linux)
   "patch.insert": "Alt+Enter", // app/useAppCommands.tsx alias → panels/patch-editor/PatchEditor.tsx patchEditor.insertPatch
   "patch.tidyUp": "Ctrl+T",

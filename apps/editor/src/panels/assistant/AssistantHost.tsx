@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_LAYOUT, SIZE_LIMITS, layoutStore, setLiveDrawerWidth, useLayout } from "../../shell/layoutStore.ts";
+import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { Splitter } from "../../ui/Splitter.tsx";
 import { useDismissableLayer } from "../../ui/lib/layerStack.ts";
 import { observeResize } from "../../ui/lib/observeResize.ts";
 import { assistantStore, useAssistant } from "./assistantStore.ts";
 import { AssistantDrawer, type AssistantDrawerProps } from "./AssistantDrawer.tsx";
+import { attachAssistantEditor } from "./editorLink.ts";
 
 const EXIT_MS = 150;
 
@@ -12,7 +14,8 @@ const EXIT_MS = 150;
  * A right-side sheet bound to assistantStore.open, for shells that don't give the Assistant a drawer
  * slot. It is as wide as the Learn drawer, and resizing either resizes both, so switching between them
  * keeps the left edge still. Escape closes it (unless a reply is running, where Escape stops it); the
- * left edge resizes it. The chat keeps running while it's closed.
+ * left edge resizes it. The chat keeps running while it's closed. While it's up, the chat follows the
+ * editor it's in: the selection, and the names its replies can show (editorLink.ts).
  */
 export function AssistantHost(props: Omit<AssistantDrawerProps, "onClose" | "store">) {
   const open = useAssistant((s) => s.open);
@@ -22,6 +25,9 @@ export function AssistantHost(props: Omit<AssistantDrawerProps, "onClose" | "sto
   const ref = useRef<HTMLElement>(null);
   const invoker = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(open);
+  const session = useEditorSession();
+
+  useEffect(() => (rendered ? attachAssistantEditor(session) : undefined), [rendered, session]);
 
   useEffect(() => {
     if (open) {

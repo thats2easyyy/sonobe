@@ -215,6 +215,7 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("help.learn"),
       cmd("help.shortcuts"),
       sep,
+      cmd("help.explain"),
       cmd("help.connectClaude"),
       sep,
       cmd("help.reportIssue"),

@@ -36,12 +36,13 @@ export function createAssistantApi(ipcRenderer: AssistantIpcRenderer): SonobeAss
 
   return {
     status: () => invoke<AssistantStatus>(ASSISTANT_IPC.status),
-    // The main process sanitizes the canvas context field by field, so this bundle stays free of imports.
+    // The main process sanitizes the canvas context and the selection field by field, so this bundle stays free of imports.
     send: (request) =>
       invoke<AssistantRunResult>(ASSISTANT_IPC.send, {
         text: String(request?.text ?? ""),
         ...(typeof request?.model === "string" ? { model: request.model } : {}),
         ...(isPlainObject(request?.context) ? { context: request.context } : {}),
+        ...(isPlainObject(request?.selection) ? { selection: request.selection } : {}),
       }),
     stop: () => invoke<boolean>(ASSISTANT_IPC.stop),
     reset: () => invoke<AssistantStatus>(ASSISTANT_IPC.reset),

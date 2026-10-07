@@ -244,6 +244,9 @@ interface PendingSplice extends SpliceChoiceRequest {
   cable: { from: string; to: string };
 }
 
+/** The app's command that asks the Assistant about the selection (panels/assistant/commands.ts). */
+const EXPLAIN_COMMAND = "ai.explain";
+
 function nodeRect(node: FlowNode, layerName?: (id: Id) => string | undefined): Rect {
   const width = node.measured?.width ?? node.width;
   const height = node.measured?.height ?? node.height;
@@ -262,6 +265,7 @@ const scopeKey = (scope: LiveScope) => `${scope.prefix ?? "∅"}|${scope.steps.m
 
 function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, toolbarContainer, defaultMinimap, commands }: CanvasProps) {
   const registry = session.registry;
+  const appCommands = useOptionalCommands();
   const flow = useReactFlow<FlowNode, CableFlowEdge>();
   const flowRef = useRef<Flow>(flow);
   flowRef.current = flow;
@@ -384,6 +388,8 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   const initializedRef = useRef(false);
   /** A reveal that arrived before the viewport was ready: onInit runs it instead of the first fit. */
   const pendingRevealRef = useRef<string[] | null>(null);
+  /** A gentle reveal that arrived before the graph showed (the patch editor opened for it). */
+  const pendingShowRef = useRef<string[] | null>(null);
   /** Fit the view to revealed nodes. On a graph that hasn't been shown yet, jump there and then show it. */
   const revealFit = useCallback(
     (ids: string[]) => {
@@ -1104,6 +1110,29 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     },
     [markViewportManual, reducedMotionRef],
   );
+  /**
+   * Bring nodes into view for someone following along (a gentle reveal): nothing moves when they
+   * already show, the view pans at its zoom when they don't, and fits to them only when they can't
+   * all show at this zoom.
+   */
+  const showNodes = useCallback(
+    (ids: readonly string[]) => {
+      const el = wrapperRef.current;
+      const rect = boundsOf(nodesRef.current.filter((n) => ids.includes(n.id)).map((n) => nodeRect(n)));
+      if (!el || !rect) return;
+      const view = flowRef.current.getViewport();
+      const width = el.clientWidth - 2 * VIEW_ROOM.x;
+      const height = el.clientHeight - 2 * VIEW_ROOM.y;
+      if (boundsVisible(rect, { ...view, x: view.x - VIEW_ROOM.x, y: view.y - VIEW_ROOM.y }, width, height, 0)) return;
+      if (rect.width * view.zoom > width || rect.height * view.zoom > height) {
+        revealFit([...ids]);
+        return;
+      }
+      markViewportManual();
+      moveRef.current = flowRef.current.setCenter(rect.x + rect.width / 2, rect.y + rect.height / 2, { zoom: view.zoom, duration: reducedMotionRef.current ? 0 : 200 });
+    },
+    [markViewportManual, reducedMotionRef, revealFit],
+  );
   useEffect(() => {
     revealInsertedRef.current = (id) => void showNode(id);
   }, [showNode]);
@@ -1218,6 +1247,8 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     paste: () => void paste(),
     rename: (nodeId) => ui.getState().set({ editingTitle: nodeId }),
     chooseLayerProperty,
+    // The app's Explain with Claude ("ai.explain"), where the app registers it.
+    ...(appCommands?.registry.get(EXPLAIN_COMMAND) ? { explain: () => void appCommands.registry.run(EXPLAIN_COMMAND) } : {}),
   });
 
   portMenuRef.current = (event, nodeId, port) => {
@@ -1361,13 +1392,25 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       .map((id) => (m.nodeIds.has(id) && flowNodeKind(id) === "patch" ? id : m.nodeIds.has(layerNodeId(id)) ? layerNodeId(id) : undefined))
       .filter((id): id is string => id !== undefined);
     if (!ids.length) return;
+    if (reveal.gentle) {
+      // A graph that isn't showing yet takes its usual first view, then brings them in.
+      if (initializedRef.current && fittedRef.current) showNodes(ids);
+      else pendingShowRef.current = ids;
+      return;
+    }
     // Entering a component and revealing in one tick: React Flow isn't ready yet, so onInit fits to these instead.
     if (initializedRef.current) revealFit(ids);
     else {
       markViewportManual();
       pendingRevealRef.current = ids;
     }
-  }, [reveal, componentId, markViewportManual, revealFit]);
+  }, [reveal, componentId, markViewportManual, revealFit, showNodes]);
+  useEffect(() => {
+    const ids = pendingShowRef.current;
+    if (!fitted || !ids) return;
+    pendingShowRef.current = null;
+    void nextFrame().then(() => mountedRef.current && showNodes(ids));
+  }, [fitted, showNodes]);
 
   // -- Commands -------------------------------------------------------------
   const activate = useCommandTarget(commands, { actions, ui, flow: () => flowRef.current, session, componentId, hovering: () => hoveringRef.current, markManual: markViewportManual });

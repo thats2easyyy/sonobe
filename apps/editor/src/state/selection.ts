@@ -36,6 +36,11 @@ export interface RevealRequest {
   ids: Id[];
   /** Increments per request so panels can react to repeated reveals of the same ids. */
   nonce: number;
+  /**
+   * The person is following along (a name pressed in the Assistant's chat): the patch editor keeps its
+   * zoom and moves only when the items aren't in view, instead of fitting the view to them.
+   */
+  gentle?: boolean;
 }
 
 export interface SelectionItems {
@@ -76,7 +81,7 @@ export interface SelectionState {
   setFocusedPanel: (panel: PanelId | null) => void;
   setPatchViewport: (componentId: Id, viewport: Viewport) => void;
   setCanvasViewport: (componentId: Id, viewport: Viewport) => void;
-  requestReveal: (component: Id, ids: readonly Id[]) => void;
+  requestReveal: (component: Id, ids: readonly Id[], options?: { gentle?: boolean }) => void;
   /** Drop components and ids that don't exist in `doc`. No-op (no store update) when nothing changed. */
   prune: (doc: SonobeDocument) => void;
 }
@@ -200,8 +205,8 @@ export function createSelectionStore(options: SelectionStoreOptions = {}): Selec
     setCanvasViewport(componentId, viewport) {
       set({ canvasViewports: { ...get().canvasViewports, [componentId]: { ...viewport } } });
     },
-    requestReveal(component, ids) {
-      set({ reveal: { component, ids: [...ids], nonce: ++revealCounter } });
+    requestReveal(component, ids, options) {
+      set({ reveal: { component, ids: [...ids], nonce: ++revealCounter, ...(options?.gentle ? { gentle: true } : {}) } });
     },
     prune(doc) {
       const s = get();
