@@ -21,6 +21,9 @@ export interface OpenOptions {
   welcome?: boolean;
 }
 
+/** Where e2e/production.setup.ts builds the editor. Not apps/editor/dist, which a running Sonobe may be showing, and not test-results, which CI uploads. */
+export const PRODUCTION_BUILD = fileURLToPath(new URL("../node_modules/.cache/sonobe-e2e/editor", import.meta.url));
+
 /** localStorage key the welcome screen uses to remember it was shown (apps/editor/src/app/welcome/welcomeStore.ts). */
 export const WELCOME_SEEN_KEY = "sonobe.welcome.v1";
 
