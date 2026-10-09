@@ -398,15 +398,112 @@ describe("sonobe mcp relay: the app restarts under a session", () => {
     expect(r.seen.filter((s) => s.body?.method === "tools/call")).toHaveLength(1);
   });
 
-  it("keeps the Reopen Sonobe message when the app doesn't come back in time", async () => {
+  it("says the connection is lost when the app doesn't come back in time, and to open Sonobe and try again", async () => {
     let asked = 0;
     const r = relay(() => Promise.reject(refused()), { health: () => (asked++ === 0 ? Response.json({ ok: true }) : Promise.reject(refused())), reconnectMs: 40 });
     r.send(call(1, "list_documents"));
     await until(() => r.lines.length === 1);
     r.stdin.end();
     await r.done;
-    expect((r.lines[0]!.error as { message: string }).message).toBe("Lost connection to the Sonobe app (ECONNREFUSED). Reopen Sonobe, then reconnect this MCP server; or use `sonobe mcp --headless <project>` to work without the app.");
+    expect((r.lines[0]!.error as { message: string }).message).toBe("Lost connection to the Sonobe app (ECONNREFUSED). Open Sonobe and try again; or use `sonobe mcp --headless <project>` to work without the app.");
     expect(r.seen.filter((s) => s.path === "/mcp")).toHaveLength(1);
+  });
+
+  it("waits once for an app that was quit: the next calls fail at once, and the first one after Sonobe is opened again finds it", async () => {
+    let gone = false;
+    let looks = 0;
+    const r = relay((message, signal, token) => (token === "t" ? Promise.reject(refused()) : answering(message, signal, token)), {
+      health: (token) => (token === "t2" || !gone ? Response.json({ ok: true }) : (looks++, Promise.reject(refused()))),
+      reconnectMs: 400,
+    });
+    await until(() => r.errors.some((e) => e.includes("relaying to Sonobe")));
+    gone = true;
+    let began = Date.now();
+    r.send(read(1));
+    await until(() => r.lines.length === 1);
+    // The first failure waits the whole time, in case this is a restart.
+    expect(Date.now() - began).toBeGreaterThanOrEqual(380);
+    const looksWhileWaiting = looks;
+    began = Date.now();
+    r.send(read(2));
+    await until(() => r.lines.length === 2);
+    r.send(call(3, "list_documents"));
+    await until(() => r.lines.length === 3);
+    // The next ones look once each and fail at once: Sonobe was quit, not restarted.
+    expect(Date.now() - began).toBeLessThan(300);
+    expect(looks).toBe(looksWhileWaiting + 2);
+    for (const line of r.lines) expect((line.error as { message: string }).message).toContain("Lost connection to the Sonobe app (ECONNREFUSED). Open Sonobe and try again");
+
+    // Sonobe is opened again: the next read goes through with no reconnect, and waiting is back for the next restart.
+    await writeFile(path.join(home, "mcp.json"), JSON.stringify({ port: 2, url: "http://127.0.0.1:2/mcp", token: "t2", pid: 222 }));
+    r.send(read(4));
+    await until(() => r.lines.length === 4);
+    r.stdin.end();
+    await r.done;
+    expect(r.lines[3]).toEqual({ jsonrpc: "2.0", id: 4, result: {} });
+    expect(r.errors.filter((e) => e.includes("Sonobe restarted"))).toHaveLength(1);
+  });
+
+  it("keeps waiting for a restart when a heartbeat's single look came up empty meanwhile", async () => {
+    // The heartbeat looks once every 10 ms and finds nothing; the call's own wait is not cut short by joining one of those looks.
+    const r = relay(restarted, { heartbeatMs: 10, health: restartedHealth(), clients: (_method, token) => (token === "t" ? Promise.reject(refused()) : new Response(null, { status: 204 })) });
+    r.send(INITIALIZE);
+    await until(() => r.errors.some((e) => e.includes("request failed")));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(r.lines).toEqual([]);
+    await relaunch(r);
+    await until(() => r.lines.length === 1);
+    r.stdin.end();
+    await r.done;
+    expect(r.lines.map((l) => l.id)).toEqual([0]);
+  });
+
+  it("never sends a tool call on to a launch a heartbeat found first", async () => {
+    // The old launch refuses the call only after the heartbeat has adopted the new one: by then the relay's own
+    // look finds the launch it already knows, and the call still wasn't meant for it.
+    let refuse!: () => void;
+    const held = new Promise<void>((resolve) => (refuse = resolve));
+    const r = relay((message, signal, token) => (token === "t" ? held.then(() => Promise.reject(refused())) : answering(message, signal, token)), {
+      heartbeatMs: 10,
+      health: restartedHealth(),
+      clients: (_method, token) => (token === "t" ? Promise.reject(refused()) : new Response(null, { status: 204 })),
+    });
+    r.send(call(1, "add_layers"));
+    await until(() => r.seen.some((s) => s.body?.method === "tools/call"));
+    await relaunch(r);
+    await until(() => r.errors.some((e) => e.includes("Sonobe restarted")));
+    refuse();
+    await until(() => r.lines.length === 1);
+    r.stdin.end();
+    await r.done;
+    expect((r.lines[0]!.error as { message: string }).message).toContain("Sonobe restarted before this call reached it, so it wasn't run.");
+    expect(r.seen.filter((s) => s.body?.method === "tools/call").map((s) => s.token)).toEqual(["t"]);
+  });
+
+  it("doesn't send a batch with a tool call in it twice either, and answers each request in it", async () => {
+    const stdin = (r: ReturnType<typeof relay>, batch: unknown[]) => r.stdin.write(`${JSON.stringify(batch)}\n`);
+    const batchSeen = (r: ReturnType<typeof relay>) => r.seen.filter((s) => s.path === "/mcp" && Array.isArray(s.body));
+    const cutOffOnce = () => {
+      let cuts = 0;
+      return ((message, signal, token) => (Array.isArray(message) && cuts++ === 0 ? Promise.reject(reset()) : Array.isArray(message) ? Promise.resolve(Response.json(message.filter((m) => m.id !== undefined).map((m) => ({ jsonrpc: "2.0", id: m.id, result: {} })))) : answering(message, signal, token))) as AppHandler;
+    };
+    const withCall = relay(cutOffOnce());
+    stdin(withCall, [{ jsonrpc: "2.0", ...read(1) }, { jsonrpc: "2.0", ...call(2, "apply_ops") }, { jsonrpc: "2.0", method: "notifications/progress", params: {} }]);
+    await until(() => withCall.lines.length === 2);
+    withCall.stdin.end();
+    await withCall.done;
+    expect(batchSeen(withCall)).toHaveLength(1);
+    expect(withCall.lines.map((l) => l.id)).toEqual([1, 2]);
+    for (const line of withCall.lines) expect((line.error as { message: string }).message).toContain("may or may not have been applied");
+
+    // A batch of reads alone is sent again, like a read.
+    const reads = relay(cutOffOnce());
+    stdin(reads, [{ jsonrpc: "2.0", ...read(1) }, { jsonrpc: "2.0", ...read(2) }]);
+    await until(() => reads.lines.length === 2);
+    reads.stdin.end();
+    await reads.done;
+    expect(batchSeen(reads)).toHaveLength(2);
+    expect(reads.lines).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }, { jsonrpc: "2.0", id: 2, result: {} }]);
   });
 
   it("finds a restarted app from a heartbeat too, so an idle session is listed again", async () => {

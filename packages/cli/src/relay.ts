@@ -13,8 +13,10 @@
  * The app can restart under a running session (an update does): its port and token change. When a
  * request is refused or rejected, the relay reads mcp.json again, waits for the new launch to answer
  * /health, says hello to it, and carries on. Requests that never reached the app are sent again, and so
- * are reads that were cut off. A tool call is never sent twice across a restart: the relay can't know
- * whether a cut-off one was applied, and a new launch may have another document in front. Node only.
+ * are reads that were cut off. A tool call is never sent twice across a restart, alone or in a batch: the
+ * relay can't know whether a cut-off one was applied, and a new launch may have another document in
+ * front. When the wait finds nothing, Sonobe was quit rather than restarted: later requests look once
+ * and fail at once, and the first one after Sonobe is opened again finds it. Node only.
  */
 
 import { randomUUID } from "node:crypto";
@@ -51,7 +53,7 @@ export interface RelayOptions {
   version?: string;
   /** How often the relay says it's still there. Default 30 s. */
   heartbeatMs?: number;
-  /** How long a failed request waits for the app to come back (a restart for an update). Default 20 s. */
+  /** How long a failed request waits for the app to come back (a restart for an update), until one such wait has found nothing. Default 20 s. */
   reconnectMs?: number;
   /** How often it looks for the app meanwhile. Default 500 ms. */
   reconnectPollMs?: number;
@@ -249,7 +251,7 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       // 5xx: the app is busy; the next heartbeat tries again. 4xx: it won't list this session.
       if (res.status >= 500 && res.status !== 501) return;
       // 401: the token is an earlier launch's. Look once for the app that replaced it.
-      if (res.status === 401) return void lookForApp();
+      if (res.status === 401) return void look();
       announcing = false;
       const text = await res.text().catch(() => "");
       const reason = (() => {
@@ -266,43 +268,46 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       );
     } catch (err) {
       // Not answering right now; the next heartbeat tries again. Refused means the app is gone: look once for a new launch.
-      if ((err as { cause?: { code?: unknown } }).cause?.code === "ECONNREFUSED") void lookForApp();
+      if ((err as { cause?: { code?: unknown } }).cause?.code === "ECONNREFUSED") void look();
     }
   };
 
   /**
-   * Finds the app again after it stopped answering: reads mcp.json and asks /health until a launch answers
-   * or `waitMs` is over. A new launch (another token, address or process) is adopted and greeted, with one
-   * line on stderr. Resolves "new" for one, "same" when the launch it knew answers again, and null when
-   * nothing came back. One search runs at a time; later callers join it.
+   * One look for the app after it stopped answering: reads mcp.json and asks /health. Resolves whether a
+   * launch answered. A new launch (another token, address or process) is adopted and greeted, with one
+   * line on stderr. One look runs at a time and callers share it. A heartbeat looks once, so an idle
+   * session finds a restarted app within a heartbeat or two.
    */
-  let searching: Promise<"new" | "same" | null> | null = null;
+  let looking: Promise<boolean> | null = null;
+  /** A full wait found no app: Sonobe was quit, not restarted. Until a launch answers, a failed request looks once instead of waiting again. */
+  let gaveUp = false;
   let ended = false;
-  const reconnect = (waitMs: number): Promise<"new" | "same" | null> =>
-    (searching ??= (async () => {
-      const deadline = Date.now() + waitMs;
-      for (;;) {
-        const next = await readConnectionFile(options.home).catch(() => null);
-        if (next && (await checkHealth(next, fetchImpl)).ok) {
-          if (next.token === connection.token && next.url === connection.url && next.pid === connection.pid) return "same";
-          connection = next;
-          // The new launch has never heard of this session.
-          announcing = true;
-          announced = false;
-          if (hello) hello = announce();
-          stderr.write(`sonobe mcp: Sonobe restarted. Relaying to it again at ${next.url}\n`);
-          return "new";
-        }
-        if (ended || Date.now() >= deadline) return null;
-        await new Promise((resolve) => setTimeout(resolve, options.reconnectPollMs ?? 500));
-      }
+  function look(): Promise<boolean> {
+    return (looking ??= (async () => {
+      const next = await readConnectionFile(options.home).catch(() => null);
+      if (!next || !(await checkHealth(next, fetchImpl)).ok) return false;
+      gaveUp = false;
+      if (next.token === connection.token && next.url === connection.url && next.pid === connection.pid) return true;
+      connection = next;
+      // The new launch has never heard of this session.
+      announcing = true;
+      announced = false;
+      if (hello) hello = announce();
+      stderr.write(`sonobe mcp: Sonobe restarted. Relaying to it again at ${next.url}\n`);
+      return true;
     })().finally(() => {
-      searching = null;
+      looking = null;
     }));
-  /** One quiet look, from a heartbeat: an idle session finds a restarted app within a heartbeat or two. */
-  function lookForApp(): void {
-    void reconnect(0);
   }
+  /** Looks every 500 ms until a launch answers or `waitMs` is over. Each caller keeps its own deadline, so one that waits is never cut short by a heartbeat's single look. */
+  const reconnect = async (waitMs: number): Promise<boolean> => {
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+      if (await look()) return true;
+      if (ended || Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, options.reconnectPollMs ?? 500));
+    }
+  };
   /** Say hello on the client's first message, and again once it names itself (initialize, or 2026-07-28 metadata). */
   const noticeClient = (message: JsonRpcMessage) => {
     const meta = message.params?._meta as Record<string, unknown> | undefined;
@@ -336,14 +341,13 @@ export async function runRelay(options: RelayOptions): Promise<number> {
     emit({ jsonrpc: "2.0", id, error: { code, message } });
   };
 
-  /** How one POST failed to get through: the app never took it, or the connection broke with it under way. */
-  type Lost = { kind: "refused" | "cut-off"; reason: string };
+  /** How one POST failed to get through: the app never took it, or the connection broke with it under way. `to` is the launch it was sent to. */
+  type Lost = { kind: "refused" | "cut-off"; reason: string; to: ConnectionFile };
 
   /** One POST of `message` to the launch the relay knows. Null once it's dealt with (answered, failed for a reason of its own, or cancelled). */
   const sendOnce = async (message: JsonRpcMessage | JsonRpcMessage[], signal: AbortSignal): Promise<Lost | null> => {
     const single = Array.isArray(message) ? undefined : message;
     const headers: Record<string, string> = {
-      authorization: `Bearer ${connection.token}`,
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       [CLIENT_HEADER]: clientId,
@@ -362,11 +366,15 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       headers["mcp-protocol-version"] = legacyVersion;
     }
     const id = single?.id ?? undefined;
+    let to = connection;
     try {
       // Tool calls wait for the hello (at most its 3 s timeout), so the app knows whose call it is.
       if (single?.method === "tools/call" && hello) await hello;
       if (signal.aborted) return null;
-      const res = await fetchImpl(connection.url, {
+      // A heartbeat may have found a new launch meanwhile: the request goes to the launch the relay knows now.
+      to = connection;
+      headers.authorization = `Bearer ${to.token}`;
+      const res = await fetchImpl(to.url, {
         method: "POST",
         headers,
         body: JSON.stringify(message),
@@ -376,7 +384,7 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       // The app turned the token down before doing anything: it belongs to an earlier launch.
       if (res.status === 401) {
         await res.body?.cancel().catch(() => undefined);
-        return { kind: "refused", reason: "the app rejected the token" };
+        return { kind: "refused", reason: "the app rejected the token", to };
       }
       const type = res.headers.get("content-type") ?? "";
       if (type.includes("text/event-stream") && res.body) {
@@ -425,28 +433,37 @@ export async function runRelay(options: RelayOptions): Promise<number> {
         return null;
       }
       // Refused: nothing was listening, so the app never saw it. Anything else broke with the request under way.
-      return { kind: reason === "ECONNREFUSED" ? "refused" : "cut-off", reason };
+      return { kind: reason === "ECONNREFUSED" ? "refused" : "cut-off", reason, to };
     }
   };
 
   const forward = async (message: JsonRpcMessage | JsonRpcMessage[]) => {
     const single = Array.isArray(message) ? undefined : message;
     const id = single?.id ?? undefined;
+    // The requests in it, each of which gets an answer when the message is lost. A batch counts as a tool call when it holds one.
+    const requests = (Array.isArray(message) ? message : [message]).filter((m) => typeof m?.method === "string" && m.id !== undefined && m.id !== null);
+    const hasToolCall = requests.some((m) => m.method === "tools/call");
+    const failAll = (text: string) => {
+      for (const request of requests) fail(request.id, text);
+    };
     const controller = new AbortController();
     if (id !== undefined && id !== null) inflight.set(id, controller);
     try {
       let lost = await sendOnce(message, controller.signal);
       if (!lost) return;
-      // The app went away under the session, as it does when it restarts for an update. Find it again.
-      const back = await reconnect(options.reconnectMs ?? 20_000);
+      // The app went away under the session, as it does when it restarts for an update. Find it again. After a wait that
+      // found nothing, Sonobe was quit: later requests look once, so they fail at once and still find it when it's opened again.
+      const back = await reconnect(gaveUp ? 0 : (options.reconnectMs ?? 20_000));
       if (controller.signal.aborted) return;
-      if (back && single?.method === "tools/call" && (lost.kind === "cut-off" || back === "new")) {
+      if (!back) gaveUp = true;
+      // Judged by the launch this request went to: a heartbeat may have found the new one first.
+      const restarted = connection !== lost.to;
+      if (back && hasToolCall && (lost.kind === "cut-off" || restarted)) {
         // Never sent twice: a cut-off call may have been applied, and a new launch may have another document in front.
-        fail(
-          id,
+        failAll(
           lost.kind === "refused"
             ? "Sonobe restarted before this call reached it, so it wasn't run. The relay has found Sonobe again: check what's open (list_documents), then try again."
-            : back === "new"
+            : restarted
               ? "Sonobe restarted while this call was running, so it may or may not have been applied. The relay has found Sonobe again: check what's open and what changed (list_documents, list_history) before trying again."
               : "The connection to Sonobe broke while this call was running, so it may or may not have been applied. Sonobe is still there: check what changed (list_history) before trying again.",
         );
@@ -454,10 +471,7 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       }
       if (back) lost = await sendOnce(message, controller.signal);
       if (!lost) return;
-      fail(
-        id,
-        `Lost connection to the Sonobe app (${lost.reason}). Reopen Sonobe, then reconnect this MCP server; or use \`sonobe mcp --headless <project>\` to work without the app.`,
-      );
+      failAll(`Lost connection to the Sonobe app (${lost.reason}). Open Sonobe and try again; or use \`sonobe mcp --headless <project>\` to work without the app.`);
     } finally {
       if (id !== undefined && id !== null) inflight.delete(id);
     }
