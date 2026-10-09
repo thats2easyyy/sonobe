@@ -11,6 +11,9 @@
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
  * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
  * - updates are off for this launch (SONOBE_UPDATES=off): the app says so, never loads the updater and asks no feed
+ * - the entry is dist/boot.cjs, and the launch leaves Node's compile cache for main.cjs in the data folder, under this
+ *   version's name, with the signature inside the bundle untouched; a second launch that has nowhere to keep one
+ *   starts all the same
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
  * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), and runs from a copy outside
  *   the checkout, where it has nothing but its own bundle to load
@@ -129,7 +132,7 @@ try {
   if (mac) for (const file of ["icon.icns", "licenses/LICENSE.electron.txt", "licenses/LICENSES.chromium.html"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   const { listPackage, extractFile } = await import("@electron/asar");
   const asarFiles = listPackage(path.join(resources, "app.asar")).map((f) => f.replaceAll("\\", "/"));
-  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
+  for (const file of ["/package.json", "/dist/boot.cjs", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   const under = (dir) => readdirSync(path.join(resources, dir), { recursive: true }).map((f) => String(f).replaceAll("\\", "/"));
   const editorMaps = under("editor").filter((f) => f.endsWith(".map"));
@@ -147,7 +150,10 @@ try {
   log(`app.asar holds ${asarFiles.length} entries; editor (no source maps), CLI, guides and licenses are in Resources`);
 
   // What this build can do with an update, as the app reads it (scripts/signing.ts).
-  const recorded = JSON.parse(extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8")).sonobe;
+  const packaged = JSON.parse(extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8"));
+  const recorded = packaged.sonobe;
+  // The entry turns on the compile cache and then loads main.cjs, which can't cache itself (electron/boot.ts).
+  assert(packaged.main === "dist/boot.cjs", "the packaged package.json's main is dist/boot.cjs", packaged.main);
   // Where a downloaded update waits (~/Library/Caches/sonobe-updater on a Mac). The first signed release freezes
   // the name. A --dir build has no app-update.yml, and never checks for updates.
   const updateConfig = path.join(resources, "app-update.yml");
@@ -245,7 +251,8 @@ try {
     const home = path.join(temp, "home");
     const userData = path.join(temp, "userData");
     const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
-    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED"]) delete env[key];
+    // NODE_COMPILE_CACHE would send the app's compile cache to the shell's folder, and NODE_DISABLE_COMPILE_CACHE turn it off.
+    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]) delete env[key];
     if (values["mcp-port"]) env.SONOBE_MCP_PORT = values["mcp-port"];
     // macOS reads -AppleLanguages as the app's preferred languages, as a non-English system would set them.
     app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 });
@@ -304,10 +311,35 @@ try {
     assert(updaterLoaded === false && !existsSync(path.join(userData, ".updaterId")), "the updater was never loaded and left nothing in the user data folder", { updaterLoaded });
     log("updates are off for this launch: no check, and the updater was never loaded");
 
+    // The compile cache is on, in this version's folder under the data folder (electron/compile-cache.ts).
+    const cache = await app.evaluate(() => globalThis.__sonobeTest.compileCache());
+    const cacheHome = path.join(userData, "compile-cache", `app-${packaged.version}`);
+    assert(cache.home === cacheHome && cache.dir?.startsWith(cacheHome), "Node's compile cache is in <userData>/compile-cache/app-<version>", cache);
+
     await app.close();
     app = null;
     await poll(() => !existsSync(tokenFile), { timeout: 5000, message: "mcp.json removal" });
     log("quit cleanly (mcp.json removed)");
+
+    // What the launch left: main.cjs's compiled code (Node keeps it one folder down, named after the runtime), and nothing
+    // changed inside the bundle, whose signature still verifies.
+    const cached = readdirSync(cacheHome, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => statSync(path.join(entry.parentPath, entry.name)).size);
+    assert(Math.max(0, ...cached) >= 500 * 1024, "the launch left main.cjs's compile cache (a file of 500 KB or more) in the data folder", cached);
+    if (mac) execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "pipe" });
+    log(`compile cache: ${cached.length} file${cached.length === 1 ? "" : "s"}, ${(cached.reduce((sum, size) => sum + size, 0) / 1024 / 1024).toFixed(1)} MB in compile-cache/app-${packaged.version}${mac ? "; codesign --verify still passes" : ""}`);
+
+    // With nowhere to keep a cache (a file sits where its folder goes) the app starts all the same, without one.
+    const blocked = path.join(temp, "userData-no-cache");
+    mkdirSync(blocked);
+    writeFileSync(path.join(blocked, "compile-cache"), "");
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio"], env: { ...env, SONOBE_USER_DATA: blocked, SONOBE_HOME: path.join(temp, "home-no-cache") }, timeout: 60_000 });
+    const second = await app.firstWindow();
+    await poll(() => second.evaluate(() => (document.getElementById("root")?.childElementCount ?? 0) > 0), { timeout: 15_000, message: "the editor to mount in a launch without a compile cache" });
+    const uncached = await app.evaluate(() => globalThis.__sonobeTest.compileCache());
+    assert(uncached.dir === null, "a launch that can't make its cache folder runs without a compile cache", uncached);
+    await app.close();
+    app = null;
+    log("a launch with no folder for the compile cache starts and renders the editor");
     log(`PASS (${verdict})`);
   }
 } catch (err) {

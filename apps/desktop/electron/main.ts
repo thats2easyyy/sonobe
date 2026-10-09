@@ -2,6 +2,7 @@
 
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { flushCompileCache, getCompileCacheDir } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,7 +22,8 @@ import { registerAssistant, type AssistantRegistration } from "./assistant/regis
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
-import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import { compileCacheDir, compileCacheKey, pruneCompileCaches } from "./compile-cache.ts";
+import { APP_NAME, launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
@@ -38,7 +40,6 @@ import { createQuitResume, moveConflict, reopenPlan, restartConfirmation, restar
 import type { NativeUpdaterLike } from "./updater-driver.ts";
 import { createUpdateController, createUpdateSettings, installLocation, manualCheckDialog, updateMode, type UpdateController, type UpdateDriver, type UpdateModeResult } from "./updates.ts";
 
-const APP_NAME = "Sonobe";
 const VERSION = __SONOBE_VERSION__;
 const platform = toHostPlatform(process.platform);
 
@@ -513,12 +514,32 @@ function main(): void {
   const loadUpdateDriver = (): Promise<UpdateDriver> => {
     if (testUpdateDriver) return Promise.resolve(testUpdateDriver);
     return (updateDriver ??= Promise.resolve()
-      .then(() => (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) }))
+      .then(() => {
+        const driver = (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) });
+        // updater.cjs compiled just now: its entry joins the cache, so the next first check doesn't compile it again.
+        keepCompileCache();
+        return driver;
+      })
       .catch((err: unknown) => {
         updateDriver = null;
         throw err;
       }));
   };
+
+  /** Where boot.ts asked Node to keep this build's compile cache (compile-cache.ts). */
+  const compileCacheHome = () => compileCacheDir(app.getPath("userData"), compileCacheKey({ version: VERSION, packaged: app.isPackaged }));
+
+  /**
+   * Writes Node's compile cache now. Node writes it when the process exits, which a crash, a force quit and app.exit() all
+   * skip, and then a version's first launch would leave nothing for its second.
+   */
+  function keepCompileCache(): void {
+    try {
+      flushCompileCache();
+    } catch (err) {
+      log("warn", `Couldn't write the compile cache: ${errorMessage(err)}`);
+    }
+  }
 
   const requireUpdates = (): UpdateController => {
     if (!updates) throw new Error("Updates aren't ready yet.");
@@ -1589,6 +1610,15 @@ function main(): void {
     // A window that never shows (closed at once) doesn't hold updates back for good.
     setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
 
+    // The compile cache is written once launch is over, and an update's old folders go then too. Only a packaged app removes
+    // any, and only other versions of itself: a checkout shares the data folder with an installed app, whose cache isn't its to delete.
+    void first.shown.then(() =>
+      setTimeout(() => {
+        keepCompileCache();
+        if (app.isPackaged) void pruneCompileCaches(path.dirname(compileCacheHome()), path.basename(compileCacheHome()), "app-");
+      }, UPDATES_START_MS).unref(),
+    );
+
     if (env.testHooks) {
       (globalThis as Record<string, unknown>).__sonobeTest = {
         invokeRenderer: (method: string, params?: unknown, opts?: { timeoutMs?: number }) => {
@@ -1615,6 +1645,8 @@ function main(): void {
         popOutViewer: (options?: { alwaysOnTop?: boolean }) => popOutViewer(options),
         closeViewerWindow: () => closeViewerWindow(),
         secretsStatus: () => secrets?.status() ?? null,
+        /** Where Node keeps the compile cache in this run (null without one), and where this build's belongs. */
+        compileCache: () => ({ dir: getCompileCacheDir() ?? null, home: compileCacheHome() }),
         /** MCP notifications published so far (outline/diagnostics updates and list changes). */
         notifications: () => {
           if (resourceTimer) {

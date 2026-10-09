@@ -5,6 +5,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | Path | What's there |
 | --- | --- |
 | `electron/main.ts` | Lifecycle, windows, IPC, the MCP endpoint, phone preview, pop-out viewer, simulation frames |
+| `electron/boot.ts`, `electron/compile-cache.ts` | The app's entry: it turns on Node's compile cache in the data folder, then loads the main bundle |
 | `electron/preload.ts`, `electron/host-api.d.ts` | `window.sonobeHost`, the API the editor uses |
 | `electron/app-host.ts` | The `SonobeHost` MCP tools run against, bridged to the editor's RPC handlers |
 | `electron/rpc.ts` | Main's calls into the editor page. Calls a reloading or crashed page hadn't answered fail at once (`page_gone`, MCP `editor_reloaded`), and new calls wait for the next page's handlers |
@@ -24,7 +25,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 | Command | Does |
 | --- | --- |
-| `npm run build` | Bundles main, preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
+| `npm run build` | Bundles main and its entry (`boot.cjs`, package.json's `main`, which turns on Node's compile cache and loads `main.cjs`), preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
 | `npm run start` | Builds and launches against `apps/editor/dist` (or `SONOBE_DEV_URL`) |
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
@@ -82,6 +83,7 @@ It reads the bundle first, then runs it:
 - **Update capability.** The packaged `package.json`'s `sonobe` field matches the real signature.
 - **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature or without Apple's secure timestamp.
 - **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and again from a copy outside the checkout (under `release/` it could load a package from the repository's `node_modules` that the bundle left out), and the app launches, shows the editor, answers `/health` and quits cleanly.
+- **Compile cache.** The entry is `dist/boot.cjs`, the launch leaves `main.cjs`'s compiled code in `compile-cache/app-<version>` under the data folder, and `codesign --verify` still passes afterwards: nothing is written inside the app. A second launch with nowhere to keep a cache starts all the same.
 
 | Flag | Does |
 | --- | --- |

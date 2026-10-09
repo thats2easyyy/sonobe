@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Bundles the Electron main process, the preload, the updater, the phone/pop-out web player, the scene
- * renderer for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides and the
- * examples' READMEs and tests next to main.cjs, and on macOS compiles the SF Symbols helper into
- * dist/bin (scripts/sfsymbol.ts).
+ * Bundles the Electron main process and the small entry that loads it (boot.cjs, package.json's "main"), the
+ * preload, the updater, the phone/pop-out web player, the scene renderer for simulation screenshots, and the
+ * `sonobe` CLI with esbuild, copies the MCP agent guides and the examples' READMEs and tests next to main.cjs,
+ * and on macOS compiles the SF Symbols helper into dist/bin (scripts/sfsymbol.ts).
  *
  *   node scripts/build.mjs               one-off build into dist/
  *   node scripts/build.mjs --watch       rebuild on change (skips the CLI bundle)
@@ -80,6 +80,9 @@ const browserPage = {
 };
 
 const targets = [
+  // The app's entry: it turns on Node's compile cache and requires main.cjs, which a module can't do for itself
+  // (electron/compile-cache.ts). main.cjs stays a file of its own, so it is what the cache holds.
+  { ...common, entryPoints: ["electron/boot.ts"], outfile: "dist/boot.cjs" },
   {
     ...common,
     entryPoints: ["electron/main.ts"],
