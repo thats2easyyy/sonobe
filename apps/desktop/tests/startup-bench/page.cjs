@@ -55,7 +55,9 @@
     done = true;
     observer.disconnect();
     const paint = Object.fromEntries(performance.getEntriesByType("paint").map((entry) => [entry.name, entry.startTime]));
-    ipcRenderer.send("sonobe-bench:result", { timeOrigin: performance.timeOrigin, marks, titles, paint, settled: settle !== null });
+    // Whether the app opened this window for something (ipc.ts LAUNCH_QUERY): then its first document is that, and no other.
+    const launching = new URLSearchParams(location.search).has("launch");
+    ipcRenderer.send("sonobe-bench:result", { timeOrigin: performance.timeOrigin, marks, titles, paint, launching, settled: settle !== null });
   }
 
   const observer = new MutationObserver(check);

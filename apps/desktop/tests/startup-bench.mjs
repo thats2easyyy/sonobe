@@ -9,7 +9,8 @@
  *   viewer's first frame are in the page), patch editor nodes
  *
  * and the intervals a change to launch moves: the main bundle's compile and evaluation, ready to the first
- * window, the window to the committed navigation, and that to the first React commit.
+ * window, the window to the committed navigation, and that to the first React commit (with a project: to the
+ * opened document, and from the window being shown to it).
  *
  *   npm run package -w @sonobe/desktop                    the app to time
  *   npm run bench:startup -w @sonobe/desktop              release/mac-<arch>/Sonobe.app
@@ -38,7 +39,8 @@
  * first launch of a copy also pays macOS's checks of a binary it hasn't seen.
  *
  * A run fails when an IPC handler was registered after the turn that created the first window (a page could
- * ask before it exists), or when the page logged "No handler registered".
+ * ask before it exists), when the page logged "No handler registered", or when a window the app opened for the
+ * project (a build that starts the editor on it) showed any other document first.
  *
  * Afterwards everything it started is killed, the copies are unregistered from LaunchServices, and the temp
  * folder is removed.
@@ -211,7 +213,8 @@ async function launch(target, { profile, project, welcome }) {
     "window created": main("windowCreated"),
     "navigation committed": main("navigated"),
     "first React commit": page(raw.page?.marks.shell),
-    "window shown": main("shown"),
+    // macOS doesn't send `show` while the display sleeps: then it's when the window was told to show.
+    "window shown": main("shown") ?? main("readyToShow"),
     "first contentful paint": page(raw.page?.paint["first-contentful-paint"]),
     "editor usable": page(raw.page?.marks.usable),
     "patch editor nodes": page(raw.page?.marks.patchNodes),
@@ -223,8 +226,15 @@ async function launch(target, { profile, project, welcome }) {
     "ready → window created": between(main("ready"), main("windowCreated")),
     "window created → navigation committed": between(main("windowCreated"), main("navigated")),
     "navigation committed → first React commit": between(main("navigated"), at["first React commit"]),
+    ...(project
+      ? {
+          "navigation committed → opened document": between(main("navigated"), at["opened document on screen"]),
+          // Negative when the document was in the page before the window was on screen.
+          "window shown → opened document": between(at["window shown"], at["opened document on screen"]),
+        }
+      : {}),
   };
-  return { at, intervals, titles: raw.page?.titles ?? [], late: raw.late, errors: raw.errors, why: raw.why, settled: raw.page?.settled === true, cached, compileCache: raw.compileCache !== null };
+  return { at, intervals, titles: raw.page?.titles ?? [], launching: raw.page?.launching === true, late: raw.late, errors: raw.errors, why: raw.why, settled: raw.page?.settled === true, cached, compileCache: raw.compileCache !== null };
 }
 
 function stats(numbers) {
@@ -296,6 +306,8 @@ try {
         if (run.why !== "page" || !run.settled) problems.push(`${scenario}, ${target.name}: a launch never showed everything it waited for (${run.why})`);
         if (run.late.length) problems.push(`${scenario}, ${target.name}: IPC handlers registered after the turn that created the window: ${[...new Set(run.late)].join(", ")}`);
         for (const error of run.errors) if (/No handler registered/.test(error)) problems.push(`${scenario}, ${target.name}: ${error}`);
+        // The app opened the window for the project: the editor starts on it, and the demo is never on screen.
+        if (project && run.launching && run.titles.join() !== path.basename(project, ".sonobe")) problems.push(`${scenario}, ${target.name}: the window was opened for the project and showed ${run.titles.join(" → ") || "nothing"}`);
         // A launch with a compile cache that found none isn't the warm launch these two scenarios are about.
         if (scenario !== "fresh" && run.compileCache && !run.cached) problems.push(`${scenario}, ${target.name}: the compile cache was empty after the first launch, so this run compiled everything again`);
       }
