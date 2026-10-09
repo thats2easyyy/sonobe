@@ -115,7 +115,7 @@ The first signed release freezes three things. Every installed copy carries them
 
 Two smaller things to decide before the first tag:
 
-- **The update cache folder**, `@sonobedesktop-updater`. `Resources/app-update.yml` in every app that ships in a DMG or zip names it as `updaterCacheDirName`, and electron-builder derives it from `apps/desktop`'s package name (`@sonobe/desktop`). It is where a downloaded update waits. Changing it later only leaves old downloads behind, but the first signed build already carries it, so pick the name you mean to keep.
+- **The update cache folder**, `sonobe-updater` (`~/Library/Caches/sonobe-updater` on a Mac). `Resources/app-update.yml` in every app that ships in a DMG or zip names it as `updaterCacheDirName`. electron-builder derives it from the packaged `package.json`'s name, which `scripts/package.mjs` sets to `sonobe` for that reason (`extraMetadata`); `@sonobe/desktop` would give `@sonobedesktop-updater`. It is where a downloaded update waits. Changing it later only leaves old downloads behind, but the first signed build carries it, so change it now if you want another name.
 - **The DMG is not signed.** `dmg.sign` is `false`, and only the app inside is signed, notarized and stapled. Gatekeeper assesses the app when someone opens the DMG and launches it, and that is what package verification checks; the clean-Mac check below is its first real test. A tool that assesses the disk image itself (`spctl -a -t open --context context:primary-signature`) rejects an unsigned one, as some managed Macs and download scanners do. If that matters to you, sign, notarize and staple the DMG too; nothing does today.
 
 ### The checklist

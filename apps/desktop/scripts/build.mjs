@@ -9,6 +9,9 @@
  *   node scripts/build.mjs --watch       rebuild on change (skips the CLI bundle)
  *   node scripts/build.mjs --arch x64    the SF Symbols helper for another architecture (arm64, x64 or
  *                                        universal; scripts/package.mjs passes the app's)
+ *   node scripts/build.mjs --version 0.1.1 --require-env SONOBE_USER_DATA,SONOBE_HOME
+ *                                        for an update rehearsal's builds (scripts/package.mjs passes them): the
+ *                                        version the app claims to be, and the variables it refuses to run without
  *   node scripts/build.mjs --licenses    also write dist/licenses, which a packaged app ships: Sonobe's
  *                                        license, the notices of every npm package in the bundles and the
  *                                        editor build, and of the packages those carry inside their own
@@ -44,6 +47,10 @@ if (archFlag >= 0 && !["arm64", "x64", "universal"].includes(helperArch)) {
   process.exit(1);
 }
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+/** The value after a flag, or undefined without the flag. */
+const flagValue = (name) => (process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : undefined);
+const version = flagValue("--version") ?? pkg.version;
+const requiredEnv = (flagValue("--require-env") ?? "").split(",").filter(Boolean);
 
 /** @type {import("esbuild").BuildOptions} */
 const common = {
@@ -57,7 +64,9 @@ const common = {
   // The metafiles say which npm packages each bundle holds (writeLicenses).
   metafile: true,
   logLevel: watch ? "info" : "warning",
-  define: { __SONOBE_VERSION__: JSON.stringify(pkg.version) },
+  // __SONOBE_LAUNCH_ENV__: the variables a rehearsal build must be launched with, comma-separated (electron/env.ts
+  // launchEnvProblem); empty otherwise. A string, so esbuild inlines it.
+  define: { __SONOBE_VERSION__: JSON.stringify(version), __SONOBE_LAUNCH_ENV__: JSON.stringify(requiredEnv.join(",")) },
 };
 
 /** @type {import("esbuild").BuildOptions} */

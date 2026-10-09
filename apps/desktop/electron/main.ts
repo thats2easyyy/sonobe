@@ -21,7 +21,7 @@ import { registerAssistant, type AssistantRegistration } from "./assistant/regis
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
-import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
@@ -1642,4 +1642,14 @@ function main(): void {
   });
 }
 
-main();
+// A build made for the update rehearsal (package.mjs --launch-env) stops here unless it was given its own data
+// folder: macOS opens an updated app without the environment of the one it replaced, and it must never run on the
+// person's real Sonobe data instead.
+const launchProblem = launchEnvProblem(__SONOBE_LAUNCH_ENV__.split(",").filter(Boolean), process.env);
+if (launchProblem) {
+  console.error(`[sonobe] ${launchProblem}`);
+  dialog.showErrorBox("This rehearsal build of Sonobe can't run here", launchProblem);
+  app.exit(1);
+} else {
+  main();
+}

@@ -328,6 +328,53 @@ describe("planSigning: a rehearsal", () => {
     });
   });
 
+  it("takes a stand-in version and the variables its Info.plist sets, for the two builds an update is tried between", () => {
+    const rehearsal = plan({
+      identity: "Jane",
+      out: "/tmp/rehearsal/n1",
+      version: "0.1.1",
+      launchEnv: ["SONOBE_USER_DATA=/tmp/rehearsal/userData", "SONOBE_UPDATE_FEED=http://127.0.0.1:5250/?a=b"],
+    });
+    expect(rehearsal).toMatchObject({
+      mode: "rehearsal",
+      version: "0.1.1",
+      launchEnv: { SONOBE_USER_DATA: "/tmp/rehearsal/userData", SONOBE_UPDATE_FEED: "http://127.0.0.1:5250/?a=b" },
+    });
+    // Without them a rehearsal builds the tree's version and bakes nothing in, so it runs like any app.
+    expect(plan({ identity: "Jane" })).toMatchObject({ version: undefined, launchEnv: {} });
+    expect(plan()).toMatchObject({ version: undefined, launchEnv: {} });
+  });
+
+  it("refuses a version that isn't three numbers, and a variable that isn't one of Sonobe's", () => {
+    expect(refusal({ identity: "Jane", version: "0.1.1-beta.1" })).toEqual({
+      message: "--version must be three numbers, like 0.1.1 (got 0.1.1-beta.1).",
+      hint: "The update feed is stable-only, so a version has no -beta or build suffix.",
+    });
+    for (const entry of ["PATH=/usr/bin", "SONOBE_HOME", "SONOBE_HOME=", "sonobe_home=/tmp/h"]) {
+      const refused = refusal({ identity: "Jane", launchEnv: [entry] });
+      expect(refused.message, entry).toBe(`--launch-env takes SONOBE_NAME=value (got ${entry}).`);
+      expect(refused.hint).toContain("--launch-env SONOBE_USER_DATA=");
+    }
+  });
+
+  it("keeps them out of a release and out of a local build", () => {
+    const release = { release: true, env: API_KEY, identities: [DEVELOPER_ID] };
+    expect(refusal({ ...release, version: "0.1.1" })).toEqual({
+      message: "--version is for a rehearsal build, and this is a release build.",
+      hint: "A release takes its version from the tree (node scripts/set-version.ts) and carries no environment of its own. Drop the flag.",
+    });
+    expect(refusal({ ...release, launchEnv: ["SONOBE_HOME=/tmp/h"] }).message).toBe(
+      "--launch-env is for a rehearsal build, and this is a release build.",
+    );
+    expect(refusal({ version: "0.1.1", launchEnv: ["SONOBE_HOME=/tmp/h"] })).toEqual({
+      message: "--version and --launch-env are for a rehearsal build, and this is a local build.",
+      hint: 'Add --identity "<name>" to build a rehearsal: signed with that certificate, not notarized, not distributable.',
+    });
+    // A release empties its output folder first, so it only ever builds into apps/desktop/release.
+    expect(refusal({ ...release, out: "/Users/me/Desktop" }).message).toMatch(/--out doesn't apply/);
+    expect(plan({ out: "/tmp/local" }).mode).toBe("local");
+  });
+
   it("lists the keychain's certificates when the name matches none or several", () => {
     expect(refusal({ identity: "Nobody" })).toEqual({
       message: '--identity "Nobody" matches no code signing certificate in this Mac\'s keychain.',
@@ -617,7 +664,7 @@ describe("electron-builder.yml", () => {
     }
     expect(yml).not.toMatch(setting("forceCodeSigning"));
     const packageScript = read("../scripts/package.mjs");
-    expect(packageScript).toContain("mac: macSigningOptions(plan, entitlements, signAsync)");
+    expect(packageScript).toContain("mac: { ...macSigningOptions(plan, entitlements, signAsync),");
     expect(packageScript).toContain('publish: "never"');
     expect(packageScript).not.toMatch(/publish: "(always|onTag|onTagOrDraft)"/);
   });
@@ -647,8 +694,15 @@ describe("electron-builder.yml", () => {
       /^  target:\n    - target: dmg\n      arch: \[arm64, x64\]\n    - target: zip\n/m,
     );
     const packageScript = read("../scripts/package.mjs");
-    // What the build can do with an update, for the app to read from its packaged package.json.
-    expect(packageScript).toContain("extraMetadata: { sonobe: plan.build }");
+    // What the build can do with an update, for the app to read from its packaged package.json, under the
+    // name that makes the update cache folder sonobe-updater (electron-builder derives it from the name).
+    expect(packageScript).toContain('extraMetadata: { name: "sonobe", sonobe: plan.build, ...(plan.version ? { version: plan.version } : {}) }');
+    expect(read("../scripts/verify-package.mjs")).toContain("/^updaterCacheDirName: sonobe-updater$/m");
+    // A rehearsal's variables reach Info.plist, and the build refuses to run without them.
+    expect(packageScript).toContain("extendInfo: { LSEnvironment: plan.launchEnv }");
+    expect(packageScript).toContain('["--require-env", launchEnvNames.join(",")]');
+    expect(read("../scripts/build.mjs")).toContain('__SONOBE_LAUNCH_ENV__: JSON.stringify(requiredEnv.join(","))');
+    expect(read("./main.ts")).toContain('launchEnvProblem(__SONOBE_LAUNCH_ENV__.split(",").filter(Boolean), process.env)');
     expect(packageScript).toContain(
       'rmSync(path.join(resources, "default_app.asar"), { force: true });',
     );

@@ -50,7 +50,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 ## Packaging
 
-`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--arch arm64,x64` builds both in one run, `--dir` skips the installer, and `--skip-editor-build` reuses `apps/editor/dist`.
+`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--arch arm64,x64` builds both in one run, `--dir` skips the installer, `--skip-editor-build` reuses `apps/editor/dist`, and `--out <dir>` builds somewhere other than `release/` (never with `--release`).
 
 `scripts/package.mjs` decides how the app is signed (`scripts/signing.ts`), and `electron-builder.yml` sets none of it:
 
@@ -64,11 +64,13 @@ Every build is signed with the hardened runtime and the entitlements in `build/e
 
 A release or rehearsal builds, for each architecture, a DMG and the zip an update downloads, with the zips' blockmaps and one `latest-mac.yml` that lists them all. A release builds arm64 and x64 by default; a rehearsal builds this Mac's architecture unless you pass `--arch arm64,x64`. Both architectures come from one run, because a second run would overwrite the feed. It also writes `Sonobe-<version>-sourcemaps.tar.gz`: the editor's and the app's source maps, which no build carries inside the app. Nothing is published from here; `electron-builder.yml`'s `publish` block only names where releases live. `.github/workflows/release.yml` runs the release build on a version tag, verifies it, and drafts the GitHub release ([CONTRIBUTING.md](../../CONTRIBUTING.md#releasing)).
 
-The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace.
+The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace. Its name is `sonobe`, so a downloaded update waits in `sonobe-updater` under the user's caches.
+
+A rehearsal takes two more flags, for the two versions an update is tried between. `--version 0.1.1` is the version the build claims to be instead of the tree's. `--launch-env SONOBE_NAME=value` (once per variable) sets it in the app's Info.plist, because macOS opens an updated app without the environment of the one it replaced; a build made with it refuses to start without those variables, so it never runs on your own Sonobe data.
 
 ### Checking a package
 
-`npm run package:verify -w @sonobe/desktop` checks the app in `release/` for this machine's architecture. It never touches your settings, your keychain or a running Sonobe: the launch is muted, has its own user data and `SONOBE_HOME`, and runs with `SONOBE_TEST=1`, and afterwards the build is unregistered from LaunchServices so it doesn't become the app that opens `.sonobe` files.
+`npm run package:verify -w @sonobe/desktop` checks the app in `release/` for this machine's architecture. It never touches your settings, your keychain or a running Sonobe: the launch is muted, has its own user data and `SONOBE_HOME`, and runs with `SONOBE_TEST=1` and `SONOBE_UPDATES=off` (it asks no update feed), and afterwards the build is unregistered from LaunchServices so it doesn't become the app that opens `.sonobe` files.
 
 It reads the bundle first, then runs it:
 

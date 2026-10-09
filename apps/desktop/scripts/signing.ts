@@ -29,6 +29,12 @@ export interface SigningInput {
   dir?: boolean;
   /** --skip-editor-build */
   skipEditorBuild?: boolean;
+  /** --out <dir>: where the artifacts go instead of apps/desktop/release. */
+  out?: string;
+  /** --version <x.y.z>: the version a rehearsal build claims to be, instead of the tree's. */
+  version?: string;
+  /** --launch-env SONOBE_NAME=value, once per variable: what a rehearsal build's Info.plist sets when macOS launches it. */
+  launchEnv?: readonly string[];
   env: Record<string, string | undefined>;
   /** Certificate names from `security find-identity -v -p codesigning` (readIdentities). */
   identities: readonly string[];
@@ -73,6 +79,14 @@ export interface SigningPlan {
   scrubEnv: string[];
   /** Variables package.mjs sets before building. */
   setEnv: Record<string, string>;
+  /** A rehearsal's stand-in version (--version); undefined builds the tree's. */
+  version: string | undefined;
+  /**
+   * Variables a rehearsal build carries in Info.plist (LSEnvironment), and refuses to run without. An
+   * updated app is opened by macOS, not by the app it replaces, so it inherits no environment: this is
+   * how the second version of an update rehearsal keeps the data folder of the first.
+   */
+  launchEnv: Record<string, string>;
 }
 
 /** A refusal: `message` says what is wrong, `hint` what to do about it. */
@@ -226,6 +240,43 @@ function releaseCertificate(input: SigningInput): {
   );
 }
 
+/** --version and --launch-env belong to a rehearsal: the two versions an update is tried between, kept off the person's own data. */
+function rehearsalOptions(
+  input: SigningInput,
+  mode: SigningMode,
+): Pick<SigningPlan, "version" | "launchEnv"> {
+  const flags = [
+    ...(input.version !== undefined ? ["--version"] : []),
+    ...(input.launchEnv?.length ? ["--launch-env"] : []),
+  ];
+  if (flags.length && mode !== "rehearsal") {
+    throw new SigningError(
+      `${flags.join(" and ")} ${flags.length > 1 ? "are" : "is"} for a rehearsal build, and this is a ${mode} build.`,
+      mode === "release"
+        ? "A release takes its version from the tree (node scripts/set-version.ts) and carries no environment of its own. Drop the flag."
+        : 'Add --identity "<name>" to build a rehearsal: signed with that certificate, not notarized, not distributable.',
+    );
+  }
+  if (input.version !== undefined && !/^\d+\.\d+\.\d+$/.test(input.version)) {
+    throw new SigningError(
+      `--version must be three numbers, like 0.1.1 (got ${input.version}).`,
+      "The update feed is stable-only, so a version has no -beta or build suffix.",
+    );
+  }
+  const launchEnv: Record<string, string> = {};
+  for (const entry of input.launchEnv ?? []) {
+    const [, name, value] = /^(SONOBE_[A-Z_]+)=(.+)$/.exec(entry) ?? [];
+    if (!name || !value) {
+      throw new SigningError(
+        `--launch-env takes SONOBE_NAME=value (got ${entry}).`,
+        "It sets one of Sonobe's own switches in the rehearsal build's Info.plist, for example --launch-env SONOBE_USER_DATA=/tmp/rehearsal/userData.",
+      );
+    }
+    launchEnv[name] = value;
+  }
+  return { version: input.version, launchEnv };
+}
+
 /** The plan for one package.mjs run, or a SigningError that says why it can't be built. */
 export function planSigning(input: SigningInput): SigningPlan {
   const mac = input.platform === "darwin";
@@ -246,8 +297,15 @@ export function planSigning(input: SigningInput): SigningPlan {
       "Windows and Linux packages are unsigned local builds: run this without the flag.",
     );
   }
+  if (input.release && input.out !== undefined) {
+    throw new SigningError(
+      "A release is built into apps/desktop/release, where the release workflow uploads from, so --out doesn't apply.",
+      "Drop --out. A release also empties its output folder before it builds, which no folder of yours should go through.",
+    );
+  }
   const archs = planArchs(input, mode);
   const strict = mode !== "local";
+  const extras = rehearsalOptions(input, mode);
 
   if (mode === "local") {
     const target = mac ? "dmg" : input.platform === "win32" ? "nsis" : "AppImage";
@@ -271,6 +329,7 @@ export function planSigning(input: SigningInput): SigningPlan {
       // An ad-hoc signature uses no secret, so a pull request build may sign: electron-builder
       // otherwise skips every signature there and leaves a bundle macOS won't run.
       setEnv: { CSC_FOR_PULL_REQUEST: "true" },
+      ...extras,
     };
   }
 
@@ -314,6 +373,7 @@ export function planSigning(input: SigningInput): SigningPlan {
       strict,
       scrubEnv: CERTIFICATE_ENV,
       setEnv: { CSC_FOR_PULL_REQUEST: "true" },
+      ...extras,
     };
   }
 
@@ -347,6 +407,7 @@ export function planSigning(input: SigningInput): SigningPlan {
     strict,
     scrubEnv: [],
     setEnv: {},
+    ...extras,
   };
 }
 
