@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { collectConsoleProblems, openEditor, PRODUCTION_BUILD, skipWelcome } from "./helpers.ts";
+import { collectConsoleProblems, hook, openEditor, PRODUCTION_BUILD, skipWelcome, waitForPrototype } from "./helpers.ts";
 
 const INDEX = join(PRODUCTION_BUILD, "index.html");
 const EDITOR_URL = `${pathToFileURL(INDEX).href}?sonobeTest`;
@@ -54,6 +54,24 @@ test.describe("the production build", () => {
     await page.goto(EDITOR_URL);
 
     await expect(page.locator(".sb-welcome[role=dialog]")).toBeAttached();
+  });
+
+  test("shows the recovery screen, not a blank window, when the editor can't draw", async ({ page }) => {
+    await openEditor(page, { path: EDITOR_URL });
+    await hook(page, (s) => s.failRender("Sonobe"));
+
+    // The production React reports a caught error through the root's handler alone, with no component names to lean on.
+    const recovery = page.locator(".sb-recovery");
+    await expect(recovery.getByRole("heading", { name: "Sonobe hit a problem" })).toBeVisible();
+    await expect(recovery.locator(".sb-recovery__draft")).toHaveText("There were no unsaved changes.");
+    await expect(recovery.getByRole("button", { name: "Reload Sonobe" })).toBeFocused();
+    await recovery.getByText("Error details").click();
+    await expect(recovery.locator("pre")).toContainText("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
+
+    await recovery.getByRole("button", { name: "Reload Sonobe" }).click();
+    await waitForPrototype(page);
+    await expect(page.locator(".sb-pe .react-flow__node").first()).toBeVisible();
+    await expect(page.locator(".sb-recovery")).toHaveCount(0);
   });
 
   test("keeps the code that loads on demand in files of its own", () => {

@@ -144,6 +144,7 @@ Text people read in the UI uses one word for one thing. Prompts and text written
 - Import types with `import type`. Don't use enums, namespaces, or parameter properties, because the code runs under Node type stripping.
 - Keep doc comments short on public APIs and skip filler comments.
 - A panel or dialog whose code loads on demand is a `loadable` (`apps/editor/src/ui/loadable.tsx`), not `React.lazy` under Suspense, which holds content back 300 ms after its fallback shows. `e2e/boot.spec.ts` checks that with the page's clock stopped. A loadable contains what it loads: with a `fallback` it says a problem in place, and without one it closes through `onFailed`.
+- To see a part of the editor fail, call `window.__sonobe.failRender("The Inspector")` in a dev build (or any build opened with `?sonobeTest`): the boundary with that name catches an error on its next render. `failRender("Sonobe")` is the whole editor, which shows the recovery screen; `failRender(name, false)` lets go. `e2e/resilience.spec.ts` drives it.
 - Format with Prettier (`npm run format`).
 
 ## Clean-room policy

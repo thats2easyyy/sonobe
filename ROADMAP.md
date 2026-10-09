@@ -48,6 +48,7 @@ The first two finish Stage 4. The rest are Stage 5.
 - [ ] Preset switching on the phone (partial: a phone runs whichever preset the editor or Claude switched to, and tunes reach it live; picking a preset from the phone's three-finger menu remains)
 - [ ] WebSocket Connection Headers (partial: Sec-WebSocket-Protocol reaches the server everywhere, and other headers warn; sending them needs the desktop app to open sockets from the Electron main process instead of the viewer's browser WebSocket)
 - [x] Drafts: unsaved work survives a crash, a quit or a killed process, and comes back from the welcome screen or through Claude; `save_document` saves without a dialog
+- [x] Never a blank window: an editor that can't draw shows a recovery screen that keeps the draft and offers Reload, Copy details and Report an Issue; editor errors reach the console
 - [x] Examples: 16 canonical recipes as runnable projects with scripted tests
 - [x] Learn panel: 5 interactive lessons, the guides, the examples, and the patch reference
 - [x] Welcome screen: new blank prototype, lessons, templates from the examples, recent files

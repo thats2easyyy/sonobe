@@ -38,22 +38,33 @@ export interface IssueContext {
   /** "desktop" or "browser". */
   host: string;
   userAgent?: string;
+  /** An error to file under "What happened?" (the recovery screen's Report an Issue). */
+  error?: string;
 }
 
-/** A new-issue link with the environment filled in. */
+/** "Sonobe 0.1.0 · desktop · mac · <user agent>": the line a report ends with. */
+export function environmentLine(context: IssueContext): string {
+  return `Sonobe ${context.version} · ${context.host} · ${context.platform}${context.userAgent ? ` · ${context.userAgent}` : ""}`;
+}
+
+/** The longest error text a new-issue link carries, and the longest link: the desktop app refuses to open one over 8,192 characters. */
+const ISSUE_ERROR_LIMIT = 1500;
+const ISSUE_URL_LIMIT = 6000;
+
+/** A new-issue link with the environment filled in, and the error when there is one, cut so the link stays short enough to open. */
 export function issueUrl(context: IssueContext, base: string = ISSUES_URL): string {
-  const body = [
-    "**What happened?**",
-    "",
-    "",
-    "**What did you expect?**",
-    "",
-    "",
-    "**Steps to reproduce**",
-    "1. ",
-    "",
-    "---",
-    `Sonobe ${context.version} · ${context.host} · ${context.platform}${context.userAgent ? ` · ${context.userAgent}` : ""}`,
-  ].join("\n");
-  return `${base}?body=${encodeURIComponent(body)}`;
+  const link = (error: string) => {
+    const body = ["**What happened?**", "", ...(error ? ["```", error, "```"] : []), "", "**What did you expect?**", "", "", "**Steps to reproduce**", "1. ", "", "---", environmentLine(context)].join("\n");
+    return `${base}?body=${encodeURIComponent(body)}`;
+  };
+  // A cut can land inside a surrogate pair, which encodeURIComponent refuses.
+  const cut = (text: string, length: number) => text.slice(0, length).replace(/[\uD800-\uDBFF]$/, "");
+  let error = cut(context.error?.trim() ?? "", ISSUE_ERROR_LIMIT);
+  let url = link(error);
+  // Encoding makes a newline, a slash or a non-Latin character three to nine times longer.
+  while (url.length > ISSUE_URL_LIMIT && error) {
+    error = cut(error, Math.floor(error.length * 0.8));
+    url = link(error);
+  }
+  return url;
 }

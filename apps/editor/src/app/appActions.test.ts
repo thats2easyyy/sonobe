@@ -128,5 +128,21 @@ describe("app actions", () => {
     const url = issueUrl({ version: "1.2.3", platform: "darwin", host: "desktop" }, "https://example.test/new");
     expect(url.startsWith("https://example.test/new?body=")).toBe(true);
     expect(decodeURIComponent(url)).toContain("Sonobe 1.2.3 · desktop · darwin");
+    expect(decodeURIComponent(url)).toContain("**What happened?**\n\n\n**What did you expect?**");
+  });
+
+  it("files an error under What happened, cut so the link still opens", () => {
+    const context = { version: "1.2.3", platform: "darwin", host: "desktop" };
+    const url = issueUrl({ ...context, error: "TypeError: layer is undefined\n    at Row (Inspector.tsx:12)" }, "https://example.test/new");
+    expect(decodeURIComponent(url)).toContain("**What happened?**\n\n```\nTypeError: layer is undefined\n    at Row (Inspector.tsx:12)\n```\n\n**What did you expect?**");
+
+    // 1,500 characters at most, and fewer when encoding makes them long: the desktop app won't open a link over 8,192.
+    const long = decodeURIComponent(issueUrl({ ...context, error: "x".repeat(4000) }, "https://example.test/new"));
+    expect(long.match(/x{2,}/)![0]).toHaveLength(1500);
+    const wide = issueUrl({ ...context, error: "“レイヤー”/\n".repeat(400) }, "https://example.test/new");
+    expect(wide.length).toBeLessThanOrEqual(6000);
+    expect(decodeURIComponent(wide)).toContain("Sonobe 1.2.3 · desktop · darwin");
+    // A cut inside an emoji's surrogate pair would make the link impossible to encode.
+    expect(() => issueUrl({ ...context, error: "🙂".repeat(1000) })).not.toThrow();
   });
 });

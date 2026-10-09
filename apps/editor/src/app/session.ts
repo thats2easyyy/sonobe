@@ -50,6 +50,11 @@ export function getAppSession(): EditorSession {
   return appSession;
 }
 
+/** The app-wide session if there is one, never creating it: error paths read it, and one that runs before the editor has started must not start it. */
+export function peekAppSession(): EditorSession | null {
+  return appSession;
+}
+
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     appSession?.dispose();

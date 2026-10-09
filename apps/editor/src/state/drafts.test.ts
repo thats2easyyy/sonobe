@@ -62,6 +62,27 @@ describe("draft keeper", () => {
     expect(writes[1]).toMatchObject({ id: "draft-0001", revision: 11 });
   });
 
+  it("says whether the document has edits its draft doesn't hold, also after a write that failed", async () => {
+    const { document, keeper, drafts } = setup();
+    expect(keeper.pending()).toBe(false);
+
+    document.getState().apply([addRect("Card")], { label: "Add Card" });
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    expect(keeper.current()).toMatchObject({ id: "draft-0001" });
+
+    // flush() resolves when the write fails, so pending() is the only way to know the edit isn't in.
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(drafts.write).mockRejectedValueOnce(new Error("disk full"));
+    document.getState().apply([addRect("Dot")], { label: "Add Dot" });
+    await keeper.flush();
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    vi.restoreAllMocks();
+  });
+
   it("waits for an open gesture to end", async () => {
     const { document, writes } = setup();
     document.getState().apply([addRect("Card", "card")], { label: "Add Card" });

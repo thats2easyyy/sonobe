@@ -32,6 +32,8 @@ export interface DraftKeeper {
   adopt(id: string, draft: { createdAt: number; projectPath: string | null }): void;
   /** The current document's draft, once it's on disk. */
   current(): { id: string; updatedAt: number } | null;
+  /** The document has edits its draft doesn't hold yet. Still true after a flush whose write failed, since `flush()` resolves either way. */
+  pending(): boolean;
   dispose(): void;
 }
 
@@ -166,6 +168,10 @@ export function createDraftKeeper(options: DraftKeeperOptions): DraftKeeper {
       adopting = { id, createdAt: restored.createdAt, projectPath: restored.projectPath };
     },
     current: () => (draft && draft.revision >= 0 && draft.updatedAt > 0 ? { id: draft.id, updatedAt: draft.updatedAt } : null),
+    pending() {
+      const s = document.getState();
+      return wanted(s) && !upToDate(s);
+    },
     dispose() {
       disposed = true;
       clearTimer();
