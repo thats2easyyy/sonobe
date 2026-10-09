@@ -272,6 +272,20 @@ function Workspace() {
     return () => clearTimeout(timer);
   }, []);
 
+  // A launch with a prototype used to draw twice (the demo, then the prototype), and the second draw is what brought
+  // the patch editor in with it: React keeps a panel that loads on demand behind its fallback for 300 ms, however fast
+  // it loaded, unless something else draws meanwhile. A window that starts on its prototype draws once, so it draws once
+  // more when the patch editor has loaded. A plain launch has the same wait, which is a change of its own.
+  const [, setPatchEditorLoaded] = useState(false);
+  useEffect(() => {
+    if (!launch.opened) return;
+    let mounted = true;
+    void loadPatchEditor().then(() => mounted && setPatchEditorLoaded(true), () => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, [launch]);
+
   const layout = layoutStore.getState();
 
   const rename = (next: string) => {
