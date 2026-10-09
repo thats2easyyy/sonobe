@@ -94,6 +94,19 @@ describe("the bundled CLI", () => {
     expect(sim.stdout).toMatch(/@photo\.scale: start 1 → end 1\.2\d*, settled by \d+ ms/);
   }, 60_000);
 
+  it("runs the relay out of the same file for exactly `mcp`, without starting the rest of the CLI", async () => {
+    // The plugin and the extension run `node sonobe.mjs mcp`: main.ts's choice survives bundling.
+    const code = await readFile(bundle.outfile, "utf8");
+    expect(code).toContain('args.length === 1 && args[0] === "mcp"');
+    const noApp = await run(process.execPath, [bundle.outfile, "mcp"], { cwd: dir, env: { ...childEnv(), SONOBE_HOME: path.join(dir, "no-app") } }).then(
+      () => ({ code: 0, stderr: "" }),
+      (err: { code?: number; stderr?: string }) => ({ code: err.code ?? 1, stderr: err.stderr ?? "" }),
+    );
+    expect(noApp.code).toBe(1);
+    expect(noApp.stderr).toContain("the Sonobe app isn't running");
+    expect(noApp.stderr).toContain("sonobe mcp --headless <project.sonobe>");
+  });
+
   it("serves a project over stdio to the v2 client", async () => {
     const project = path.join(dir, "Served.sonobe");
     expect((await sonobe(["new", project, "--template", "photo-zoom"])).code).toBe(0);

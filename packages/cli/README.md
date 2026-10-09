@@ -56,4 +56,6 @@ It also tells the app which session it is, so Connect Claude can list connected 
 - It heartbeats every 30 s and says goodbye (`DELETE /clients/<id>`) when stdin closes or on SIGINT or SIGTERM (Claude Code stops stdio servers with SIGINT).
 - An app from before session lists answers 404: the relay writes one line to stderr and keeps relaying.
 
+Every Claude session keeps a relay running, so exactly `sonobe mcp` loads the relay and nothing else: `src/main.ts` imports `src/relay-main.ts` for it, and the CLI for every other form (`mcp --headless`, `mcp --help`). `src/relay.ts` imports only Node's own modules and `@sonobe/mcp/clients`; keep it that way, or every session pays for what it pulls in.
+
 `runCli(argv, io)` runs any command in-process with injectable streams (see `src/cli.test.ts`).
