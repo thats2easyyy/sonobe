@@ -255,15 +255,22 @@ function PulseRing({ address }: { address: string }) {
   return shown > 0 ? <span key={shown} className="sb-pe-pulse-ring" aria-hidden /> : null;
 }
 
-const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeId: string; port: PortModel; showsLive: boolean }) {
+/** The value is on, for the port dot's glow: true, or true in the watched copy of a loop. */
+const isOn = (value: unknown, copy: number | null) => (copy === null ? isTruthyState(value) : pickCopy(value, copy).value === true);
+
+const OutputPort = memo(function OutputPort({ nodeId, port, showsLive, far }: { nodeId: string; port: PortModel; showsLive: boolean; far: boolean }) {
   const { liveEnabled, ui, session, componentId } = usePatchEditor();
   const hover = useHoverCard(nodeId, port);
   const onContextMenu = usePortMenu(nodeId, port);
-  const live = useLiveValue(liveEnabled && showsLive ? port.address : null);
   const copy = useWatchedCopy(session);
+  // Zoomed far out, the value's text isn't painted (patch-editor.css, data-lod). The row then follows
+  // only what still shows, whether the value is on and how wide its slot is, so it renders when one of
+  // those changes (or its first value arrives) and not with every value. Its text is the value as it
+  // was at that render, and zooming back in reads the value as it is by then.
+  const live = useLiveValue(liveEnabled && showsLive ? port.address : null, far ? (value) => `${value === undefined}|${isOn(value, copy)}|${liveReserve(port, value)}` : undefined);
   const armed = useUi((s) => s.armed?.address === port.address);
   const armable = useUi((s) => (s.draggingType && s.draggingSide === "in" && s.draggingFrom !== nodeId ? dropFit(port.type, s.draggingType) : null));
-  const truthy = copy === null ? isTruthyState(live) : pickCopy(live, copy).value === true;
+  const truthy = isOn(live, copy);
   const toggleArmed = () => {
     const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
@@ -338,6 +345,8 @@ function useRemeasureOnHandleChange(nodeId: string, inputs: readonly PortModel[]
 /** Inputs down the left, outputs down the right, one row each. */
 export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editable, showsLive = true }: PortRowsProps) {
   useRemeasureOnHandleChange(nodeId, inputs, outputs);
+  // Read once per node, not per row: rows render with every value they follow.
+  const far = useUi((s) => s.farZoom);
   const rows = Math.max(inputs.length, outputs.length);
   if (rows === 0) return <div className="sb-pe-rows sb-pe-rows--empty" />;
   return (
@@ -348,7 +357,7 @@ export const PortRows = memo(function PortRows({ nodeId, inputs, outputs, editab
         return (
           <div key={i} className="sb-pe-row">
             {input ? <InputPort nodeId={nodeId} port={input} editable={editable} /> : <span className="sb-pe-port sb-pe-port--spacer" />}
-            {output ? <OutputPort nodeId={nodeId} port={output} showsLive={showsLive} /> : null}
+            {output ? <OutputPort nodeId={nodeId} port={output} showsLive={showsLive} far={far} /> : null}
           </div>
         );
       })}

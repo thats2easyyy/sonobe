@@ -14,7 +14,7 @@ import type { Id, Op } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
 import { ChevronDown, Circle, Group, MousePointer2, Ruler, Sparkles, Square, Type } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
 import { layoutStore, useLayout } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
@@ -26,6 +26,7 @@ import type { EditorSession } from "../../state/session.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
+import { loadable } from "../../ui/loadable.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { toast } from "../../ui/Toast.tsx";
@@ -34,7 +35,7 @@ import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { isEditableTarget, type ShortcutBinding } from "../../ui/commands/shortcutManager.ts";
 import { cx } from "../../ui/lib/cx.ts";
-import { useLatest } from "../../ui/lib/hooks.ts";
+import { useEventCallback, useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
@@ -117,7 +118,7 @@ const DESIGN_BOX_MIN_HEIGHT = 250;
 const DRAFT_WHOLE_ZOOM = 0.45;
 
 // The Design with Claude box loads the first time it opens.
-const DesignBox = lazy(() => import("../design/DesignBox.tsx").then((m) => ({ default: m.DesignBox })));
+const DesignBox = loadable(() => import("../design/DesignBox.tsx").then((m) => m.DesignBox), { name: "Design with Claude" });
 
 interface GestureBase {
   pointerId: number;
@@ -588,7 +589,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     }
     const names = layerNames(idx, snapshot.layers.map((l) => l.id));
     const duplicate = g.alt ? duplicateForDrag(snapshot) : null;
-    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: duplicate ? `Duplicate ${names}` : `Move ${names}`, defaultComponent: cid }), ...(duplicate ? { duplicate } : {}) };
+    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: duplicate ? `Duplicate ${names}` : `Move ${names}`, defaultComponent: cid, gesture: true }), ...(duplicate ? { duplicate } : {}) };
   };
 
   /** ⌥-drag (Origami, Figma): copy the selection in place, and the drag moves the copies. */
@@ -617,6 +618,26 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
 
+  // A move, resize or rotate whose pointer-up can't arrive is kept as one undo step, as letting go
+  // would: the canvas goes away (a view switch), the pointer's capture is lost, or another pointer
+  // presses. That also closes its gesture, which drafts and the patch editor wait for.
+  const finishDrag = useEventCallback(() => {
+    const g = gestureRef.current;
+    if (!g || (g.kind !== "move" && g.kind !== "resize" && g.kind !== "rotate")) return false;
+    gestureRef.current = null;
+    g.txn.commit();
+    if (g.kind === "move" && g.duplicate) finishDuplicate(g.duplicate, g.txn.ops, g.txn.label, latest.current.componentId);
+    return true;
+  });
+  useEffect(() => () => void finishDrag(), [finishDrag]);
+
+  /** `finishDrag` on a canvas that stays: the drag's guides and cursor go with it. */
+  const dropDrag = () => {
+    if (!finishDrag()) return;
+    setDraft(EMPTY_DRAFT);
+    setCursor(undefined);
+  };
+
   /** Focus from a click or a drop is not keyboard focus: the ring stays off (canvas.css reads data-kbd). */
   const focusFromPointer = () => {
     const body = bodyRef.current;
@@ -635,6 +656,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const base: GestureBase = { pointerId: event.pointerId, start: a, startScreen: p };
     focusFromPointer();
     finishNudge();
+    // A drag still in flight ends here: a second pointer (another finger, a pen beside the mouse) takes over, and the first one's pointer-up no longer finds its drag.
+    dropDrag();
     setAltMeasure([]);
 
     if (event.button === 1 || (event.button === 0 && latest.current.spaceHeld)) {
@@ -652,13 +675,13 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         const snapshot = beginResize(idx, cid, ids, hit.handle, board);
         if (snapshot) {
           notifyBlocked(snapshot.blocked, "size");
-          gestureRef.current = { ...base, kind: "resize", snapshot, txn: createEditTransaction(session.document, { label: `Resize ${layerNames(idx, snapshot.members.map((m) => m.id))}`, defaultComponent: cid }) };
+          gestureRef.current = { ...base, kind: "resize", snapshot, txn: createEditTransaction(session.document, { label: `Resize ${layerNames(idx, snapshot.members.map((m) => m.id))}`, defaultComponent: cid, gesture: true }) };
         } else {
           notifyBlocked(ids, "size");
         }
       } else if (hit?.kind === "rotate" && c?.single) {
         const snapshot = beginRotate(idx, cid, c.single);
-        if (snapshot) gestureRef.current = { ...base, kind: "rotate", snapshot, txn: createEditTransaction(session.document, { label: `Rotate ${layerNames(idx, [c.single])}`, defaultComponent: cid }) };
+        if (snapshot) gestureRef.current = { ...base, kind: "rotate", snapshot, txn: createEditTransaction(session.document, { label: `Rotate ${layerNames(idx, [c.single])}`, defaultComponent: cid, gesture: true }) };
         else notifyBlocked([c.single], "rotation");
       } else {
         const sel = session.selection.getState();
@@ -802,6 +825,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (gestureRef.current?.pointerId === event.pointerId) cancelGesture();
+  };
+
+  // The canvas can lose the pointer with no pointer-up to follow (something else captures it, or releases it): the drag ends where it is.
+  const onLostPointerCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && gestureRef.current?.pointerId === event.pointerId) dropDrag();
   };
 
   const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1259,6 +1287,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         onPointerMove={canDraw ? onPointerMove : undefined}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onLostPointerCapture}
         onPointerEnter={() => (pointerInside.current = true)}
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
@@ -1325,9 +1354,15 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         )}
       </div>
       {designLoaded && (
-        <Suspense fallback={null}>
-          <DesignBox session={session} bounds={layerBounds} onHeightChange={onDesignHeight} />
-        </Suspense>
+        <DesignBox
+          session={session}
+          bounds={layerBounds}
+          onHeightChange={onDesignHeight}
+          onLoadError={() => {
+            designStore.getState().closeBox();
+            setDesignLoaded(false);
+          }}
+        />
       )}
     </Panel>
   );

@@ -7,7 +7,7 @@ import type { Op, SonobeDocument, Value } from "@sonobe/core";
 import type { ApplyOpsResult } from "@sonobe/core";
 import { handleDesignPreview } from "../host/rpcHandlers.ts";
 import type { DesignPreviewUpdate } from "../host/types.ts";
-import { importDesign, type ImportOutcome } from "../panels/import/importDesign.ts";
+import type { ImportOutcome } from "../panels/import/importDesign.ts";
 import type { SelectionState } from "../state/selection.ts";
 import type { EditorSession } from "../state/session.ts";
 import { layoutStore, type LayoutStore } from "../shell/layoutStore.ts";
@@ -59,7 +59,8 @@ export function installTestHook(session: EditorSession, target: Window = window)
       const { ok, errors, idMap } = session.document.getState().apply(ops, { label });
       return { ok, errors, idMap };
     },
-    importHtml: (html, options = {}) => importDesign(session, { html, ...options }, { desktop: null }),
+    // Imported on use: a static import would put the whole design-import pipeline in the startup chunk.
+    importHtml: async (html, options = {}) => (await import("../panels/import/importDesign.ts")).importDesign(session, { html, ...options }, { desktop: null }),
     previewDesign: (update) => handleDesignPreview(session, update),
   };
   target.__sonobe = hook;

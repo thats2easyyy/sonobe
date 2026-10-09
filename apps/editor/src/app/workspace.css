@@ -1,4 +1,4 @@
-/* Placeholders while a panel's code loads. */
+/* Placeholders while a panel's code loads. Hidden for the first 150 ms, so code that arrives sooner shows nothing in between. */
 .sb-app-loading {
   display: flex;
   flex: 1 1 auto;
@@ -8,6 +8,13 @@
   min-height: 0;
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
+  animation: sb-app-loading-in 1ms 150ms backwards;
+}
+
+@keyframes sb-app-loading-in {
+  from {
+    visibility: hidden;
+  }
 }
 
 .sb-app-loading__dot {
