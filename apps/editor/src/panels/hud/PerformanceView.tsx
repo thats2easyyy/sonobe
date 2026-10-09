@@ -31,6 +31,9 @@ export interface PerformanceViewProps {
 export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
   const session = useEditorSession();
   const { samples, reset } = usePerfSamples({ capacity: CAPACITY, intervalMs: SAMPLE_MS });
+  // The headline reads the host as it publishes, like the strip above it. The samples are for the
+  // charts: they are half a second apart, and the last one before a wake was taken at rest.
+  const fps = useRuntimeState((s) => s.fps);
   const playing = useRuntimeState((s) => s.playing);
   const resting = useRuntimeState((s) => s.resting);
   // The live viewer draws at the display's rate, so that is the rate and the frame budget to judge by.
@@ -57,7 +60,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
   }, [session, active]);
 
   const summary = summarizeSamples(samples, rate);
-  const status = smoothness(summary.fps.latest, playing, { resting, displayHz: rate });
+  const status = smoothness(fps, playing, { resting, displayHz: rate });
   // Paused and resting samples are gaps: no frames ran, so there is no rate or frame time to plot.
   const fpsValues = useMemo(() => samples.map((s) => (framesRan(s) ? s.fps : null)), [samples]);
   const msValues = useMemo(() => samples.map((s) => (s.playing && !s.resting ? s.frameMs : null)), [samples]);
@@ -74,7 +77,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
         <div className="sb-perfx">
           <section className="sb-perfx__charts" aria-label="Frame rate">
             <div className="sb-perfx__headline">
-              <span className="sb-perfx__fps sb-tabular">{playing && !resting ? Math.round(summary.fps.latest) : "–"}</span>
+              <span className="sb-perfx__fps sb-tabular">{playing && !resting && fps > 0 ? Math.round(fps) : "–"}</span>
               <span className="sb-perfx__unit">fps</span>
               <Badge tone={status.tone} dot>
                 {status.label}

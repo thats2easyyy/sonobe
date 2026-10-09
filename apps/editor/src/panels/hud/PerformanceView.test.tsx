@@ -67,6 +67,22 @@ describe("PerformanceView", () => {
     expect(container.textContent).toContain("0slow samples");
   });
 
+  it("follows the host through a wake, between two samples: never 0 fps, never Starting", () => {
+    publish({ playing: true, resting: true, fps: 0, frameMs: 2, displayHz: 60 });
+    const seen: string[] = [];
+    // What the host publishes on a tap: at rest still for a stats interval, then the rate.
+    for (const state of [{ frame: 12 }, { resting: false, fps: 59.8 }, { fps: 60 }, { resting: true, fps: 0 }]) {
+      act(() => session.runtime.state.setState(state));
+      seen.push(headline().replace("Clear chart", ""));
+    }
+    expect(seen).toEqual(["–fpsAt rest", "60fpsSmooth", "60fpsSmooth", "–fpsAt rest"]);
+  });
+
+  it("shows no rate while the prototype starts", () => {
+    publish({ playing: true, resting: false, fps: 0, frameMs: 0, displayHz: 0 });
+    expect(headline()).toContain("–fpsStarting");
+  });
+
   it("judges frames against the display's rate and its frame budget", () => {
     const budget = () => [...container.querySelectorAll(".sb-perfx__stat")].find((s) => s.textContent?.startsWith("Frame budget used"))!.textContent;
     // Until the display's rate is known, it is taken to be 60 Hz.

@@ -523,9 +523,27 @@ describe("what frames feed while the loop rests", () => {
     const { scheduler, host } = rested({ statsIntervalMs: 250 });
     const states: boolean[] = [];
     host.state.subscribe((s) => states.push(s.resting));
+    // The tap comes seconds into the rest, long past the stats interval.
+    scheduler.frame(5000);
     host.runtime.dispatch([{ kind: "pointer", phase: "move", pointerId: 1, x: 5, y: 5 }]);
     settle(scheduler, host);
+    expect(states.length).toBeGreaterThan(0);
     expect(states.every(Boolean)).toBe(true);
+  });
+
+  it("says at rest, then a rate: no readout sees frames running at 0 fps after a wake", () => {
+    const { scheduler, host } = rested({ statsIntervalMs: 250 });
+    scheduler.frame(5000);
+    const states: { resting: boolean; fps: number }[] = [];
+    host.state.subscribe((s) => states.push({ resting: s.resting, fps: s.fps }));
+    // A second of frames, as an animation runs them.
+    host.profilePatches();
+    scheduler.frames(30);
+    settle(scheduler, host);
+    const running = states.filter((s) => !s.resting);
+    expect(running.length).toBeGreaterThan(1);
+    expect(running.every((s) => s.fps > 55)).toBe(true);
+    expect(states.at(-1)).toMatchObject({ resting: true, fps: 0 });
   });
 
   it("time keeps running across a rest: the frame that ends it is 5 s later, and patches see one frame of it", () => {
