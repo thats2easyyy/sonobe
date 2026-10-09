@@ -19,6 +19,8 @@ export interface CommandSpec {
 
 /** Placeholder until the public repository URL is final. */
 export const ISSUES_URL = "https://github.com/thats2easyyy/sonobe/issues/new";
+/** Where releases are published: the repository electron-builder.yml's `publish` block names (updates.test.ts holds them together). */
+export const RELEASES_URL = "https://github.com/thats2easyyy/sonobe/releases";
 
 /**
  * Every command the native menus can send. Shortcuts follow Origami Studio where they exist

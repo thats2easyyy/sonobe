@@ -210,6 +210,73 @@ export interface ViewerWindowStatus {
   error: string | null;
 }
 
+/** What went wrong with an update, in words for people. */
+export interface UpdateProblem {
+  /**
+   * network: nothing answered. no-release: nothing is published yet. damaged: the download didn't arrive
+   * whole. rejected: the system refused to install it. location: the app can't be replaced where it is.
+   */
+  kind: "network" | "no-release" | "damaged" | "rejected" | "location" | "other";
+  message: string;
+  /** What to do about it. */
+  hint: string;
+}
+
+/** Where this copy of Sonobe stands with updates (electron/updates.ts). */
+export interface UpdateStatus {
+  /**
+   * install: downloads a new version in the background and offers Restart to Update. notify: only says
+   * there is one, and where to get it. off: never checks (run from a checkout, an automated run,
+   * SONOBE_UPDATES=off, or a build with no update feed).
+   */
+  mode: "install" | "notify" | "off";
+  /** Why this copy can't do more, as a sentence for people; null when nothing needs saying. */
+  reason: string | null;
+  state: "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "failed";
+  /** This app's version. */
+  current: string;
+  /** The newer version, once a check found one. */
+  version: string | null;
+  /** The release page of `version`, or of the latest release. */
+  releaseUrl: string;
+  /** This version's release notes, on the first launch after an update (with `updatedFrom`). */
+  notesUrl: string | null;
+  /** 0 to 1 while downloading. */
+  progress: number | null;
+  error: UpdateProblem | null;
+  /** The person asked for the check behind this state (Check for Updates…), so it deserves an answer even when there's nothing new. */
+  manual: boolean;
+  /** When a check last got an answer (epoch ms). */
+  checkedAt: number | null;
+  /** "Check for updates automatically". Check for Updates… works either way. */
+  autoCheck: boolean;
+  /** The version this copy ran as before, on the first launch after an update. */
+  updatedFrom: string | null;
+  /** The app could update itself from the Applications folder, and nobody has been offered the move yet. */
+  offerMove: boolean;
+  /** moveToApplications() can help (macOS, a build that installs updates, outside an Applications folder). */
+  canMove: boolean;
+  /** Restart to Update is closing the windows. Back to false with the state still `ready` means the person cancelled. */
+  restarting: boolean;
+}
+
+/** Updates, for the editor's notices, About and Settings. Every call answers with a status, never an error. */
+export interface SonobeUpdates {
+  status(): Promise<UpdateStatus>;
+  /** Check now (Check for Updates…). Resolves once the check has its answer; a download carries on after it. */
+  check(): Promise<UpdateStatus>;
+  /**
+   * Restart to Update: closes every window through its unsaved-changes prompt, then installs and reopens
+   * what was open. Resolves false when the person cancelled or the restart didn't happen.
+   */
+  restart(): Promise<boolean>;
+  setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
+  /** Move the app to the Applications folder and open it there (macOS). Resolves false when it stayed where it was. */
+  moveToApplications(): Promise<boolean>;
+  /** Status changes. Returns unsubscribe. */
+  onStatus(cb: (status: UpdateStatus) => void): () => void;
+}
+
 /** What the Import dialog asks the app to render and capture. */
 export interface DesignCaptureParams {
   url?: string;
