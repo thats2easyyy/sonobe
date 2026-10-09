@@ -16,8 +16,11 @@ export type Binding =
   | { kind: "instanceOutput"; type: ValueType; pulse: boolean; scope: Scope; key: string; inner: Binding | null; zero: Value }
   /** A variable receiver's source: a broadcaster's value binding at an ancestor depth (null = zero). */
   | { kind: "variable"; type: ValueType; pulse: false; depth: number; source: Binding | null; zero: Value }
-  /** A `{ "layer": id }` literal; replicated layers read as loops of instance references. */
-  | { kind: "layerRef"; type: "layer"; pulse: false; layerId: Id; cache: Map<string, { frame: number; value: Value | Loop }> }
+  /**
+   * A `{ "layer": id }` literal; replicated layers read as loops of instance references. `cache`, by
+   * instance path: what it read while the layer drew `count` copies (undefined: it isn't replicated).
+   */
+  | { kind: "layerRef"; type: "layer"; pulse: false; layerId: Id; cache: Map<string, { count: number | undefined; value: Value | Loop }> }
   /** A read-only layer output (host-reported or derived from the previous frame). */
   | { kind: "layerOutput"; type: ValueType; pulse: boolean; layerId: Id; layerType: string; key: string; default: Value }
   /** "@layer.repeat" read as a source: how many copies the layer drew last frame (ARCHITECTURE §4). */
@@ -128,7 +131,11 @@ export interface CLayer {
   node: LayerNode;
   scope: Scope;
   spec: LayerTypeSpec;
-  /** Every prop default (published inputs included for component instances). */
+  /**
+   * Every prop default: one object shared by every layer of the type (compile.ts defaultsFor), so
+   * read it and never write it. A component instance layer has its own, with its component's size
+   * and published inputs.
+   */
   defaults: Record<string, Value>;
   bound: CProp[];
   props: Map<string, ResolvedProp>;

@@ -689,9 +689,10 @@ Each frame:
   - a JSON lookup that finds the wrong type (output the zero value)
 
 **16.8 Evaluation.**
-- Set `alwaysEvaluate: true` for patches whose outputs change without input changes: clocks, animations in flight, gestures, sensors, async work.
-- Call `ctx.requestNextFrame()` while something is still moving or pending.
-- The v1 engine evaluates every patch on every frame anyway; the field documents intent and enables later dirty tracking.
+- Set `alwaysEvaluate: true` for patches whose outputs change without input changes: clocks, animations in flight, gestures, sensors, async work. The field documents intent; only the `javascript` patch acts on it.
+- Every frame that runs evaluates every patch. A live prototype doesn't run every frame, though: it rests once two frames in a row change nothing, and wakes on input, an edit, or a device change (ARCHITECTURE.md §5.2). Simulations step every frame.
+- So calling `ctx.requestNextFrame()` is required, on every frame where the patch is waiting on something no input event announces: an animation in flight, a timer, a pending request, a platform service it polls (`platform.gamepads`, a geolocation watch). A patch that waits without asking freezes when the prototype rests.
+- Write an output that changed as a new value. An array or object changed in place and written again reads as unchanged, and the prototype may rest on it.
 
 **16.9 Disabled and muted.**
 - **Disabled** (`enabled` false): the patch outputs idle values and keeps its state, unless the behavior says otherwise.

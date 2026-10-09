@@ -178,6 +178,27 @@ describe("lottie layers", () => {
     expect(body().querySelector("svg")!.getAttribute("preserveAspectRatio")).toBe("none");
   });
 
+  it("moves one frame where Play turns on, however long ago the last frame was (a prototype at rest draws none)", async () => {
+    const { loader, animations } = fakePlayer();
+    make({ loadLottie: loader });
+    draw(0, lottie({ animation: DATA, playing: false }));
+    await flush();
+    const anim = animations[0]!;
+    draw(1 / 60, lottie({ animation: DATA, playing: false }));
+    draw(2 / 60, lottie({ animation: DATA, playing: false }));
+    expect(anim.frames.at(-1)).toBe(0);
+    // Ten seconds later a tap turns Play on: it starts from the beginning, one frame in.
+    draw(10, lottie({ animation: DATA }));
+    expect(media.at(-1)!.currentTime).toBeCloseTo(1 / 60, 6);
+    // From there it follows the frame clock, as before.
+    draw(10.5, lottie({ animation: DATA }));
+    expect(media.at(-1)!.currentTime).toBeCloseTo(0.5 + 1 / 60, 6);
+    // Turning Scrub off after a gap does the same.
+    draw(10.6, lottie({ animation: DATA, scrub: true, scrubTime: 1 }));
+    draw(20, lottie({ animation: DATA }));
+    expect(media.at(-1)!.currentTime).toBeCloseTo(1 + 1 / 60, 6);
+  });
+
   it("skips drawing while hidden but keeps time", async () => {
     const { loader, animations } = fakePlayer();
     make({ loadLottie: loader });

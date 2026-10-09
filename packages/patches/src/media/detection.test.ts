@@ -54,7 +54,10 @@ describe("faceDetection", () => {
   it("runs passes on new frames at the quality's cadence and outputs faces largest first", async () => {
     const d = detector<unknown>();
     const h = createPatchHarness(faceDetectionPatch, { inputs: { layer: { layerId: "cam" }, maxFaces: 1.9 }, services: { platform: { detect: { faces: d.run }, media: d.media } as never } });
-    expect(h.step({ dt: 0.05 }).outputs).toMatchObject({ available: true, count: 0 });
+    const f0 = h.step({ dt: 0.05 });
+    expect(f0.outputs).toMatchObject({ available: true, count: 0 });
+    // New camera frames and finished passes arrive between frames: a running detector asks for every frame.
+    expect(f0.requestedNextFrame).toBe(true);
     expect(d.requests).toHaveLength(1);
     expect(d.requests[0]!.options).toEqual({ maxDimension: 640, positioning: "relative" });
     d.requests[0]!.resolve([

@@ -31,6 +31,7 @@ Node 22.18+ is required. Node 24 is what CI uses.
    - The `behavior` field is the implementation spec.
    - The `docs` field is what users read.
 2. Implement it in `packages/patches/src/<category>/<type>.ts` with `definePatch(type, { state, evaluate })`, then add it to that category's `index.ts`.
+   - A prototype rests while nothing changes (ARCHITECTURE.md §5.2). A patch that waits on something no input event announces (a timer, a request, a service it polls) calls `ctx.requestNextFrame()` on every frame while it waits, or it freezes at rest. Assert it in the test (`requestedNextFrame`), and when the patch keeps state across a wait, check a whole document over a rest with `runRested` from `@sonobe/engine/testing`.
 3. Test it in `<type>.test.ts` with the harness in `@sonobe/engine/testing`. Cover pulses, loops (per-index state), and edge cases.
 4. Regenerate the reference docs with `node packages/patches/scripts/generate-docs.ts`.
 
@@ -101,13 +102,15 @@ The subscription path is experimental and off by default. Only the app run from 
 
 ## Measuring editor speed
 
-`npm run bench -w @sonobe/editor` builds the editor into a temp folder, serves it, and drives it in headless Chromium (`apps/editor/scripts/bench`). It times boot and first opens, then eleven interactions on `examples/02-like-toggle` and on a generated 302-patch, 302-layer document, and prints main-thread time per second, frame times and long tasks. It asserts nothing and isn't part of `npm test` or CI.
+`npm run bench -w @sonobe/editor` builds the editor into a temp folder, serves it, and drives it in headless Chromium (`apps/editor/scripts/bench`). It times boot and first opens, then twelve interactions on `examples/02-like-toggle` and on a generated 302-patch, 302-layer document, and prints main-thread time per second, the animation frames the app asked for and the frames the prototype stepped per second, frame times and long tasks. It asserts nothing and isn't part of `npm test` or CI.
 
 1. Compare two builds in one run, never against numbers from another day or another machine. Serve the build to compare against (`npx vite preview --outDir <its dist> --port 5260` from `apps/editor`) and pass `--baseline http://localhost:5260`: the builds take turns, and the table shows both with the difference. Run a build against itself once to see how much the numbers move on their own.
 2. Narrow a run while you work: `--only stress --filter scrub,dragLayer --reps 3`. `--throttle 4` stands in for a slower machine, `--profile <folder>` writes a CPU profile per interaction for DevTools, and `--trace` prints the timeline's busiest events (Layerize, Layout, Paint).
 3. Frame times rarely move on a fast machine, so read main-thread ms per second first. Put the before and after numbers in the commit message, and leave out a change that doesn't show.
 
-The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. `run.ts` lists the options.
+The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. The example is still, so its idle rows should read about 0 rAF/s and 0 steps/s, with main-thread time near the `paused.idle` row; the stress document never stops moving, so its rows show what a frame costs. `run.ts` lists the options.
+
+What one frame costs without a browser is in two test files, which print it per case and hold it to a budget (about three times the case's cost on a quiet laptop, so read the printed figure for anything smaller): `packages/engine/src/runtime/benchmark.test.ts` (the engine's step) and `packages/renderer/src/perf.test.ts` (the draw, with its style writes counted). Run them with `npx vitest run <file> --reporter=default` before and after a change to the scene build, layout or the renderer, and add a case when yours needs one.
 
 ## Releasing
 

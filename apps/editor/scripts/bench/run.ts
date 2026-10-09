@@ -117,15 +117,18 @@ function printInteractions(doc: DocumentName, builds: Build[], runs: Map<string,
     return deltas.length ? `${round((100 * deltas.filter((d) => d > 25).length) / deltas.length, 1)}%` : "–";
   };
   const long = (build: Build, key: string) => String(of(build, key).reduce((n, r) => n + r.longTasks, 0));
+  const median = (pick: (r: Run) => number) => (build: Build, key: string) => round(stats(of(build, key).map(pick)).median);
   const each = (cell: (build: Build, key: string) => string, key: string) => builds.map((b) => cell(b, key)).join(" / ");
   const title = doc === "example" ? "examples/02-like-toggle" : "the stress document (302 patches, 302 layers)";
   console.log(`\nInteractions on ${title}: ${reps} run${reps === 1 ? "" : "s"} each${builds.length > 1 ? `, ${builds.map((b) => b.name).join(" / ")}` : ""}`);
   printTable([
-    ["", ...builds.map((b) => `main thread ms/s, ${b.name}`), ...(builds.length > 1 ? ["change"] : []), "frame p95 ms", "frames over 25 ms", "long tasks"],
+    ["", ...builds.map((b) => `main thread ms/s, ${b.name}`), ...(builds.length > 1 ? ["change"] : []), "rAF/s", "steps/s", "frame p95 ms", "frames over 25 ms", "long tasks"],
     ...keys.map((key) => [
       key,
       ...builds.map((b) => spread(perSecond(b, key))),
       ...(builds.length > 1 ? [change(perSecond(builds[0]!, key), perSecond(builds[1]!, key))] : []),
+      each(median((r) => r.rafPerSec), key),
+      each(median((r) => r.stepsPerSec), key),
       each((b, k) => round(stats(pooled(b, k)).p95, 1), key),
       each(over25, key),
       each(long, key),

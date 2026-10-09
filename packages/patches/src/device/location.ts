@@ -1,6 +1,7 @@
 /**
  * Location: the device's position from the host's geolocation watch, or a fixed city center from
- * Override. Callbacks only store fixes; the next evaluate applies them.
+ * Override. Callbacks only store fixes; the next evaluate applies them, so it asks for frames while
+ * a watch is open.
  */
 
 import type { GeoFix } from "@sonobe/engine";
@@ -125,7 +126,7 @@ export const locationPatch = definePatch<LocationState>("location", {
           s.errorMessage = s.fixError;
           s.fixError = null;
         }
-        if (s.loading) ctx.requestNextFrame();
+        if (s.loading || s.watch) ctx.requestNextFrame();
       }
     }
     ctx.output("latitude", s.latitude);

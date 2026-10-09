@@ -2,7 +2,8 @@
  * Phone web player, served by the LAN preview server (electron/lan-preview.ts). Runs the open
  * prototype full-screen with the real engine and DOM renderer, and follows edits made in Sonobe over
  * a WebSocket: new revisions hot-swap into the running prototype, keeping patch state, and restarting
- * the prototype in Sonobe restarts it here too. platform.ts gives it the editor viewer's services
+ * the prototype in Sonobe restarts it here too. While nothing in the prototype moves it asks for no
+ * frames (`wake`). platform.ts gives it the editor viewer's services
  * (sound, speech, network, links, media) plus haptics through a native host like Sonobe Viewer, and
  * device.ts tells it about the phone (appearance, safe area, rotation). A three-finger tap opens the
  * player's menu (gesture.ts, menu.ts).
@@ -62,7 +63,10 @@ let renderer: DomRenderer | null = null;
 let liveVideos: LiveVideoOverlays | null = null;
 let lastScene: SceneFrame | null = null;
 let size: [number, number] = [0, 0];
-let generation = 0;
+/** A frame is asked for. While the prototype rests none is. */
+let scheduled = false;
+/** When the last frame ran (0 before a prototype's first). */
+let lastFrameAt = 0;
 let connected = false;
 let statusTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -141,29 +145,46 @@ function layout(): void {
   syncDevice();
 }
 
-function run(): void {
-  const id = ++generation;
-  let last = 0;
-  const frame = (now: number) => {
-    if (id !== generation || !runtime || !renderer) return;
-    const dt = last && !document.hidden ? Math.min(0.064, (now - last) / 1000) : 1 / 60;
-    last = now;
-    const scene = runtime.step(dt);
-    lastScene = scene;
-    if (scene.size[0] !== size[0] || scene.size[1] !== size[1]) {
-      size = [scene.size[0], scene.size[1]];
-      layout();
-    }
-    renderer.render(scene);
-    try {
-      liveVideos?.sync(scene);
-    } catch {
-      // A camera feed that can't show doesn't stop the prototype.
-    }
-    requestAnimationFrame(frame);
-  };
+function frame(now: number): void {
+  scheduled = false;
+  if (!runtime || !renderer) return;
+  // The whole time since the last frame: the runtime caps a slow frame at 64 ms and knows a rest from one.
+  const dt = lastFrameAt && !document.hidden ? (now - lastFrameAt) / 1000 : 1 / 60;
+  lastFrameAt = now;
+  const scene = runtime.step(dt);
+  lastScene = scene;
+  if (scene.size[0] !== size[0] || scene.size[1] !== size[1]) {
+    size = [scene.size[0], scene.size[1]];
+    layout();
+  }
+  renderer.render(scene);
+  try {
+    liveVideos?.sync(scene);
+  } catch {
+    // A camera feed that can't show doesn't stop the prototype.
+  }
+  if (!runtime.resting) wake();
+}
+
+/**
+ * Ask for a frame. The loop stops asking once the runtime is at rest (ARCHITECTURE.md §5.2), so a
+ * prototype where nothing moves leaves the phone idle. Everything that can change a frame here goes
+ * through the runtime, which calls this as its `onWake`: touches, keys and text (the renderer's
+ * events), fingers taken for the menu (cancelTouches), a new revision from Sonobe (updateDocument),
+ * a restart from Sonobe or the menu, the phone turning, its appearance and its safe area (syncDevice),
+ * and a font that finished loading (refreshScene, below). Whatever a patch waits on, it asks for
+ * frames while it waits. A resize alone needs no step: setScale draws the last frame again.
+ */
+function wake(): void {
+  if (scheduled || !runtime || !renderer) return;
+  scheduled = true;
   requestAnimationFrame(frame);
 }
+
+// The engine lays text out with this measurer, so a font that finishes loading changes the layout.
+measurer.onInvalidate(() => {
+  if (runtime && runtime.frame >= 0) runtime.refreshScene();
+});
 
 const fontAssets = createFontAssetRegistry((assetId) => resolveAssetUrl(assetId));
 
@@ -190,13 +211,14 @@ function show(message: Extract<Message, { type: "document" }>): void {
     stageHost.replaceChildren();
     const device = deviceFor(deviceScreenSize(message.doc.project.device));
     reportedDevice = JSON.stringify(device);
-    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl, platform, device });
+    const next = createRuntime(message.doc, { registry, textMeasurer: measurer, resolveAssetUrl, platform, device, onWake: wake });
     runtime = next;
     renderer = createDomRenderer(stageHost, { resolveAssetUrl, textMeasurer: measurer, loadLottie, onEvents: (events) => next.dispatch(events) });
     liveVideos = createLiveVideoOverlays(renderer, platform);
     lastScene = null;
     size = [0, 0];
-    run();
+    lastFrameAt = 0;
+    wake();
   } else {
     runtime.updateDocument(message.doc);
   }

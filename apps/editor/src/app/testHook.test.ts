@@ -27,6 +27,8 @@ describe("installTestHook", () => {
     expect(sonobe.frame()).toBeGreaterThanOrEqual(0);
     expect(sonobe.getValue("@photo.scale")).toBe(1);
     expect(sonobe.playing()).toBe(false);
+    // Paused isn't at rest; playing with nothing moving is.
+    expect(sonobe.resting()).toBe(false);
 
     const revision = sonobe.revision();
     const result = sonobe.apply([{ op: "setProject", changes: { name: "Hooked" } }]);

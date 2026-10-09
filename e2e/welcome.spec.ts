@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot } from "./helpers.ts";
+import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, waitForPrototype } from "./helpers.ts";
 
 test.describe("welcome screen", () => {
   test("shows on first launch and opens a template", async ({ page }) => {
@@ -23,7 +23,7 @@ test.describe("welcome screen", () => {
 
     // It was seen, so a reload goes straight to the editor.
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3);
+    await waitForPrototype(page);
     await page.waitForTimeout(400);
     await expect(page.getByRole("dialog", { name: "Welcome to Sonobe" })).toBeHidden();
     expect(problems).toEqual([]);
@@ -93,7 +93,7 @@ test.describe("welcome screen", () => {
 
     // A reload (a crash, a closed tab) leaves the draft; the welcome screen offers it at launch.
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3);
+    await waitForPrototype(page);
     const welcome = page.getByRole("dialog", { name: "Welcome to Sonobe" });
     await expect(welcome).toBeVisible();
     const recovered = welcome.getByRole("region", { name: "Recovered" });
@@ -109,7 +109,7 @@ test.describe("welcome screen", () => {
 
     // Still unsaved, so it's kept again; this time discard it.
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3);
+    await waitForPrototype(page);
     await expect(welcome).toBeVisible();
     await welcome.getByRole("button", { name: "Discard Untitled" }).click();
     const confirm = page.getByRole("dialog", { name: "Discard “Untitled”?" });

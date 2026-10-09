@@ -65,6 +65,12 @@ export interface RenderContext {
   readonly stats: RendererStats;
   frame: SceneFrame;
   prevTime: number;
+  /**
+   * Seconds this frame moves layers that run on the frame clock: the time since the last frame, or
+   * one ordinary frame after a longer gap. A prototype at rest draws no frames while its time keeps
+   * running, so what starts on the frame that ends a rest must not jump by it.
+   */
+  frameDelta: number;
   scale: number;
   dpr: number;
   editorMode: boolean;
@@ -80,6 +86,11 @@ export interface RenderContext {
   resolveAssetUrl(assetId: string): string | undefined;
   emit(events: InputEvent[]): void;
   findNode(ref: LayerRef): SceneNode | undefined;
+  /**
+   * Draw the last frame again: something a drawer shows or reports changed between frames (media that
+   * loaded). A prototype at rest draws no frames, so nothing else would pick it up.
+   */
+  invalidate(): void;
   onShaderError?: (info: ShaderErrorInfo) => void;
   onMediaState?: (key: string, layerId: string, state: MediaState) => void;
   onFocusChange?: (layerId: string | null) => void;

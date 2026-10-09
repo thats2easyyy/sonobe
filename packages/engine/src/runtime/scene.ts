@@ -1,17 +1,17 @@
 /**
  * Layer resolution and SceneFrame emission: resolve props per layer (literals, links, defaults),
  * replicate layers bound to loops, render component instances, run layout, and build scene nodes
- * with local and world transforms plus the layer-info snapshots patches read on the next frame.
+ * with local and world transforms. Patches read a build's layer geometry on the next frame.
  */
 
 import type { Color, Id, LayerRef, Value } from "@sonobe/core";
-import { computeLayout, type LayoutNode } from "../layout/computeLayout.ts";
+import { computeLayout, type LayoutNode, type LayoutResult } from "../layout/computeLayout.ts";
 import { compose, multiply } from "../math/matrix.ts";
 import { finiteOr, toVec2 } from "../math/vec.ts";
 import type { LayerInfoSnapshot, Loop, SceneFrame, SceneNode, TextMeasurer } from "../types.ts";
 import type { Binding, CLayer, CProp, InstancePath, Scope } from "./graph.ts";
 import { isLoop, MAX_LOOP_LENGTH } from "./loop.ts";
-import { coerceValue } from "./values.ts";
+import { coerceValue, valuesEqual } from "./values.ts";
 
 export interface SceneEnv {
   root: Scope;
@@ -50,10 +50,19 @@ export interface SceneBuild {
   scene: SceneFrame;
   /** Every scene node by key. */
   nodes: Map<string, SceneNode>;
-  /** Layer geometry by scene key (read by patches on the next frame). */
-  info: Map<string, LayerInfoSnapshot>;
+  /**
+   * A layer's geometry by scene key, as patches read it on the next frame. Made on the first read,
+   * from the node and its layout, and kept, so every reader of a build gets the same object. Most
+   * layers are never asked. It can wait because the runtime only reads the build of a step that
+   * has finished, and nothing changes a build's nodes or layout after that.
+   */
+  info(key: string): LayerInfoSnapshot | undefined;
+  /** Frames and content sizes by scene key, as laid out (Text's textSize reads the content size). */
+  layout: ReadonlyMap<string, LayoutResult>;
   /** Copy counts of replicated layers (and their descendants) by prefixed layer id: "card", "card#2/badge". */
   counts: Map<string, number>;
+  /** Some layer moves without the engine (LIVE_LAYERS), so the frames have to keep coming. */
+  live: boolean;
 }
 
 interface Pending extends LayoutNode {
@@ -65,6 +74,23 @@ interface Pending extends LayoutNode {
 }
 
 const ROOT_KEY = " root";
+
+/**
+ * Layers that move without the engine: a renderer draws them from scene time, or reads their
+ * element's state, on every frame it draws (ARCHITECTURE.md §5.2). While one is active the scene is
+ * `live` and the prototype never rests. Each rule is at least as wide as what the DOM renderer does
+ * (packages/renderer/src/drawers.ts); a renderer that animates another layer type on its own needs a
+ * rule here, or a prototype at rest freezes it. `shown`: the layer and the layers it's inside are enabled.
+ */
+const LIVE_LAYERS: Readonly<Record<string, (props: Readonly<Record<string, Value>>, shown: boolean, opacity: number) => boolean>> = {
+  // Drawn from scene time while it's on screen. A Clone draws its source even when the source is
+  // hidden, so a scene with a Clone counts every shader (see buildScene).
+  shader: (_props, shown, opacity) => shown && opacity > 0,
+  // The playhead advances on every frame while Play is on, hidden or not.
+  lottie: (props) => props.animation != null && props.playing !== false && props.scrub !== true,
+  // Current Time is read from the playing element on every frame. A hidden video is paused.
+  video: (props, shown) => shown && props.video != null && props.playing !== false && props.scrub !== true,
+};
 
 /** A value in a sentence: text "A", true, a color. */
 function describeValue(v: Value | Loop | undefined): string {
@@ -134,7 +160,9 @@ interface Inherited {
 export function buildScene(env: SceneEnv): SceneBuild {
   const counts = new Map<string, number>();
   const nodes = new Map<string, SceneNode>();
-  const info = new Map<string, LayerInfoSnapshot>();
+  let live = false;
+  let shaders = false;
+  let clones = false;
   const makeRef = env.layerRef ?? ((layerId: Id, instance: number | undefined): LayerRef => (instance === undefined ? { layerId } : { layerId, instance }));
 
   const resolve = (layers: readonly CLayer[], path: InstancePath, prefix: string, inherited: Inherited | null, out: Pending[]): void => {
@@ -214,8 +242,9 @@ export function buildScene(env: SceneEnv): SceneBuild {
         const index = looping ? n : (inherited?.index ?? 0);
         const key = looping || inherited ? `${baseKey}#${index}` : baseKey;
         // Defaults come through the prototype and bound values are own properties, so a layer replicated
-        // thousands of times doesn't copy every default per copy per frame. Enumerate with for...in, or
-        // plainProps before JSON or structured clone.
+        // thousands of times doesn't copy every default per copy per frame, and every layer of a type
+        // shares one prototype (CLayer.defaults). Enumerate with for...in, or plainProps before JSON or
+        // structured clone.
         const props = Object.create(layer.defaults) as Record<string, Value>;
         for (let j = 0; j < bound.length; j++) {
           const p = bound[j]!;
@@ -242,7 +271,7 @@ export function buildScene(env: SceneEnv): SceneBuild {
   resolve(env.root.layers, env.rootPath, "", null, roots);
   const layout = computeLayout({ key: ROOT_KEY, type: "group", props: {}, children: roots }, env.measurer, env.size);
 
-  const emit = (p: Pending, parentWorld: readonly number[] | null, parent: Pending | null): SceneNode => {
+  const emit = (p: Pending, parentWorld: readonly number[] | null, parent: Pending | null, parentShown: boolean): SceneNode => {
     const f = layout.get(p.key) ?? { x: 0, y: 0, width: 0, height: 0, contentSize: [0, 0] as [number, number] };
     const props = p.props;
     const w = f.width;
@@ -283,25 +312,45 @@ export function buildScene(env: SceneEnv): SceneBuild {
       children: [],
     };
     nodes.set(p.key, node);
+    const shown = parentShown && node.visible;
+    const isLive = LIVE_LAYERS[node.type];
+    if (isLive && !live) live = isLive(props, shown, node.opacity);
+    if (node.type === "shader") shaders = true;
+    else if (node.type === "clone") clones = true;
+    node.children = p.children.map((c) => emit(c, worldTransform, p, shown));
+    return node;
+  };
+
+  const infos = new Map<string, LayerInfoSnapshot>();
+  const info = (key: string): LayerInfoSnapshot | undefined => {
+    const known = infos.get(key);
+    if (known) return known;
+    const node = nodes.get(key);
+    if (!node) return undefined;
+    const props = node.props;
+    const scale = finiteOr(props.scale, 1);
+    const sxyz = Array.isArray(props.scaleXYZ) ? (props.scaleXYZ as unknown[]) : [];
     const anchor = toVec2(props.anchor, [0, 0]);
+    const parent = node.parentKey === null ? undefined : nodes.get(node.parentKey);
     let parentRef: LayerRef | null = null;
     if (parent) {
       const { prefix, instance } = splitSceneKey(parent.key);
-      parentRef = makeRef(parent.layer.id, instance, prefix);
+      parentRef = makeRef(parent.layerId, instance, prefix);
     }
-    info.set(p.key, {
-      type: p.layer.type,
+    const content = layout.get(key)?.contentSize ?? [0, 0];
+    const made: LayerInfoSnapshot = {
+      type: node.type,
       enabled: props.enabled !== false,
-      position: [f.x + anchor[0] * w, f.y + anchor[1] * h],
-      size: [w, h],
-      scale: [sx, sy],
+      position: [node.x + anchor[0] * node.width, node.y + anchor[1] * node.height],
+      size: [node.width, node.height],
+      scale: [scale * finiteOr(sxyz[0], 1), scale * finiteOr(sxyz[1], 1)],
       anchor,
       parent: parentRef,
-      worldTransform,
-      contentSize: [f.contentSize[0], f.contentSize[1]],
-    });
-    node.children = p.children.map((c) => emit(c, worldTransform, p));
-    return node;
+      worldTransform: node.worldTransform,
+      contentSize: [content[0], content[1]],
+    };
+    infos.set(key, made);
+    return made;
   };
 
   const scene: SceneFrame = {
@@ -309,7 +358,55 @@ export function buildScene(env: SceneEnv): SceneBuild {
     time: env.time,
     size: [env.size[0], env.size[1]],
     background: env.background,
-    roots: roots.map((r) => emit(r, null, null)),
+    roots: roots.map((r) => emit(r, null, null, true)),
   };
-  return { scene, nodes, info, counts };
+  return { scene, nodes, info, layout, counts, live: live || (shaders && clones) };
+}
+
+/** Copy counts are the same. */
+export function sameCounts(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, n] of a) if (b.get(key) !== n) return false;
+  return true;
+}
+
+function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** Two nodes' props hold the same values: the same defaults object, and equal bound values. */
+function sameProps(a: Record<string, Value>, b: Record<string, Value>): boolean {
+  if (a === b) return true;
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (!Object.hasOwn(b, key) || !valuesEqual(a[key], b[key])) return false;
+  return true;
+}
+
+/**
+ * Two builds draw, lay out and count the same: the same nodes in the same order with equal geometry,
+ * props and Text Field state, the same content sizes (Text's textSize), and the same copy counts.
+ * `frame` and `time` aren't compared. The runtime runs this only on a step that may count toward
+ * rest (SonobeRuntime.resting).
+ */
+export function sameBuild(a: SceneBuild, b: SceneBuild): boolean {
+  if (a === b) return true;
+  if (a.nodes.size !== b.nodes.size || !sameCounts(a.counts, b.counts)) return false;
+  if (!sameNumbers(a.scene.size, b.scene.size) || !valuesEqual(a.scene.background, b.scene.background)) return false;
+  const others = b.nodes.values();
+  for (const n of a.nodes.values()) {
+    const m = others.next().value!;
+    if (n.key !== m.key || n.type !== m.type || n.layerId !== m.layerId) return false;
+    if (n.x !== m.x || n.y !== m.y || n.width !== m.width || n.height !== m.height) return false;
+    if (n.opacity !== m.opacity || n.visible !== m.visible || n.clip !== m.clip || n.zPosition !== m.zPosition) return false;
+    if (!sameNumbers(n.worldTransform, m.worldTransform) || !sameProps(n.props, m.props)) return false;
+    if (n.textField !== m.textField && !valuesEqual(n.textField, m.textField)) return false;
+    const c = a.layout.get(n.key)!.contentSize;
+    const d = b.layout.get(m.key)!.contentSize;
+    if (c[0] !== d[0] || c[1] !== d[1]) return false;
+  }
+  return true;
 }

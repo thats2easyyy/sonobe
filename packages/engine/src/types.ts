@@ -102,7 +102,11 @@ export interface PatchContext<S = any> {
   output(key: string, value: Value): void;
   /** Emit a one-frame pulse on a pulse output. */
   pulse(key: string): void;
-  /** Keep evaluating next frame even if nothing changes (animations in flight). */
+  /**
+   * Ask for the next frame. A live prototype rests while nothing changes, so call this on every
+   * frame where the patch is waiting on something no input event announces: an animation in flight,
+   * a timer, a pending request, a platform service it polls.
+   */
   requestNextFrame(): void;
   /** Log a warning through services.log at most once per patch instance and key until the prototype restarts. */
   warnOnce(key: string, message: string): void;
@@ -653,6 +657,12 @@ export interface RuntimeOptions {
   device?: Partial<DeviceInfo>;
   /** Record per-patch evaluate timings (Runtime.patchTimings). Default false. */
   profile?: boolean;
+  /**
+   * Called when something outside a step may change the next frame (input, an edit, a device change,
+   * a reported layer output, a restart), so a host that stopped asking for frames while the runtime
+   * was `resting` starts again. May be called more than once before the next step.
+   */
+  onWake?: () => void;
 }
 
 export interface EngineRegistry extends Registry {
@@ -724,7 +734,11 @@ export interface Runtime {
   readonly time: number;
   /** Queue input events for the next step. */
   dispatch(events: InputEvent[]): void;
-  /** Advance one frame (dt ignored in deterministic mode) and return the scene. */
+  /**
+   * Advance one frame and return the scene. Deterministic runtimes ignore `dt`. Live ones cap it at
+   * 64 ms, except after a step that ended at rest: `time` moves over the whole gap and patches see
+   * one frame of `dt` at most (ARCHITECTURE.md §5.2).
+   */
   step(dt?: number): SceneFrame;
   /** Last produced frame (step() once if none). */
   scene(): SceneFrame;

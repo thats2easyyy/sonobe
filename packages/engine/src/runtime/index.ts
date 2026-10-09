@@ -5,6 +5,7 @@ export {
   MAX_LIVE_DT,
   MAX_REPLAY_FRAMES,
   MAX_RUNTIME_ISSUES,
+  REST_AFTER_STILL_STEPS,
   TraceUnavailableError,
   type SonobeRuntime,
 } from "./runtime.ts";

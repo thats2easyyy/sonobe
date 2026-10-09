@@ -18,6 +18,9 @@ export interface Run {
   styleMs: number;
   /** Tasks of 50 ms or more. */
   longTasks: number;
+  /** Animation frames the app asked for, and frames the prototype stepped, per second. Near 0 for a prototype at rest. */
+  rafPerSec: number;
+  stepsPerSec: number;
   /** Timeline self time per event in ms per second, with --trace. */
   trace?: { name: string; msPerSec: number }[];
 }
@@ -38,12 +41,14 @@ export interface ScenarioOptions {
   trace: boolean;
 }
 
+/** Wait `n` animation frames, with the browser's own function so the app's count (lib.ts) leaves them out. */
 const frames = (page: Page, n: number) =>
   page.evaluate(
     (n) =>
       new Promise<void>((resolve) => {
-        const step = () => (--n <= 0 ? resolve() : requestAnimationFrame(step));
-        requestAnimationFrame(step);
+        const raf = (window as any).__perf.raf as typeof requestAnimationFrame;
+        const step = () => (--n <= 0 ? resolve() : raf(step));
+        raf(step);
       }),
     n,
   );
@@ -52,19 +57,35 @@ const frames = (page: Page, n: number) =>
 async function record(page: Page, cdp: CDPSession, fn: () => Promise<void>): Promise<Run> {
   await frames(page, 3);
   const before = await metrics(cdp);
-  const t0 = await page.evaluate(() => {
+  const { t0, raf0, step0 } = await page.evaluate(() => {
     (window as any).__perf.startFrames();
-    return performance.now();
+    return { t0: performance.now(), raf0: (window as any).__perf.rafRequests as number, step0: (window as any).__sonobe.frame() as number };
   });
   await frames(page, 2);
   await fn();
   await frames(page, 3);
-  const { stamps, t1 } = await page.evaluate(() => ({ stamps: (window as any).__perf.stopFrames() as number[], t1: performance.now() }));
+  const { stamps, t1, raf1, step1 } = await page.evaluate(() => ({
+    stamps: (window as any).__perf.stopFrames() as number[],
+    t1: performance.now(),
+    raf1: (window as any).__perf.rafRequests as number,
+    step1: (window as any).__sonobe.frame() as number,
+  }));
   const after = await metrics(cdp);
   await sleep(120); // long tasks are reported a little late
   const longTasks = await page.evaluate(({ t0, t1 }) => (window as any).__perf.longTasks.filter((l: { start: number; duration: number }) => l.start + l.duration >= t0 && l.start <= t1).length, { t0, t1 });
   const ms = (key: string) => (after[key]! - before[key]!) * 1000;
-  return { deltas: frameDeltas(stamps), wallMs: t1 - t0, taskMs: ms("TaskDuration"), scriptMs: ms("ScriptDuration"), layoutMs: ms("LayoutDuration"), styleMs: ms("RecalcStyleDuration"), longTasks };
+  const perSecond = (n: number) => (1000 * n) / (t1 - t0);
+  return {
+    deltas: frameDeltas(stamps),
+    wallMs: t1 - t0,
+    taskMs: ms("TaskDuration"),
+    scriptMs: ms("ScriptDuration"),
+    layoutMs: ms("LayoutDuration"),
+    styleMs: ms("RecalcStyleDuration"),
+    longTasks,
+    rafPerSec: perSecond(raf1 - raf0),
+    stepsPerSec: perSecond(step1 - step0),
+  };
 }
 
 // ---------- The patch editor's view ----------
@@ -255,6 +276,16 @@ async function typeInPicker(page: Page): Promise<Gesture> {
 
 const idle: () => Promise<Gesture> = async () => () => sleep(3000);
 
+/**
+ * Three seconds paused: the floor an idle prototype is compared with. The few frames it asks for are
+ * the empty ones that measure the display after a pause (runtime/displayRate.ts), and the one play asks for.
+ */
+const pausedIdle = (page: Page) => async () => async () => {
+  await page.evaluate(() => (window as any).__sonobe.session.runtime.pause());
+  await sleep(3000);
+  await page.evaluate(() => (window as any).__sonobe.session.runtime.play());
+};
+
 // ---------- Scenario ----------
 
 /** Open `base`, load the document, and run every interaction `reps` times. Returns the runs by interaction name. */
@@ -281,7 +312,7 @@ export async function runScenario(browser: Browser, base: string, name: Document
     const wanted = (key: string) => options.filter.length === 0 || options.filter.some((f) => key.includes(f));
     const run = async (key: string, prepare: (i: number) => Promise<Gesture>, settle = 250) => {
       if (!wanted(key)) return;
-      if (options.warm && key !== "fit.idle" && key !== "close.idle") {
+      if (options.warm && !key.endsWith(".idle")) {
         await (await prepare(-1))();
         await sleep(settle);
       }
@@ -317,6 +348,7 @@ export async function runScenario(browser: Browser, base: string, name: Document
     await fitPatches(page);
     await zoomPatchesTo(page, 0.65);
     await run("close.idle", idle);
+    await run("paused.idle", pausedIdle(page));
     await run("close.dragPatch", (i) => dragPatch(page, side(i) * 300));
     await run("close.dragCable", () => dragCable(page));
     await run("close.panZoom", () => panAndZoom(page));
