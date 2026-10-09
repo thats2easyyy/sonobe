@@ -29,6 +29,8 @@ import {
   type NodeTypes,
   type OnConnectStartParams,
   type OnError,
+  type OnMove,
+  type OnNodeDrag,
   type ReactFlowInstance,
   type ReactFlowState,
 } from "@xyflow/react";
@@ -929,6 +931,27 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   // -- Connecting -----------------------------------------------------------
   const originRef = useRef<(HandleRef & { side: PortSide }) | null>(null);
 
+  // React Flow keeps its handlers in its store and writes each one that's a new function, and every
+  // write runs every node's and cable's selectors. So what it's handed keeps its identity between renders.
+  const onNodeDragStart = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDragStart(event, dragged), [onDragStart]);
+  const onNodeDrag = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDrag(event, dragged), [onDrag]);
+  const onNodeDragStop = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDragStop(event, dragged), [onDragStop]);
+  const onPaneClick = useCallback(() => ui.getState().set({ armed: null }), [ui]);
+  const onMove = useCallback<OnMove>(
+    (_event, viewport) => {
+      if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+      updateCrop(viewport);
+    },
+    [ui, updateCrop],
+  );
+  const onMoveEnd = useCallback<OnMove>(
+    (event, viewport) => {
+      session.selection.getState().setPatchViewport(componentId, viewport);
+      if (event) fitModeRef.current = false;
+    },
+    [session, componentId],
+  );
+
   const onConnectStart = useCallback(
     (_event: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
       ui.getState().set({ hoverPort: null, armed: null });
@@ -1472,27 +1495,21 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           connectionMode={ConnectionMode.Loose}
           connectionLineComponent={ConnectionLineView}
           connectionRadius={22}
-          onNodeDragStart={(e, _n, dragged) => onDragStart(e, dragged)}
-          onNodeDrag={(e, _n, dragged) => onDrag(e, dragged)}
-          onNodeDragStop={(e, _n, dragged) => onDragStop(e, dragged)}
-          onSelectionDragStart={(e, dragged) => onDragStart(e, dragged)}
-          onSelectionDrag={(e, dragged) => onDrag(e, dragged)}
-          onSelectionDragStop={(e, dragged) => onDragStop(e, dragged)}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onSelectionDragStart={onDragStart}
+          onSelectionDrag={onDrag}
+          onSelectionDragStop={onDragStop}
           onNodeContextMenu={onNodeContextMenu}
           onEdgeContextMenu={onEdgeContextMenu}
           onPaneContextMenu={onPaneContextMenu}
           onSelectionContextMenu={onSelectionContextMenu}
           onNodeClick={onNodeClick}
-          onPaneClick={() => ui.getState().set({ armed: null })}
+          onPaneClick={onPaneClick}
           onInit={onInit}
-          onMove={(_event, viewport) => {
-            if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
-            updateCrop(viewport);
-          }}
-          onMoveEnd={(event, viewport) => {
-            session.selection.getState().setPatchViewport(componentId, viewport);
-            if (event) fitModeRef.current = false;
-          }}
+          onMove={onMove}
+          onMoveEnd={onMoveEnd}
           {...(savedViewport ? { defaultViewport: savedViewport } : {})}
           minZoom={MIN_ZOOM}
           maxZoom={2.5}
