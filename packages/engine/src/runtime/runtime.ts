@@ -268,7 +268,6 @@ class RuntimeImpl implements SonobeRuntime {
   private touched = true;
   /** The last step ended at rest, so the time before the next one is time rested, not a slow frame. */
   private rested = false;
-  private tick = 0;
   private log: ReplayEntry[] = [];
   private logSteps = 0;
   private logBase: SonobeDocument;
@@ -425,7 +424,6 @@ class RuntimeImpl implements SonobeRuntime {
     const before = this.snapshot;
     const build = this.build();
     if (before) this.syncTextFields(before, build);
-    this.tick++;
     this.snapshot = build;
     if (this.produced) this.produced = build;
     // The next step hit-tests against this layout, so trace replays must refresh at the same point.
@@ -555,7 +553,6 @@ class RuntimeImpl implements SonobeRuntime {
     this.queue = [];
     this.record(rested > 0 ? { kind: "step", dt: h, rested, events } : { kind: "step", dt: h, events });
     const snapshot = this.ensureSnapshot();
-    this.tick++;
     this.frame += 1;
     this.time += rested + h;
     // Pointer times (press starts, long presses) are on the same clock.
@@ -896,7 +893,6 @@ class RuntimeImpl implements SonobeRuntime {
     this.rested = false;
     this.touched = true;
     this.env.watch = false;
-    this.tick++;
     this.log = [];
     this.logSteps = 0;
     this.logBase = this.document;
@@ -1152,13 +1148,15 @@ class RuntimeImpl implements SonobeRuntime {
     // first frame: one reference. Otherwise the patches that listen to it run 0 times, and whatever
     // they feed (often the layer's own copies) could never come back (ARCHITECTURE.md §5.2).
     if (count === 0 && !whole) return this.makeRef(b.layerId, undefined, path.layerPrefix);
+    // References say which layer and which copy, nothing about a frame, so they last until the
+    // layer's copy count changes: 1,000 copies don't cost 1,000 new references on every frame.
     const cached = b.cache.get(path.key);
-    if (cached && cached.frame === this.tick) return cached.value;
+    if (cached && cached.count === count) return cached.value;
     const value =
       count === undefined
         ? this.makeRef(b.layerId, undefined, path.layerPrefix)
         : makeLoop(Array.from({ length: count }, (_, i) => this.makeRef(b.layerId, i, path.layerPrefix)));
-    b.cache.set(path.key, { frame: this.tick, value });
+    b.cache.set(path.key, { count, value });
     return value;
   }
 
