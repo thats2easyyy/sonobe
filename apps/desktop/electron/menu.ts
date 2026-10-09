@@ -5,7 +5,7 @@ import { COMMANDS, commandLabel, isNativeAccelerator, resolveAccelerator, type H
 type Role = NonNullable<MenuItemConstructorOptions["role"]>;
 
 /** Main-process actions that don't involve the renderer. */
-export type NativeAction = "clearRecent" | "interfaceLarger" | "interfaceSmaller" | "interfaceReset" | "maximize" | "stopPreview";
+export type NativeAction = "clearRecent" | "interfaceLarger" | "interfaceSmaller" | "interfaceReset" | "maximize" | "stopPreview" | "checkForUpdates" | "restartToUpdate";
 
 /** Platform-neutral menu description; converted to an Electron template by {@link toMenuTemplate}. */
 export type MenuNode =
@@ -28,6 +28,8 @@ export interface MenuContext {
   /** The editor's Undo and Redo titles, saying what they'll revert ("Undo Mute Card Shadow"). Plain "Undo" and "Redo" without them. */
   undoLabel?: string;
   redoLabel?: string;
+  /** Adds the update item: Check for Updates…, or Restart to Update once one is ready. Left out in a build that never checks. */
+  updates?: "check" | "restart";
 }
 
 const sep: MenuNode = { kind: "separator" };
@@ -48,12 +50,17 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
     ? [...ctx.recentProjects.map((p): MenuNode => ({ kind: "recent", path: p, label: recentLabel(p) })), sep, { kind: "action", action: "clearRecent", label: "Clear Recent" }]
     : [{ kind: "info", label: "No Recent Projects" }];
 
+  // Under About in the app menu on macOS, and above About in Help elsewhere. Handled in main, so it works with no window open.
+  const updateItems: MenuNode[] =
+    ctx.updates === "restart" ? [{ kind: "action", action: "restartToUpdate", label: "Restart to Update" }] : ctx.updates === "check" ? [{ kind: "action", action: "checkForUpdates", label: "Check for Updates…" }] : [];
+
   const appMenu: MenuNode = {
     kind: "submenu",
     label: ctx.appName,
     role: "appMenu",
     items: [
       { kind: "role", role: "about", label: `About ${ctx.appName}` },
+      ...updateItems,
       sep,
       cmd("app.settings"),
       sep,
@@ -219,7 +226,7 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("help.connectClaude"),
       sep,
       cmd("help.reportIssue"),
-      ...(mac ? [] : [sep, { kind: "role", role: "about", label: `About ${ctx.appName}` } satisfies MenuNode]),
+      ...(mac ? [] : [sep, ...updateItems, { kind: "role", role: "about", label: `About ${ctx.appName}` } satisfies MenuNode]),
     ],
   };
 

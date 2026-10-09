@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeWindowsForRestart,
+  moveConflict,
   reopenPlan,
   resolveClosePrompt,
   restartConfirmation,
@@ -251,6 +252,13 @@ describe("restartConfirmation", () => {
   });
 });
 
+describe("moveConflict", () => {
+  it("asks before replacing a Sonobe in Applications, and never replaces one that's running", () => {
+    expect(moveConflict("exists")).toMatchObject({ replace: "ask", question: { message: "Replace the Sonobe that's in your Applications folder?", buttons: ["Replace", "Cancel"] } });
+    expect(moveConflict("existsAndRunning")).toEqual({ replace: false, message: "Another Sonobe is running from your Applications folder.", detail: "Quit that one, then choose Move to Applications again." });
+  });
+});
+
 describe("restartKeepingWork", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
@@ -322,6 +330,23 @@ describe("restartKeepingWork", () => {
     expect(await unwritable.run).toMatchObject({ result: "failed", error: { message: "EACCES: permission denied" } });
     expect(unwritable.log).not.toContain("install");
     expect(unwritable.log.at(-1)).toContain("recover");
+  });
+
+  it("closes the windows the same way for a move to Applications, and brings the work back when the app stays", async () => {
+    const log: string[] = [];
+    const run = restartKeepingWork({
+      reason: "move",
+      confirm: async () => true,
+      windows: () => [fakeWindow("a", log, { closed: true, draft: DRAFT })],
+      setRestarting: (on) => void log.push(`restarting ${on}`),
+      record: () => void log.push("record"),
+      noWindowsLeft: async () => true,
+      // The person kept the copy that's already in Applications.
+      install: () => Promise.reject(new Error("Sonobe stayed where it is.")),
+      recover: async (windows) => void log.push(`recover ${windows.length}`),
+    });
+    expect(await run).toMatchObject({ result: "failed", error: { message: "Sonobe stayed where it is." } });
+    expect(log).toEqual(["restarting true", "focus a", "close a (move)", "record", "restarting false", "recover 1"]);
   });
 
   it("treats an install that comes back without restarting as a failure too", async () => {

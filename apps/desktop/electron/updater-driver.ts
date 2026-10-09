@@ -3,6 +3,7 @@
  * which does the installing. loadUpdaterDriver is the only place that loads electron-updater, and main
  * reaches this file with a dynamic import when the first check starts, so launch never evaluates it.
  * createElectronUpdaterDriver takes both updaters as arguments, so its rules are unit tested with fakes.
+ * Nothing here imports Electron.
  */
 
 import type { UpdateDriver, UpdateMode } from "./updates.ts";
@@ -128,8 +129,8 @@ export function createElectronUpdaterDriver(options: UpdaterDriverOptions): Upda
   };
 }
 
-/** The real thing: electron-updater's updater for this platform and Electron's own, both loaded here and now. */
-export async function loadUpdaterDriver(options: Omit<UpdaterDriverOptions, "updater" | "native">): Promise<UpdateDriver> {
-  const [{ autoUpdater }, electron] = await Promise.all([import("electron-updater"), import("electron")]);
-  return createElectronUpdaterDriver({ ...options, updater: autoUpdater as unknown as AppUpdaterLike, native: electron.autoUpdater as unknown as NativeUpdaterLike });
+/** The real thing: electron-updater's updater for this platform, loaded here and now, over Electron's own (which main passes in). */
+export async function loadUpdaterDriver(options: Omit<UpdaterDriverOptions, "updater">): Promise<UpdateDriver> {
+  const { autoUpdater } = await import("electron-updater");
+  return createElectronUpdaterDriver({ ...options, updater: autoUpdater as unknown as AppUpdaterLike });
 }

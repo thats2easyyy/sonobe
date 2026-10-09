@@ -58,6 +58,16 @@ export const IPC = {
   draftsRead: "sonobe:drafts:read",
   draftsRelease: "sonobe:drafts:release",
   draftsReveal: "sonobe:drafts:reveal",
+  /** renderer → main: updates (electron/updates.ts). */
+  updatesStatus: "sonobe:updates:status",
+  updatesCheck: "sonobe:updates:check",
+  updatesRestart: "sonobe:updates:restart",
+  updatesSetAutoCheck: "sonobe:updates:set-auto-check",
+  updatesMoveToApplications: "sonobe:updates:move-to-applications",
+  /** main → renderer: the update status changed. */
+  updatesChanged: "sonobe:updates:changed",
+  /** renderer → main: number of onStatus subscribers in this window. With none, main answers Check for Updates… itself. */
+  updatesListeners: "sonobe:updates:listeners",
   rpcRequest: "sonobe:rpc:request",
   rpcResponse: "sonobe:rpc:response",
   /** renderer → main: the full list of registered rpc method names. */
@@ -68,3 +78,6 @@ export type IpcChannel = (typeof IPC)[keyof typeof IPC];
 
 /** Added to an editor window's process.argv when the app runs muted (SONOBE_MUTE); the preload reads it into sonobeHost.muted. */
 export const MUTED_ARG = "--sonobe-muted";
+
+/** Added to the first editor window's process.argv when this launch reopens what was open before a restart; the preload reads it into sonobeHost.reopening. */
+export const REOPENING_ARG = "--sonobe-reopening";

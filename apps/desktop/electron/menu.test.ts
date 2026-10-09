@@ -129,6 +129,55 @@ describe("menu spec", () => {
   });
 });
 
+describe("the update item", () => {
+  const withUpdates = (platform: HostPlatform, updates?: "check" | "restart") => buildMenuSpec({ platform, appName: "Sonobe", recentProjects: [], dev: false, ...(updates ? { updates } : {}) });
+  const submenu = (nodes: MenuNode[], label: string) => nodes.find((n): n is Extract<MenuNode, { kind: "submenu" }> => n.kind === "submenu" && n.label === label)!;
+  const check: MenuNode = { kind: "action", action: "checkForUpdates", label: "Check for Updates…" };
+
+  it("sits right under About in the app menu on macOS", () => {
+    const items = submenu(withUpdates("darwin", "check"), "Sonobe").items;
+    expect(items.slice(0, 3)).toEqual([{ kind: "role", role: "about", label: "About Sonobe" }, check, { kind: "separator" }]);
+    expect(labels(submenu(withUpdates("darwin", "check"), "Help").items)).not.toContain("Check for Updates…");
+  });
+
+  it.each(["win32", "linux"] as const)("sits above About in Help on %s", (platform) => {
+    const items = submenu(withUpdates(platform, "check"), "Help").items;
+    expect(items.slice(-3)).toEqual([{ kind: "separator" }, check, { kind: "role", role: "about", label: "About Sonobe" }]);
+  });
+
+  it("reads Restart to Update once an update is ready", () => {
+    for (const platform of PLATFORMS) {
+      const all = labels(withUpdates(platform, "restart"));
+      expect(all, platform).toContain("Restart to Update");
+      expect(all, platform).not.toContain("Check for Updates…");
+      expect(JSON.stringify(withUpdates(platform, "restart"))).toContain('"action":"restartToUpdate"');
+    }
+  });
+
+  it("isn't there in a build that never checks, such as a checkout", () => {
+    for (const platform of PLATFORMS) {
+      // The same menus with the item taken out: its absence here isn't a menu that lost its place for it.
+      const without = withUpdates(platform);
+      expect(JSON.stringify(without), platform).not.toMatch(/Update/);
+      const menu = platform === "darwin" ? "Sonobe" : "Help";
+      expect(submenu(withUpdates(platform, "check"), menu).items.filter((item) => JSON.stringify(item) !== JSON.stringify(check))).toEqual(submenu(without, menu).items);
+    }
+  });
+
+  it("runs in main: it's an action, not a command the editor has to be open for", () => {
+    const calls: string[] = [];
+    const handlers = { command: (id: string) => calls.push(`command:${id}`), openRecent: () => undefined, action: (a: string) => calls.push(`action:${a}`) };
+    for (const [updates, label] of [["check", "Check for Updates…"], ["restart", "Restart to Update"]] as const) {
+      const template = toMenuTemplate(withUpdates("darwin", updates), "darwin", handlers);
+      const item = (template[0]!.submenu as { label?: string; click?: () => void }[]).find((entry) => entry.label === label)!;
+      item.click!();
+    }
+    expect(calls).toEqual(["action:checkForUpdates", "action:restartToUpdate"]);
+    // Every command still appears exactly once: the item added none.
+    expect(collectCommandIds(withUpdates("darwin", "check")).sort()).toEqual([...COMMAND_IDS].sort());
+  });
+});
+
 describe("toMenuTemplate", () => {
   it("wires commands, recents, and actions to handlers", () => {
     const calls: string[] = [];

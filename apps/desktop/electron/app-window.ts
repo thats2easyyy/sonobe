@@ -6,8 +6,9 @@ import { DARK_BACKGROUND, placeholderHtml, toDataUrl } from "./placeholder.ts";
 import type { RendererRpcHub } from "./rpc.ts";
 import { isAllowedSubframeUrl, isAppUrl, isExternalUrl, isMailtoUrl, type AppContent } from "./security.ts";
 import { ZOOM_MAX, ZOOM_MIN, loadWindowState, saveWindowStateSync, type WindowState } from "./window-state.ts";
-import { IPC, MUTED_ARG } from "./ipc.ts";
+import { IPC, MUTED_ARG, REOPENING_ARG } from "./ipc.ts";
 import type { NativeAction } from "./menu.ts";
+import { resolveClosePrompt, type CloseOutcome, type CloseReason } from "./update-restart.ts";
 
 export const WINDOW_DEFAULTS = { width: 1440, height: 900, minWidth: 1024, minHeight: 680 } as const;
 
@@ -19,6 +20,8 @@ export interface AppWindowOptions {
   source: WindowContentSource;
   statePath: string;
   mute: boolean;
+  /** This window opens again what was open before a restart: its editor skips the welcome screen (sonobeHost.reopening). */
+  reopening?: boolean;
   rpc: RendererRpcHub;
   appName: string;
   log(level: "info" | "warn" | "error", message: string): void;
@@ -35,6 +38,10 @@ export interface AppWindow {
   content(): AppContent;
   /** Set by the preload when onCommand subscribers change. */
   setCommandListeners(count: number): void;
+  /** Set by the preload when sonobeHost.updates.onStatus subscribers change. */
+  setUpdateListeners(count: number): void;
+  /** The editor in this window listens for update status, so its notices answer Check for Updates…. */
+  showsUpdates(): boolean;
   sendCommand(id: SonobeCommandId): void;
   /** Queue or deliver a project folder to the renderer. */
   openProject(dir: string): void;
@@ -44,6 +51,12 @@ export interface AppWindow {
   setRepresentedDir(dir: string): void;
   zoom(action: Extract<NativeAction, "interfaceLarger" | "interfaceSmaller" | "interfaceReset">): void;
   focus(): void;
+  /**
+   * Close the window as its close button would: with unsaved changes it asks first. Resolves once the
+   * window is gone, or with `closed: false` when the person kept it open. A prompt that's already up
+   * answers for this request too. `reason` words the prompt for a restart (electron/update-restart.ts).
+   */
+  requestClose(reason?: CloseReason): Promise<CloseOutcome>;
 }
 
 const ZOOM_STEPS = [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
@@ -97,7 +110,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       spellcheck: false,
       safeDialogs: true,
       // System speech plays through the OS, past setAudioMuted, so the editor has to know to stay quiet.
-      ...(opts.mute ? { additionalArguments: [MUTED_ARG] } : {}),
+      additionalArguments: [...(opts.mute ? [MUTED_ARG] : []), ...(opts.reopening ? [REOPENING_ARG] : [])],
     },
   });
   const wc = win.webContents;
@@ -105,6 +118,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
 
   let content: AppContent = opts.source.kind === "dev" ? { kind: "dev", origin: opts.source.url.origin } : { kind: "file", root: opts.source.root };
   let commandListeners = 0;
+  let updateListeners = 0;
   let openReady = false;
   const pendingOpens: string[] = [];
   const pendingCommands: SonobeCommandId[] = [];
@@ -112,7 +126,10 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   let baseTitle = opts.appName;
   let titleOverridden = false;
   let forceClose = false;
-  let prompting = false;
+  /** The unsaved-changes prompt that's open, and what comes of it. */
+  let prompt: Promise<CloseOutcome> | null = null;
+  /** requestClose() calls waiting to hear how a prompt ended. */
+  const closeWatchers = new Set<(outcome: CloseOutcome) => void>();
 
   const currentState = (): WindowState => {
     const b = win.getNormalBounds();
@@ -174,6 +191,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   wc.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
       commandListeners = 0;
+      updateListeners = 0;
       openReady = false;
     }
   });
@@ -193,47 +211,56 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
     win.show();
   });
 
-  const promptUnsaved = async () => {
-    // Nobody may answer the prompt (the app is being shut down): keep the edits in the draft meanwhile.
-    const flushed = opts.rpc.hasMethod(wc, "drafts.flush") === true ? opts.rpc.invoke(wc, "drafts.flush", undefined, { timeoutMs: 1500 }).catch(() => undefined) : Promise.resolve();
-    const canSave = opts.rpc.hasMethod(wc, "document.save") === true;
-    const buttons = canSave ? ["Save", "Don't Save", "Cancel"] : ["Don't Save", "Cancel"];
-    const { response } = await dialog.showMessageBox(win, {
-      type: "warning",
-      buttons,
-      defaultId: 0,
-      cancelId: buttons.length - 1,
-      message: `Do you want to save the changes you made to “${baseTitle}”?`,
-      detail: "Your changes will be lost if you don't save them.",
-    });
-    const choice = buttons[response];
-    if (choice === "Cancel") return;
-    if (choice === "Save") {
-      try {
+  const warn = (what: string) => (err: unknown) => opts.log("warn", `${what}: ${err instanceof Error ? err.message : String(err)}`);
+
+  /** The unsaved-changes prompt (resolveClosePrompt decides; this gives it the dialogs and the editor). One at a time: a second request joins the one that's open. */
+  const promptUnsaved = (reason: CloseReason): Promise<CloseOutcome> =>
+    (prompt ??= resolveClosePrompt({
+      reason,
+      name: baseTitle,
+      canSave: opts.rpc.hasMethod(wc, "document.save") === true,
+      // Closing: nobody may answer the prompt (the app is being shut down), so the edits go to the draft meanwhile.
+      // A restart waits for the draft, up to 10 s, because Keep Draft is only offered once it holds everything.
+      flush: async () => {
+        if (opts.rpc.hasMethod(wc, "drafts.flush") !== true) return null;
+        const reply = await opts.rpc.invoke<{ draft?: { id?: unknown } | null; pending?: unknown } | undefined>(wc, "drafts.flush", undefined, { timeoutMs: reason === "close" ? 1500 : 10_000 });
+        return { draft: typeof reply?.draft?.id === "string" ? reply.draft.id : null, pending: reply?.pending !== false };
+      },
+      ask: async ({ message, detail, buttons }) => {
+        const { response } = await dialog.showMessageBox(win, { type: "warning", buttons, defaultId: 0, cancelId: buttons.length - 1, message, detail });
+        return buttons[response] ?? "Cancel";
+      },
+      save: async () => {
         // interactive: when the project changed on disk meanwhile, the editor asks which version to keep.
-        const result = await opts.rpc.invoke(wc, "document.save", { interactive: true }, { timeoutMs: 120_000 });
-        if (result === false) return;
-      } catch (err) {
-        await dialog.showMessageBox(win, { type: "error", message: "Sonobe couldn't save your prototype.", detail: err instanceof Error ? err.message : String(err) });
-        return;
-      }
-    }
-    // Saved, or the person chose not to keep the changes: the draft goes with the window (after the flush lands).
-    await flushed;
-    await opts.onDiscardDrafts?.(wc.id).catch((err: unknown) => opts.log("warn", `Couldn't remove the window's draft: ${err instanceof Error ? err.message : String(err)}`));
-    forceClose = true;
-    win.close();
-  };
+        const result = await opts.rpc.invoke<false | { path?: unknown } | undefined>(wc, "document.save", { interactive: true }, { timeoutMs: 120_000 });
+        return result === false ? false : typeof result?.path === "string" ? result.path : null;
+      },
+      discard: async () => {
+        await opts.onDiscardDrafts?.(wc.id).catch(warn("Couldn't remove the window's draft"));
+      },
+      showError: async (message, detail) => {
+        await dialog.showMessageBox(win, { type: "error", message, detail });
+      },
+    })
+      .catch((err: unknown): CloseOutcome => {
+        warn("The unsaved-changes prompt failed")(err);
+        return { closed: false };
+      })
+      .then((outcome) => {
+        prompt = null;
+        for (const watch of [...closeWatchers]) watch(outcome);
+        if (outcome.closed && !win.isDestroyed()) {
+          forceClose = true;
+          win.close();
+        }
+        return outcome;
+      }));
 
   win.on("close", (event) => {
     saveState();
     if (!edited || forceClose) return;
     event.preventDefault();
-    if (prompting) return;
-    prompting = true;
-    void promptUnsaved().finally(() => {
-      prompting = false;
-    });
+    void promptUnsaved("close");
   });
   win.on("closed", () => {
     if (saveTimer) clearTimeout(saveTimer);
@@ -256,6 +283,10 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       commandListeners = Math.max(0, Math.floor(count));
       deliverCommands();
     },
+    setUpdateListeners(count) {
+      updateListeners = Math.max(0, Math.floor(count));
+    },
+    showsUpdates: () => updateListeners > 0 && !win.isDestroyed(),
     sendCommand(id) {
       if (win.isDestroyed()) return;
       if (id === "help.reportIssue") {
@@ -299,6 +330,29 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
+    },
+    requestClose(reason = "close") {
+      if (win.isDestroyed()) return Promise.resolve({ closed: true });
+      return new Promise<CloseOutcome>((resolve) => {
+        // What the prompt said on the way out (where Save put the document, the draft that was kept).
+        let last: CloseOutcome = { closed: true };
+        const done = (outcome: CloseOutcome) => {
+          closeWatchers.delete(watch);
+          win.removeListener("closed", onClosed);
+          resolve(outcome);
+        };
+        // A prompt that ends with the window staying open answers now; one that closes it answers when it's gone.
+        const watch = (outcome: CloseOutcome) => {
+          last = outcome;
+          if (!outcome.closed) done(outcome);
+        };
+        const onClosed = () => done(last.closed ? last : { closed: true });
+        closeWatchers.add(watch);
+        win.once("closed", onClosed);
+        // An open prompt is joined. Otherwise the close handler asks, if there's anything to ask.
+        if (edited || prompt) void promptUnsaved(reason);
+        else win.close();
+      });
     },
   };
 

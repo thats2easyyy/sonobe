@@ -128,7 +128,7 @@ Two smaller things to decide before the first tag:
 6. **Try it on a clean Mac** (below).
 7. **Publish the draft.** That makes the download public.
 
-A release that's wrong is fixed by the next version, never by swapping its files. And never publish a release as the latest one without `latest-mac.yml` in it, for example one that carries only the Claude Desktop extension: the newest release's `latest-mac.yml` is the feed an installed app reads to find an update. The app doesn't check for updates yet, but the first release already carries the feed, so the first app that does check finds it.
+A release that's wrong is fixed by the next version, never by swapping its files. And never publish a release as the latest one without `latest-mac.yml` in it, for example one that carries only the Claude Desktop extension: the newest release's `latest-mac.yml` is the feed an installed app reads to find an update. Every installed app reads it a few seconds after launch and every few hours (`apps/desktop/electron/updates.ts`), so a latest release without it makes every check fail.
 
 Keep `Sonobe-<version>-sourcemaps.tar.gz` on every release. The app ships without source maps, and a stack trace from that version can only be read with that archive.
 

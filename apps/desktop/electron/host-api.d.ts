@@ -401,6 +401,8 @@ export interface SonobeHost {
   readonly version: string;
   /** True when the app runs muted (SONOBE_MUTE). The editor then speaks silently too: system speech plays past Chromium's audio mute. */
   readonly muted: boolean;
+  /** True in the window that opens again what was open before a restart for an update: the editor skips its welcome screen there. */
+  readonly reopening: boolean;
 
   /** Native folder picker for a *.sonobe project. Resolves the project directory or null. */
   openProjectDialog(): Promise<string | null>;
@@ -483,6 +485,13 @@ export interface SonobeHost {
 
   /** Drafts of unsaved work, so it survives a crash, a quit or a killed process. */
   drafts: SonobeDrafts;
+
+  /**
+   * Updates: whether a newer version exists and what this copy can do about it. Status changes go to
+   * every window. While a window subscribes to them, its notices answer Check for Updates…; with no
+   * subscriber, the host answers with a native dialog.
+   */
+  updates: SonobeUpdates;
 }
 
 declare global {

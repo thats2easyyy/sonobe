@@ -207,6 +207,20 @@ export function restartConfirmation(sessions: readonly string[], version: string
   };
 }
 
+/**
+ * What Move to Applications does when a Sonobe is already in the Applications folder: ask before
+ * replacing one that isn't running, and never replace one that is.
+ */
+export function moveConflict(conflict: "exists" | "existsAndRunning"): { replace: "ask"; question: ClosePromptQuestion } | { replace: false; message: string; detail: string } {
+  if (conflict === "existsAndRunning") {
+    return { replace: false, message: "Another Sonobe is running from your Applications folder.", detail: "Quit that one, then choose Move to Applications again." };
+  }
+  return {
+    replace: "ask",
+    question: { message: "Replace the Sonobe that's in your Applications folder?", detail: "This copy takes its place. Your prototypes and settings stay as they are.", buttons: ["Replace", "Cancel"] },
+  };
+}
+
 // --- The sequence --------------------------------------------------------------------------------
 
 export interface RestartSteps {

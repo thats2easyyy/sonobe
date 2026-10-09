@@ -173,7 +173,10 @@ describe("electron-updater driver", () => {
     const source = readFileSync(new URL("./updater-driver.ts", import.meta.url), "utf8");
     expect(source).toContain('import("electron-updater")');
     expect(source).not.toMatch(/^import .* from "electron(-updater)?";$/m);
+    // main only takes a type from this file; the code arrives with import("./updater-driver.ts").
     const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
-    expect(main).not.toMatch(/from "electron-updater"|from "\.\/updater-driver\.ts"/);
+    expect(main).not.toContain('"electron-updater"');
+    expect(main.match(/^import (type )?.* from "\.\/updater-driver\.ts";$/gm)).toEqual(['import type { NativeUpdaterLike } from "./updater-driver.ts";']);
+    expect(main).toContain('import("./updater-driver.ts")');
   });
 });
