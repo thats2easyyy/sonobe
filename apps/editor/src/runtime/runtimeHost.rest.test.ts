@@ -11,6 +11,7 @@ import type { SceneFrame } from "@sonobe/engine";
 import { buildDoc, createMockRegistry, defineMock, port } from "@sonobe/engine/testing";
 import { DomTextMeasurer } from "@sonobe/renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { smoothness } from "../panels/hud/perfModel.ts";
 import { createDocumentStore } from "../state/document.ts";
 import { createRuntimeHost, type RuntimeHost, type RuntimeHostOptions } from "./runtimeHost.ts";
 import { createManualScheduler, type ManualScheduler } from "./scheduler.ts";
@@ -31,6 +32,8 @@ const natural = defineMock({
 const ticks = defineMock<{ n: number }>({ type: "ticks", name: "Ticks", inputs: [], outputs: [], state: () => ({ n: 0 }), evaluate: (ctx) => void ctx.state.n++ });
 
 const registry = createMockRegistry([js, dark, natural, ticks]);
+/** Frames a probe of the display's rate takes on a steady clock: one to start, and twelve even gaps. */
+const PROBE_FRAMES = 13;
 const hosts: RuntimeHost[] = [];
 
 afterEach(() => {
@@ -74,11 +77,18 @@ function setup(options: Partial<RuntimeHostOptions> & { doc?: SonobeDocument } =
   return { scheduler, store, host };
 }
 
-/** Run frames until the loop rests (it must, within a second of frames). */
+/**
+ * Run frames until the loop rests (it must, within a second of frames). The only frames asked for
+ * after that are the probe of the display's rate (displayRate.ts): empty ones, and soon none.
+ */
 function settle(scheduler: ManualScheduler, host: RuntimeHost) {
   for (let i = 0; i < 60 && !host.isResting(); i++) scheduler.frame();
   expect(host.isResting()).toBe(true);
+  const frame = host.runtime.frame;
+  for (let i = 0; i < PROBE_FRAMES && scheduler.pending > 0; i++) scheduler.frame();
   expect(scheduler.pending).toBe(0);
+  expect(host.isResting()).toBe(true);
+  expect(host.runtime.frame).toBe(frame);
 }
 
 function rested(options: Parameters<typeof setup>[0] = {}) {
@@ -103,8 +113,10 @@ describe("the frame loop at rest", () => {
     expect(host.isResting()).toBe(false);
     scheduler.frames(3);
     expect(host.isResting()).toBe(true);
-    expect(scheduler.pending).toBe(0);
     expect(host.state.getState()).toMatchObject({ playing: true, resting: true, fps: 0, frame: 2 });
+    // Empty frames measure the display, then nothing asks for a frame.
+    scheduler.frames(PROBE_FRAMES);
+    expect(scheduler.pending).toBe(0);
     scheduler.frames(100);
     expect(host.runtime.frame).toBe(2);
     expect(host.isPlaying()).toBe(true);
@@ -117,6 +129,54 @@ describe("the frame loop at rest", () => {
     expect(host.isResting()).toBe(false);
     expect(host.state.getState()).toMatchObject({ resting: false, displayHz: 60 });
     expect(host.state.getState().fps).toBeGreaterThan(55);
+  });
+
+  it("measures the display on empty frames once it rests, and a wake stops the measuring", () => {
+    const { scheduler, store, host } = setup({ statsIntervalMs: 0 });
+    scheduler.frames(3, 1000 / 120);
+    expect(host.isResting()).toBe(true);
+    // Three frames of the loop said nothing yet.
+    expect(host.state.getState().displayHz).toBe(0);
+    scheduler.frames(PROBE_FRAMES, 1000 / 120);
+    expect(host.state.getState()).toMatchObject({ resting: true, displayHz: 120, frame: 2 });
+    expect(scheduler.pending).toBe(0);
+
+    // An edit a few frames into the next probe: only the loop's frame is pending.
+    apply(store, [{ op: "setInput", target: "fade.start", value: 0.8 }]);
+    for (let i = 0; i < 10 && !host.isResting(); i++) scheduler.frame(1000 / 120);
+    scheduler.frames(5, 1000 / 120);
+    expect(scheduler.pending).toBe(1);
+    apply(store, [{ op: "setInput", target: "fade.start", value: 0.9 }]);
+    expect(scheduler.pending).toBe(1);
+    scheduler.frame(1000 / 120);
+    expect(host.runtime.getValue("@card.opacity")).toBe(0.9);
+  });
+
+  it("judges a prototype stuck at 60 fps against a 120 Hz display, measured while paused", () => {
+    const { scheduler, host } = setup({ doc: movingDoc(), statsIntervalMs: 0 });
+    // Too heavy for the display from its first frame: every frame takes two refreshes.
+    scheduler.frames(120, 1000 / 60);
+    expect(host.state.getState().displayHz).toBe(60);
+    host.pause();
+    scheduler.frames(PROBE_FRAMES, 1000 / 120);
+    expect(host.state.getState()).toMatchObject({ playing: false, displayHz: 120 });
+    expect(scheduler.pending).toBe(0);
+    host.play();
+    scheduler.frames(700, 1000 / 60);
+    const { fps, displayHz } = host.state.getState();
+    expect(Math.round(fps)).toBe(60);
+    expect(displayHz).toBe(120);
+    expect(smoothness(fps, true, { displayHz }).label).toBe("Some dropped frames");
+  });
+
+  it("measures again after a frame drawn while paused", () => {
+    const { scheduler, store, host } = setup({ autoplay: false });
+    apply(store, [{ op: "setInput", target: "fade.start", value: 0.8 }]);
+    scheduler.frame();
+    expect(host.runtime.frame).toBe(0);
+    scheduler.frames(PROBE_FRAMES);
+    expect(host.state.getState().displayHz).toBe(60);
+    expect(scheduler.pending).toBe(0);
   });
 
   it("isn't at rest while paused, and settles again after play", () => {
@@ -332,6 +392,7 @@ describe("what wakes a resting loop", () => {
     expect(host.isResting()).toBe(true);
     expect(frames).toBeLessThan(60);
 
+    scheduler.frames(PROBE_FRAMES);
     host.restart();
     for (frames = 0; frames < 200 && !host.isResting(); frames++) scheduler.frame();
     expect(frames).toBeLessThan(5);
@@ -468,7 +529,8 @@ describe("what frames feed while the loop rests", () => {
   });
 
   it("time keeps running across a rest: the frame that ends it is 5 s later, and patches see one frame of it", () => {
-    const { scheduler, host } = rested({ statsIntervalMs: 0 });
+    const { scheduler, host } = setup({ statsIntervalMs: 0 });
+    for (let i = 0; i < 60 && !host.isResting(); i++) scheduler.frame();
     const before = host.runtime.time;
     scheduler.frame(5000);
     expect(host.runtime.time).toBe(before);

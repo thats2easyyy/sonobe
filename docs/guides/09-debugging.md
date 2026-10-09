@@ -132,7 +132,7 @@ The Console shows logs from JavaScript patches, plus runtime issues like script 
 
 ## Performance
 
-Keep an eye on the FPS meter in the bottom HUD while something moves. The goal is a steady 60, or 120 on displays that support it: Sonobe judges "Smooth" against your display's rate. When nothing in the prototype is moving, the meter reads "At rest": no frames run, so there is no rate to show and nothing is wrong. Tap, drag or scroll to see a number.
+Keep an eye on the FPS meter in the bottom HUD while something moves. The goal is a steady 60, or 120 on displays that support it: Sonobe judges "Smooth" against your display's rate, which it measures whenever the prototype is at rest or paused. A prototype that never stops moving hasn't been measured yet, so on a 120 Hz display pause it once before you trust "Smooth" at 60 fps. When nothing in the prototype is moving, the meter reads "At rest": no frames run, so there is no rate to show and nothing is wrong. Tap, drag or scroll to see a number.
 
 When a prototype can't keep up, frames stretch. Sonobe caps each step at 64 ms, so a badly overloaded prototype (below about 15 frames per second) runs in slow motion instead of teleporting. If the animations look slow and FPS is low, you have a performance problem, not a spring problem.
 

@@ -105,7 +105,10 @@ export interface RuntimeHostState {
   resting: boolean;
   /** Frames per second while frames run; 0 while paused or at rest. */
   fps: number;
-  /** The display's refresh rate as the frame loop saw it (60, 120...), or 0 before enough frames ran. */
+  /**
+   * The display's refresh rate (60, 120...), or 0 before it is known. Measured on empty frames each
+   * time the loop rests or pauses (displayRate.ts); until then, the fastest the loop's own frames came, 60 at least.
+   */
   displayHz: number;
   frame: number;
   /** Seconds since the prototype started. */
@@ -405,7 +408,10 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   const state = createStore<RuntimeHostState>()(() => ({ playing: false, resting: false, fps: 0, displayHz: 0, frame: -1, time: 0, frameMs: 0, diagnostics: [], muted: mute.getState().muted, profiling: false, viewers: 0, scope, staleState: null }));
   const meter = createFpsMeter();
-  const displayRate = createDisplayRate();
+  const displayRate = createDisplayRate(scheduler, () => {
+    const displayHz = displayRate.hz();
+    if (!disposed && state.getState().displayHz !== displayHz) state.setState({ displayHz });
+  });
   const frameListeners = new Set<(scene: SceneFrame) => void>();
   const restartListeners = new Set<() => void>();
   const pulseListeners = new Set<(fire: PulseFire) => void>();
@@ -448,6 +454,8 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   const schedule = () => {
     if (handle !== null || disposed) return;
+    // The frames from here on carry the prototype's work: they can't measure the display.
+    displayRate.stopProbe();
     handle = scheduler.request(tick);
     if (asleep) {
       asleep = false;
@@ -640,6 +648,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     // and the last frame's counters and diagnostics.
     emitValues(now, true);
     publishStats(now, true);
+    displayRate.probe();
   }
 
   function tick(now: number) {
@@ -666,6 +675,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     } else if (refreshQueued) {
       refreshQueued = false;
       runFrame(0, now, true);
+      displayRate.probe();
     }
   }
 
@@ -690,6 +700,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       handle = null;
     }
     state.setState({ playing: false, resting: false, fps: 0 });
+    displayRate.probe();
   }
 
   const setDocument = (doc: SonobeDocument) => {
@@ -994,6 +1005,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       if (disposed) return;
       pause();
       disposed = true;
+      displayRate.stopProbe();
       unsubscribeDoc?.();
       unsubscribeTrust();
       unsubscribeMute();

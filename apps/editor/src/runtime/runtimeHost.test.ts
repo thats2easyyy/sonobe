@@ -73,8 +73,9 @@ describe("runtime host", () => {
     scheduler.frames(2);
     expect(scheduler.pending).toBe(1);
     host.pause();
+    // The loop's frame is cancelled. Empty frames measure the display for a moment (displayRate.ts), then none are asked for.
+    scheduler.frames(20);
     expect(scheduler.pending).toBe(0);
-    scheduler.frame();
     expect(host.runtime.frame).toBe(1);
 
     store.getState().apply([{ op: "updateLayer", id: "card", props: { color: "#FF0000FF" } }], { label: "Color" });
