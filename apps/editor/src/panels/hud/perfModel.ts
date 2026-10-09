@@ -11,6 +11,8 @@ export interface PerfSample {
   /** Evaluate time of the last frame. */
   frameMs: number;
   playing: boolean;
+  /** Playing with no frames running: nothing in the prototype moved (fps is 0, and nothing is wrong). */
+  resting: boolean;
 }
 
 /** Append a sample, keeping the newest `capacity`. */
@@ -23,35 +25,48 @@ export function pushSample(samples: readonly PerfSample[], sample: PerfSample, c
 export interface PerfSummary {
   fps: { latest: number; min: number; avg: number };
   frameMs: { latest: number; avg: number; max: number };
-  /** Playing samples below 50 fps. */
+  /** Samples with frames running that fell under five sixths of the display's rate (50 fps at 60 Hz). */
   slowSamples: number;
+  /** Samples with frames running: playing and not at rest. */
   playingSamples: number;
 }
 
-export function summarizeSamples(samples: readonly PerfSample[]): PerfSummary {
-  const playing = samples.filter((s) => s.playing && s.fps > 0);
+/** The rate smoothness is judged against: the display's, or 60 Hz until it is known. */
+export const displayRateOr60 = (displayHz: number | undefined) => (displayHz && displayHz > 0 ? displayHz : 60);
+
+/** Whether frames were running at a sample: paused and resting samples have no frame rate to judge. */
+export const framesRan = (s: PerfSample) => s.playing && !s.resting && s.fps > 0;
+
+export function summarizeSamples(samples: readonly PerfSample[], displayHz?: number): PerfSummary {
+  const running = samples.filter(framesRan);
   const last = samples.at(-1);
   const avg = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+  const slow = displayRateOr60(displayHz) * (5 / 6);
   return {
-    fps: { latest: last?.playing ? last.fps : 0, min: playing.length ? Math.min(...playing.map((s) => s.fps)) : 0, avg: avg(playing.map((s) => s.fps)) },
+    fps: { latest: last && framesRan(last) ? last.fps : 0, min: running.length ? Math.min(...running.map((s) => s.fps)) : 0, avg: avg(running.map((s) => s.fps)) },
     frameMs: { latest: last?.frameMs ?? 0, avg: avg(samples.map((s) => s.frameMs)), max: samples.length ? Math.max(...samples.map((s) => s.frameMs)) : 0 },
-    slowSamples: playing.filter((s) => s.fps < 50).length,
-    playingSamples: playing.length,
+    slowSamples: running.filter((s) => s.fps < slow).length,
+    playingSamples: running.length,
   };
 }
 
 export type SmoothnessTone = "success" | "warn" | "danger" | "neutral";
 
-/** Plain-language frame-rate status. */
-export function smoothness(fps: number, playing: boolean): { tone: SmoothnessTone; label: string } {
+/**
+ * Plain-language frame-rate status, judged against the display's rate (a 120 Hz display at 60 fps
+ * drops every other frame). A prototype at rest runs no frames, which isn't a problem.
+ */
+export function smoothness(fps: number, playing: boolean, options: { resting?: boolean; displayHz?: number } = {}): { tone: SmoothnessTone; label: string } {
   if (!playing) return { tone: "neutral", label: "Paused" };
+  if (options.resting) return { tone: "neutral", label: "At rest" };
   if (fps <= 0) return { tone: "neutral", label: "Starting" };
-  if (fps >= 55) return { tone: "success", label: "Smooth" };
-  if (fps >= 30) return { tone: "warn", label: "Some dropped frames" };
+  const rate = displayRateOr60(options.displayHz);
+  if (fps >= rate * 0.92) return { tone: "success", label: "Smooth" };
+  if (fps >= rate * 0.5) return { tone: "warn", label: "Some dropped frames" };
   return { tone: "danger", label: "Choppy" };
 }
 
-/** Share of a 60 Hz frame budget (16.7 ms) used by evaluation, 0..1+. */
+/** Share of one frame at `fps` (16.7 ms at 60 Hz, 8.3 ms at 120 Hz) used by evaluation, 0..1+. */
 export function frameBudgetShare(frameMs: number, fps = 60): number {
   return frameMs / (1000 / fps);
 }

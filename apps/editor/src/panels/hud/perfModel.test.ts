@@ -4,7 +4,7 @@ import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { documentStats, formatMs, frameBudgetShare, patchTimingsOf, pushSample, sceneStats, smoothness, summarizeSamples, type PerfSample } from "./perfModel.ts";
 
-const sample = (t: number, fps: number, frameMs: number, playing = true): PerfSample => ({ t, fps, frameMs, playing });
+const sample = (t: number, fps: number, frameMs: number, playing = true, resting = false): PerfSample => ({ t, fps, frameMs, playing, resting });
 
 describe("samples", () => {
   it("keeps the newest samples", () => {
@@ -22,11 +22,34 @@ describe("samples", () => {
     expect(summarizeSamples([])).toMatchObject({ fps: { latest: 0, min: 0, avg: 0 }, frameMs: { latest: 0, avg: 0, max: 0 } });
   });
 
+  it("leaves a prototype at rest out of the frame rate: no frames ran, and nothing was slow", () => {
+    const summary = summarizeSamples([sample(0, 60, 2), sample(1, 0, 2, true, true), sample(2, 0, 2, true, true)]);
+    expect(summary.fps).toEqual({ latest: 0, min: 60, avg: 60 });
+    expect(summary.slowSamples).toBe(0);
+    expect(summary.playingSamples).toBe(1);
+  });
+
+  it("counts a sample as slow against the display's rate", () => {
+    const samples = [sample(0, 120, 2), sample(1, 90, 2), sample(2, 60, 2)];
+    expect(summarizeSamples(samples).slowSamples).toBe(0);
+    expect(summarizeSamples(samples, 120).slowSamples).toBe(2);
+  });
+
   it("describes smoothness in plain language", () => {
     expect(smoothness(60, true)).toEqual({ tone: "success", label: "Smooth" });
     expect(smoothness(45, true).tone).toBe("warn");
     expect(smoothness(20, true).tone).toBe("danger");
     expect(smoothness(60, false)).toEqual({ tone: "neutral", label: "Paused" });
+    // At rest no frames run: that is neither Starting nor a dropped frame.
+    expect(smoothness(0, true, { resting: true })).toEqual({ tone: "neutral", label: "At rest" });
+    expect(smoothness(0, true)).toEqual({ tone: "neutral", label: "Starting" });
+    expect(smoothness(0, false, { resting: true }).label).toBe("Paused");
+    // On a 120 Hz display 60 fps drops every other frame.
+    expect(smoothness(60, true, { displayHz: 120 })).toEqual({ tone: "warn", label: "Some dropped frames" });
+    expect(smoothness(115, true, { displayHz: 120 }).label).toBe("Smooth");
+    expect(smoothness(50, true, { displayHz: 120 }).tone).toBe("danger");
+    expect(smoothness(60, true, { displayHz: 0 }).label).toBe("Smooth");
+    expect(frameBudgetShare(4.17, 120)).toBeCloseTo(0.5, 2);
     expect(frameBudgetShare(8.35)).toBeCloseTo(0.5, 2);
     expect(formatMs(12.4)).toBe("12 ms");
     expect(formatMs(4.23)).toBe("4.2 ms");

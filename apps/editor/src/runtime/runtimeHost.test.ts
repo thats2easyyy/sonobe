@@ -69,16 +69,19 @@ describe("runtime host", () => {
 
   it("pauses, refreshes edits while paused, and restarts", () => {
     const { scheduler, store, host } = setup();
-    scheduler.frames(4);
+    // Two frames in, before the prototype settles: the next frame is scheduled.
+    scheduler.frames(2);
+    expect(scheduler.pending).toBe(1);
     host.pause();
     expect(scheduler.pending).toBe(0);
     scheduler.frame();
-    expect(host.runtime.frame).toBe(3);
+    expect(host.runtime.frame).toBe(1);
 
     store.getState().apply([{ op: "updateLayer", id: "card", props: { color: "#FF0000FF" } }], { label: "Color" });
     scheduler.frame();
     expect(host.runtime.document).toBe(store.getState().doc);
-    expect(host.runtime.time).toBeCloseTo(3 / 60, 5);
+    expect(host.runtime.frame).toBe(2);
+    expect(host.runtime.time).toBeCloseTo(1 / 60, 5);
 
     host.restart();
     scheduler.frame();
@@ -154,7 +157,6 @@ describe("runtime host", () => {
     const entries = consoleStore.getState().entries;
     expect(entries).toEqual(expect.arrayContaining([expect.objectContaining({ level: "log", source: "logger", componentPath: "main", message: "logger 42" }), expect.objectContaining({ level: "warn", source: "careful", message: "careful 7" })]));
     expect(host.state.getState().diagnostics).toEqual([{ code: "patch_warning", severity: "warning", message: "careful 7", component: "main", itemIds: ["careful"] }]);
-    expect(host.state.getState().fps).toBeGreaterThan(50);
   });
 
   it("draws into attached viewers and reports bounds", () => {

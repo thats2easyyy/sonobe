@@ -47,17 +47,20 @@ const TAB_ICONS: Record<HudTabId, ReactNode> = {
 
 /**
  * Bottom HUD: Console, Diagnostics, AI Activity, and Performance, with a live fps and frame-time
- * readout. Fills its container; mount inside an EditorProvider.
+ * readout ("At rest" while nothing in the prototype moves). Fills its container; mount inside an EditorProvider.
  */
 export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = false, onToggleCollapse, onConnectClaude, className }: HudProps) {
   const [current, setCurrent] = useControllableState<HudTabId>(tab, defaultTab, onTabChange);
   const counts = useHudCounts();
   const fps = useRuntimeState((s) => s.fps);
   const playing = useRuntimeState((s) => s.playing);
+  const resting = useRuntimeState((s) => s.resting);
+  const displayHz = useRuntimeState((s) => s.displayHz);
   const frameMs = useRuntimeState((s) => s.frameMs);
   const [severities, setSeverities] = useState<SeverityFilter>(ALL_SEVERITIES);
-  const status = smoothness(fps, playing);
-  const readout = playing ? `${status.label}, ${Math.round(fps)} fps, ${formatMs(frameMs)} to evaluate a frame` : "Paused";
+  const status = smoothness(fps, playing, { resting, displayHz });
+  // At rest no frames run, so there is no rate to show: 0 fps would read as a problem.
+  const readout = !playing ? "Paused" : resting ? "At rest: nothing in the prototype is moving, so no frames run" : `${status.label}, ${Math.round(fps)} fps, ${formatMs(frameMs)} to evaluate a frame`;
 
   const consoleBadge =
     counts.consoleErrors > 0 ? (
@@ -101,7 +104,7 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
           <Tooltip content={`${readout}. Show performance`} placement="top">
             <button type="button" className="sb-hudx__stat" data-link onClick={() => setCurrent("performance")} aria-label={`${readout}. Show performance`}>
               <span className="sb-hudx__dot" data-tone={status.tone} aria-hidden />
-              <span className="sb-tabular">{playing ? `${Math.round(fps)} fps` : "Paused"}</span>
+              <span className="sb-tabular">{!playing ? "Paused" : resting ? "At rest" : `${Math.round(fps)} fps`}</span>
             </button>
           </Tooltip>
           {onToggleCollapse && <IconButton size="sm" icon={collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />} label={collapsed ? "Show bottom panel" : "Hide bottom panel"} shortcut="Mod+J" tooltipPlacement="top" onClick={onToggleCollapse} />}

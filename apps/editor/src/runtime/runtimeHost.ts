@@ -1,7 +1,8 @@
 /**
  * RuntimeHost: the one live engine runtime for the open document. It follows document revisions
- * (hot-swapping the graph on the next frame), runs the frame loop with play/pause/restart, meters
- * fps, routes prototype logs to the console store (with the engine's patch attribution), turns
+ * (hot-swapping the graph on the next frame), runs the frame loop with play/pause/restart, rests
+ * while nothing in the prototype moves and wakes on anything that can change a frame, meters fps
+ * and the display's rate, routes prototype logs to the console store (with the engine's patch attribution), turns
  * runtime issues into diagnostics for the component they came from, feeds throttled live values and
  * per-frame pulse fires to the UI (inside component instances too), exposes per-patch timings,
  * drives DOM renderers, provides platform services with a global mute, gates project scripts on
@@ -44,6 +45,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { ConsoleStore } from "../state/console.ts";
 import type { DocumentStore } from "../state/document.ts";
 import { pulseOutputAddresses } from "../state/registry.ts";
+import { createDisplayRate } from "./displayRate.ts";
 import { createFpsMeter } from "./fpsMeter.ts";
 import { componentIdForInstancePath, qualifyAddress } from "./instances.ts";
 import { createMediaInfoCache, findSceneNode, type MediaInfoCache } from "./mediaInfo.ts";
@@ -95,7 +97,16 @@ export interface RuntimeHostOptions {
 
 export interface RuntimeHostState {
   playing: boolean;
+  /**
+   * Playing, with no frames running because nothing in the prototype moves (ARCHITECTURE.md §5.2).
+   * `fps` is 0 meanwhile. After a wake it stays true until frames have run for a stats interval,
+   * so a tap that settles at once doesn't flicker the readouts.
+   */
+  resting: boolean;
+  /** Frames per second while frames run; 0 while paused or at rest. */
   fps: number;
+  /** The display's refresh rate as the frame loop saw it (60, 120...), or 0 before enough frames ran. */
+  displayHz: number;
   frame: number;
   /** Seconds since the prototype started. */
   time: number;
@@ -209,6 +220,8 @@ export interface RuntimeHost {
   pause(): void;
   togglePlay(): void;
   isPlaying(): boolean;
+  /** Playing, with no frame scheduled because the prototype is at rest. */
+  isResting(): boolean;
   /** Start the prototype over on the next frame. */
   restart(): void;
   /** Called whenever restart() is asked for, and when an opened document starts over (the desktop restarts phones with it). Returns unsubscribe. */
@@ -384,19 +397,15 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     onLog: (level, args, source) => {
       logSink?.getState().push(level, args, source?.patchId !== undefined ? { source: source.patchId, ...(source.componentPath ? { componentPath: source.componentPath } : {}) } : { source: "prototype" });
     },
+    // Something reached the runtime between frames: a resting loop starts again (see `refresh`).
+    onWake: () => {
+      if (playing) schedule();
+    },
   });
 
-  let explicitProfiling = options.profile === true;
-  let profileRefs = 0;
-  const applyProfiling = () => {
-    const on = explicitProfiling || profileRefs > 0;
-    runtime.setProfiling(on);
-    if (state.getState().profiling !== on) state.setState({ profiling: on });
-  };
-
-  const state = createStore<RuntimeHostState>()(() => ({ playing: false, fps: 0, frame: -1, time: 0, frameMs: 0, diagnostics: [], muted: mute.getState().muted, profiling: false, viewers: 0, scope, staleState: null }));
-  if (explicitProfiling) applyProfiling();
+  const state = createStore<RuntimeHostState>()(() => ({ playing: false, resting: false, fps: 0, displayHz: 0, frame: -1, time: 0, frameMs: 0, diagnostics: [], muted: mute.getState().muted, profiling: false, viewers: 0, scope, staleState: null }));
   const meter = createFpsMeter();
+  const displayRate = createDisplayRate();
   const frameListeners = new Set<(scene: SceneFrame) => void>();
   const restartListeners = new Set<() => void>();
   const pulseListeners = new Set<(fire: PulseFire) => void>();
@@ -414,6 +423,12 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   let handle: number | null = null;
   let playing = false;
+  /** Playing, with no frame scheduled: the prototype is at rest. */
+  let asleep = false;
+  /** The scheduled frame is the first after a rest. */
+  let woke = false;
+  /** Frames run at least until this one, at rest or not (a timing window for the Performance view). */
+  let awakeUntilFrame = -1;
   let disposed = false;
   let lastNow: number | null = null;
   let pendingDoc: SonobeDocument | null = null;
@@ -429,14 +444,64 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   let staleCheck: { afterFrame: number; notBefore: number } | null = null;
 
   const schedule = () => {
-    if (handle === null && !disposed) handle = scheduler.request(tick);
+    if (handle !== null || disposed) return;
+    handle = scheduler.request(tick);
+    if (asleep) {
+      asleep = false;
+      woke = true;
+    }
   };
 
+  /**
+   * Run a frame soon. While playing, the loop stops asking for frames once the runtime is at rest
+   * (ARCHITECTURE.md §5.2, §9), so everything that can change a frame has to start it again. A
+   * source missing from this list is a prototype that freezes; each has a test in
+   * runtimeHost.rest.test.ts.
+   *
+   * Through the runtime's `onWake`, which everything that reaches the runtime fires:
+   * - input of every kind from an attached viewer (`dispatchInput`), and the Inspector's Fire (`fireLayerPulses`);
+   * - layer outputs a renderer reports: an image that loaded, video and Lottie state (`onMediaState`);
+   * - the system's appearance changing (`onAppearance`);
+   * - a font that finished loading, which changes text layout (`onFontsLoaded`).
+   *
+   * Through this function, for what the next frame applies:
+   * - a document revision of any kind (`setDocument`): an edit, undo, a hot swap from Claude, a knob
+   *   tune or preset, a device or rotation change, a replaced or reloaded document;
+   * - `restart()`: Cmd-R, restart_viewer, script trust granted;
+   * - a viewer attached before the first scene.
+   *
+   * By keeping the loop awake until it is done (`canRest`): a swapped-in document or restart not
+   * applied yet, the restart offer's check after an edit, and one timing window after profiling
+   * turns on. `play()` and `stepFrame()` run frames themselves.
+   *
+   * Through patches: whatever a patch waits on (timers, requests, sensors, sockets), it asks for
+   * frames while it waits, so the runtime isn't at rest.
+   *
+   * Needing no frame: a viewer attached once there is a scene, a new scale or hit-target overlay,
+   * shader textures and video metadata (the renderer draws its last frame again), a new value
+   * subscription or scope (read at once), and bounds (read from the DOM).
+   */
   const refresh = () => {
-    if (playing) return;
-    refreshQueued = true;
+    if (!playing) refreshQueued = true;
     schedule();
   };
+
+  /** The loop may stop asking for frames: the runtime is at rest and the host has nothing pending. */
+  const canRest = () => runtime.resting && pendingDoc === null && !pendingRestart && staleCheck === null && runtime.frame >= awakeUntilFrame;
+
+  let explicitProfiling = options.profile === true;
+  let profileRefs = 0;
+  const applyProfiling = () => {
+    const on = explicitProfiling || profileRefs > 0;
+    const was = state.getState().profiling;
+    runtime.setProfiling(on);
+    if (was !== on) state.setState({ profiling: on });
+    if (!on || was) return;
+    // Timings are averaged over about a second of frames: run that many, then rest again.
+    awakeUntilFrame = Math.max(0, runtime.frame) + Math.ceil(runtime.fps) + 1;
+    if (playing) schedule();
+  };
+  if (explicitProfiling) applyProfiling();
 
   const prefixFor = (valueScope: ValueScope): string | null => (valueScope === "current" ? scope : valueScope === "root" ? "" : valueScope.instancePath);
 
@@ -451,7 +516,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     lastStatsAt = now;
     const issues = runtime.issues();
     const key = issueKey(issues);
-    const next: Partial<RuntimeHostState> = { fps: playing ? Math.round(meter.fps() * 10) / 10 : 0, frame: runtime.frame, time: runtime.time, frameMs };
+    const next: Partial<RuntimeHostState> = { fps: playing && !asleep ? Math.round(meter.fps() * 10) / 10 : 0, resting: asleep, displayHz: displayRate.hz(), frame: runtime.frame, time: runtime.time, frameMs };
     if (key !== lastIssues) {
       lastIssues = key;
       next.diagnostics = issuesToDiagnostics(issues, currentDoc.project.root, currentDoc);
@@ -562,15 +627,36 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     return scene;
   };
 
+  /** Stop asking for frames until something wakes the loop (see `refresh`). */
+  function rest(now: number) {
+    asleep = true;
+    // No later frame will carry them: values that changed inside a subscription's throttle window,
+    // and the last frame's counters and diagnostics.
+    emitValues(now, true);
+    publishStats(now, true);
+  }
+
   function tick(now: number) {
     handle = null;
     if (disposed) return;
     if (playing) {
+      // The whole time since the last frame, rested or not: the runtime knows which it was.
       const dt = lastNow === null ? 0 : (now - lastNow) / 1000;
       lastNow = now;
+      if (woke) {
+        woke = false;
+        // Rates are counted from here, not across the rest, and the readouts keep saying
+        // "at rest" until frames have run for a stats interval.
+        meter.reset();
+        displayRate.reset();
+        lastStatsAt = now;
+      }
       meter.tick(now);
+      displayRate.tick(now);
       runFrame(dt, now, false);
-      if (playing) schedule();
+      if (!playing) return;
+      if (canRest()) rest(now);
+      else schedule();
     } else if (refreshQueued) {
       refreshQueued = false;
       runFrame(0, now, true);
@@ -583,6 +669,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     lastNow = null;
     refreshQueued = false;
     meter.reset();
+    displayRate.reset();
     state.setState({ playing: true });
     schedule();
   }
@@ -590,11 +677,13 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   function pause() {
     if (!playing) return;
     playing = false;
+    asleep = false;
+    woke = false;
     if (handle !== null) {
       scheduler.cancel(handle);
       handle = null;
     }
-    state.setState({ playing: false, fps: 0 });
+    state.setState({ playing: false, resting: false, fps: 0 });
   }
 
   const setDocument = (doc: SonobeDocument) => {
@@ -648,6 +737,13 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
 
   const onAppearance = () => runtime.setDevice(device());
   appearance?.addEventListener?.("change", onAppearance);
+
+  // The engine lays text out with this measurer, so a font that finishes loading changes the
+  // layout with no input: the scene is rebuilt with it, which wakes a prototype at rest.
+  const onFontsLoaded = () => {
+    if (!disposed && runtime.frame >= 0) runtime.refreshScene();
+  };
+  const unsubscribeFonts = domMeasurer?.onInvalidate(onFontsLoaded);
 
   const unsubscribeMute = mute.subscribe((s, previous) => {
     if (s.muted !== previous.muted) state.setState({ muted: s.muted });
@@ -707,6 +803,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     pause,
     togglePlay: () => (playing ? pause() : play()),
     isPlaying: () => playing,
+    isResting: () => asleep,
     restart,
 
     subscribeRestart(cb) {
@@ -717,7 +814,10 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     },
 
     stepFrame(dtSeconds = 1 / 60) {
-      return runFrame(dtSeconds, scheduler.now(), true);
+      const scene = runFrame(dtSeconds, scheduler.now(), true);
+      // A step taken by hand can start something moving: a resting loop picks it up.
+      if (playing && !canRest()) schedule();
+      return scene;
     },
 
     fireLayerPulses(pulses) {
@@ -891,6 +991,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       unsubscribeDoc?.();
       unsubscribeTrust();
       unsubscribeMute();
+      unsubscribeFonts?.();
       appearance?.removeEventListener?.("change", onAppearance);
       for (const viewer of [...viewers]) viewer.dispose();
       frameListeners.clear();

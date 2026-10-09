@@ -66,7 +66,7 @@ export function usePerfSamples(options: PerfSamplesOptions = {}): { samples: Per
   useEffect(() => {
     const read = () => {
       const s = session.runtime.state.getState();
-      setSamples((previous) => pushSample(previous, { t: performance.now(), fps: s.fps, frameMs: s.frameMs, playing: s.playing }, capacity));
+      setSamples((previous) => pushSample(previous, { t: performance.now(), fps: s.fps, frameMs: s.frameMs, playing: s.playing, resting: s.resting }, capacity));
     };
     read();
     const timer = setInterval(read, intervalMs);

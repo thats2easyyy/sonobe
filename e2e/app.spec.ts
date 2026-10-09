@@ -44,6 +44,19 @@ test.describe("editor app", () => {
     await openEditor(page);
     const toolbar = page.locator(".sb-toolbar");
 
+    // Pause, Play and Restart act on the frame loop, and a prototype where nothing moves runs no
+    // frames. So a clock turns the photo while they are tried, and is undone afterwards.
+    const clock = await hook(page, (s) =>
+      s.apply(
+        [
+          { op: "addPatch", patch: { id: "e2e_clock", type: "time", ui: { x: 40, y: 600 } } },
+          { op: "setInput", target: "@photo.rotation", value: { link: "e2e_clock.time" } },
+        ],
+        "Clock",
+      ),
+    );
+    expect(clock.ok).toBe(true);
+    await page.waitForFunction(() => (window.__sonobe?.frame() ?? 0) > 10);
     await toolbar.getByRole("button", { name: "Pause prototype" }).click();
     await expect.poll(() => hook(page, (s) => s.playing())).toBe(false);
     const pausedAt = await hook(page, (s) => s.frame());
@@ -55,6 +68,8 @@ test.describe("editor app", () => {
     const beforeRestart = await hook(page, (s) => s.frame());
     await toolbar.getByRole("button", { name: "Restart prototype" }).click();
     await expect.poll(() => hook(page, (s) => s.frame())).toBeLessThan(beforeRestart);
+    await hook(page, (s) => void s.session.document.getState().undo());
+    await expect.poll(() => hook(page, (s) => s.resting())).toBe(true);
 
     await toolbar.getByLabel("Device: iPhone 17 Pro").click();
     await page.getByRole("combobox", { name: "Search Device" }).fill("iPhone SE");

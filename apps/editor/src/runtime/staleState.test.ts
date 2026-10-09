@@ -19,7 +19,10 @@ const pick = defineMock({
   },
 });
 
-/** State that goes bad on frame 3 and stays bad: indices 0 and 1, then only 5 (past the end). */
+/**
+ * State that goes bad on frame 3 and stays bad: indices 0 and 1, then only 5 (past the end). It asks
+ * for frames until then, as a patch that waits on something must, or the prototype rests first.
+ */
 const latch = defineMock<{ tripped: boolean }>({
   type: "latch",
   name: "Latch",
@@ -29,6 +32,7 @@ const latch = defineMock<{ tripped: boolean }>({
   state: () => ({ tripped: false }),
   evaluate(ctx) {
     if (ctx.frame >= 3) ctx.state.tripped = true;
+    else ctx.requestNextFrame();
     ctx.output("index", (ctx.state.tripped ? [5] : [0, 1]) as never);
   },
 });
@@ -103,12 +107,19 @@ describe("the viewer's restart offer", () => {
     expect(host.state.getState().diagnostics).toEqual([expect.objectContaining({ code: "empty_loop" })]);
     expect(host.state.getState().staleState).toBeNull();
 
+    // Nothing moves any more, so the loop is at rest when the edit arrives.
+    expect(host.isResting()).toBe(true);
+
     // An edit while the warning is up; the latch stays tripped, so the dots stay gone.
     store.getState().apply([{ op: "rename", id: "fade", name: "Fade" }], { label: "Rename" });
     scheduler.frames(2);
     expect(host.state.getState().staleState).toBeNull();
-    scheduler.frames(20);
+    // The check needs a few frames and 300 ms: the loop stays awake for it, then rests again.
+    scheduler.frames(10);
+    expect(host.isResting()).toBe(false);
+    scheduler.frames(10);
     expect(host.state.getState().staleState).toEqual({ layerId: "dot", copies: 3 });
+    expect(host.isResting()).toBe(true);
 
     const restarts: number[] = [];
     host.subscribeRestart(() => restarts.push(host.runtime.frame));
