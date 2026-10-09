@@ -113,6 +113,11 @@ The first signed release freezes three things. Every installed copy carries them
 - **The Apple Developer team** that owns the Developer ID certificate. macOS replaces an installed app only with one signed by the same team.
 - **The release repository**, `thats2easyyy/sonobe` (the `publish` block in `apps/desktop/electron-builder.yml`). It is written into every app as the place to look for a newer version.
 
+Two smaller things to decide before the first tag:
+
+- **The update cache folder**, `@sonobedesktop-updater`. `Resources/app-update.yml` in every app that ships in a DMG or zip names it as `updaterCacheDirName`, and electron-builder derives it from `apps/desktop`'s package name (`@sonobe/desktop`). It is where a downloaded update waits. Changing it later only leaves old downloads behind, but the first signed build already carries it, so pick the name you mean to keep.
+- **The DMG is not signed.** `dmg.sign` is `false`, and only the app inside is signed, notarized and stapled. Gatekeeper assesses the app when someone opens the DMG and launches it, and that is what package verification checks; the clean-Mac check below is its first real test. A tool that assesses the disk image itself (`spctl -a -t open --context context:primary-signature`) rejects an unsigned one, as some managed Macs and download scanners do. If that matters to you, sign, notarize and staple the DMG too; nothing does today.
+
 ### The checklist
 
 1. **Set the version.** `node scripts/set-version.ts 0.2.0` writes it everywhere it lives and rebuilds the examples. It takes three plain numbers and nothing else: the update feed is stable-only, so there are no `-beta` versions.
@@ -162,10 +167,10 @@ To try a signed build without a Developer ID, build a rehearsal: `node apps/desk
 
 ### On a clean Mac
 
-Use a Mac that has never built or run Sonobe, on the oldest macOS you mean to support (the app needs 13). The Intel build has never run on an Intel Mac, so try one if you can.
+Use a Mac that has never built or run Sonobe, on the oldest macOS you mean to support (the app needs 13). The Intel build has never been launched anywhere: the Mac it was built on has no Rosetta, so it was only read (`verify-package.mjs --static`). Its first launch is the release workflow's Rosetta step, so try it on an Intel Mac if you can.
 
 - Download the DMG with a browser, so macOS quarantines it. Open it, drag Sonobe into Applications and launch it. macOS asks once whether to open an app from the internet, and nothing else.
-- Open a prototype that uses the Camera patch, then one that uses the Microphone patch. Each permission dialog carries Sonobe's wording, and after Allow the viewer shows the camera and hears the microphone. Under the hardened runtime a missing entitlement fails here, silently.
+- Open a prototype that uses the Camera patch, then one that uses the Microphone patch. Each permission dialog carries Sonobe's wording, and after Allow the viewer shows the camera and hears the microphone. Under the hardened runtime a missing entitlement fails here, silently. Nobody has tried this yet in any build with the hardened runtime, a local `npm run package` build included, so try it in a local build before the first tag.
 - Pop out the viewer.
 - Import a design that has an SF Symbol in it: the real symbol arrives, not a gray placeholder.
 - Run `/Applications/Sonobe.app/Contents/Resources/cli/sonobe --version`.
