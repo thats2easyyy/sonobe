@@ -665,7 +665,10 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     cablesBySource.set(l.from, list);
   }
 
-  const result = share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  const shared = share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  // The same nodes and cables as before (a layer moved, a color changed): the previous model itself,
+  // since the rest of a model is made from those two lists. What's memoized on the model then holds.
+  const result = options.previous && shared.nodes === options.previous.nodes && shared.edges === options.previous.edges ? options.previous : shared;
   // Remember the node objects the model actually holds, so the next derive hands them back.
   for (const node of result.nodes) {
     const entry = node.type === "patch" ? cache.entries.get(node.id) : undefined;
@@ -703,6 +706,75 @@ function share(next: GraphModel, previous: GraphModel | null | undefined): Graph
   });
   // Unchanged lists keep their identity too, so React Flow skips rebuilding its lookups (a literal edit changes one node and no cables).
   return { ...next, nodes: sameItems(nodes, previous.nodes) ? previous.nodes : nodes, edges: sameItems(edges, previous.edges) ? previous.edges : edges };
+}
+
+/** The same own keys, with identical values (by identity) under every key but those in `skip`. */
+function sameExcept(a: object, b: object, ...skip: string[]): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (!Object.hasOwn(b, key)) return false;
+    if (!skip.includes(key) && (a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key]) return false;
+  }
+  return true;
+}
+
+/** A stored layer property the graph never reads: not a cable, a layer reference or a loop (those decide cables, nodes and what loops). */
+const isGraphNeutral = (value: unknown) => !isLinkInput(value) && !isLayerInput(value) && !isLoopLiteral(value);
+
+/**
+ * Two layer lists the graph reads alike: the same layers in the same order, each with the same name,
+ * type, component and children, and the same properties except for literals the graph doesn't read.
+ * Repeat always counts, since it decides how many copies there are.
+ */
+function sameGraphLayers(a: readonly LayerNode[], b: readonly LayerNode[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x === y) continue;
+    if (!sameExcept(x, y, "props", "children")) return false;
+    if (x.children !== y.children && !(x.children && y.children && sameGraphLayers(x.children, y.children))) return false;
+    if (x.props === y.props) continue;
+    const keys = Object.keys(x.props);
+    const others = Object.keys(y.props);
+    if (keys.length !== others.length) return false;
+    for (let k = 0; k < keys.length; k++) {
+      const key = keys[k]!;
+      // The same properties in the same order: cables are listed in the order their properties are stored.
+      if (key !== others[k]) return false;
+      const before = x.props[key];
+      const after = y.props[key];
+      if (before !== after && (key === "repeat" || !isGraphNeutral(before) || !isGraphNeutral(after))) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether `deriveGraph` reads the same from two documents for a component, so the graph derived
+ * from one stands for the other (given the same diagnostics). True for the same document, and for
+ * documents that differ only in layer property literals the graph never reads: a position, a color,
+ * an opacity, anything but Repeat, a loop, a cable or a layer reference. Every other difference
+ * counts, in this component or any other, so it can say false of documents whose graphs are equal
+ * and never true of ones whose graphs differ.
+ */
+export function sameGraphSource(a: SonobeDocument, b: SonobeDocument, componentId: Id): boolean {
+  if (a === b) return true;
+  if (!sameExcept(a, b, "components")) return false;
+  if (a.components === b.components) return true;
+  const ids = Object.keys(a.components);
+  if (ids.length !== Object.keys(b.components).length) return false;
+  for (const id of ids) {
+    if (!Object.hasOwn(b.components, id)) return false;
+    if (id !== componentId && a.components[id] !== b.components[id]) return false;
+  }
+  const before = a.components[componentId];
+  const after = b.components[componentId];
+  if (before === after) return true;
+  if (!before || !after) return false;
+  return sameExcept(before, after, "layers") && sameGraphLayers(before.layers, after.layers);
 }
 
 /** Rect of a patch in a component using an estimate (placement before measuring). */

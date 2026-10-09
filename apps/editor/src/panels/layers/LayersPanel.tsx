@@ -30,7 +30,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { Panel } from "../../shell/Panel.tsx";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
@@ -60,6 +60,7 @@ import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { TreeView } from "../../ui/TreeView.tsx";
 import { cx } from "../../ui/lib/cx.ts";
+import { useEventCallback } from "../../ui/lib/hooks.ts";
 import { getAncestorIds } from "../../ui/lib/treeModel.ts";
 import { designStore } from "../design/designStore.ts";
 import { layerDropAttributes, useCableDrag } from "../patch-editor/api.ts";
@@ -153,6 +154,52 @@ function LayerBadges({ node, copies }: { node: LayerNode; copies: LayerCopies })
     </span>
   );
 }
+
+/**
+ * A row's Touch, hide and lock buttons. They show on hover, but every row has them, and the panel
+ * renders again on each hover and selection change: memoized, a row's menu, buttons and tooltips
+ * are built again only when its layer changes.
+ */
+const LayerRowActions = memo(function LayerRowActions({
+  node,
+  visibilityShortcut,
+  lockShortcut,
+  onToggleVisibility,
+  onToggleLock,
+}: {
+  node: LayerNode;
+  visibilityShortcut: string | undefined;
+  lockShortcut: string | undefined;
+  onToggleVisibility: (node: LayerNode) => void;
+  onToggleLock: (node: LayerNode) => void;
+}) {
+  const session = useEditorSession();
+  const hidden = isHidden(node);
+  return (
+    <>
+      <Menu aria-label={`Add an interaction to ${node.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, node.id)}>
+        <IconButton size="sm" icon={<Pointer size={13} strokeWidth={1.75} />} label={`Touch: add an interaction to ${node.name}`} tooltip="Touch: add an interaction" />
+      </Menu>
+      <IconButton
+        size="sm"
+        icon={hidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
+        label={hidden ? `Show ${node.name}` : `Hide ${node.name}`}
+        tooltip={hidden ? "Show" : "Hide"}
+        shortcut={visibilityShortcut}
+        onClick={() => onToggleVisibility(node)}
+      />
+      <IconButton
+        size="sm"
+        icon={node.locked ? <Lock size={13} strokeWidth={1.75} /> : <LockOpen size={13} strokeWidth={1.75} />}
+        label={node.locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
+        tooltip={node.locked ? "Unlock" : "Lock"}
+        shortcut={lockShortcut}
+        active={node.locked}
+        onClick={() => onToggleLock(node)}
+      />
+    </>
+  );
+});
 
 function report(result: ActionResult): void {
   if (result.ok && result.note) toast({ title: result.note.message, ...(result.note.hint ? { description: result.note.hint } : {}), tone: "neutral" });
@@ -299,6 +346,12 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
       `${lock ? "Lock" : "Unlock"} ${subject(targets)}`,
     );
   };
+
+  // What the rows' buttons take: stable, so a row's buttons render again only with its layer.
+  const onToggleVisibility = useEventCallback(toggleVisibility);
+  const onToggleLock = useEventCallback(toggleLock);
+  const visibilityShortcut = keyOf("layer.toggleVisibility");
+  const lockShortcut = keyOf("layer.toggleLock");
 
   const insert = (type: string, instanceOf?: Id) => {
     if (!canHoldLayers) return;
@@ -727,33 +780,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
                 </>
               );
             }}
-            renderActions={(node) => {
-              const hidden = isHidden(node);
-              return (
-                <>
-                  <Menu aria-label={`Add an interaction to ${node.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, node.id)}>
-                    <IconButton size="sm" icon={<Pointer size={13} strokeWidth={1.75} />} label={`Touch: add an interaction to ${node.name}`} tooltip="Touch: add an interaction" />
-                  </Menu>
-                  <IconButton
-                    size="sm"
-                    icon={hidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
-                    label={hidden ? `Show ${node.name}` : `Hide ${node.name}`}
-                    tooltip={hidden ? "Show" : "Hide"}
-                    shortcut={keyOf("layer.toggleVisibility")}
-                    onClick={() => toggleVisibility(node)}
-                  />
-                  <IconButton
-                    size="sm"
-                    icon={node.locked ? <Lock size={13} strokeWidth={1.75} /> : <LockOpen size={13} strokeWidth={1.75} />}
-                    label={node.locked ? `Unlock ${node.name}` : `Lock ${node.name}`}
-                    tooltip={node.locked ? "Unlock" : "Lock"}
-                    shortcut={keyOf("layer.toggleLock")}
-                    active={node.locked}
-                    onClick={() => toggleLock(node)}
-                  />
-                </>
-              );
-            }}
+            renderActions={(node) => <LayerRowActions node={node} visibilityShortcut={visibilityShortcut} lockShortcut={lockShortcut} onToggleVisibility={onToggleVisibility} onToggleLock={onToggleLock} />}
             emptyState={<div className="sb-layerspanel__empty">{emptyState}</div>}
           />
           {fileDrop?.layerId === null && (

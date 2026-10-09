@@ -12,8 +12,9 @@ const workspace = (names: string) => new RegExp(`[\\\\/]packages[\\\\/](?:${name
  *
  * Chunks: the entry holds the app shell and panels that paint first. The patch editor (React Flow,
  * d3), the Learn drawer (guides, examples, lessons, patch reference), the welcome screen, the
- * Assistant, and the Connect Claude, Settings, and About dialogs load with dynamic imports. ELK is a
- * classic script asset that loads on the first Tidy Up. Panels on screen at startup reach the patch
+ * Assistant, and the Connect Claude, Settings, and About dialogs load with dynamic imports, each
+ * through `loadable` (`src/ui/loadable.tsx`), which shows a surface as soon as its chunk is in. ELK is
+ * a classic script asset that loads on the first Tidy Up. Panels on screen at startup reach the patch
  * editor only through `panels/patch-editor/api.ts`, which doesn't import React Flow.
  *
  * Libraries and the Sonobe packages are split into long-lived vendor chunks that load in parallel.

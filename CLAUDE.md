@@ -41,6 +41,7 @@ These run by hand, outside CI:
 
 ```sh
 npm run smoke -w @sonobe/desktop   # the muted Electron end-to-end run
+npm run bench -w @sonobe/editor    # editor boot and interaction timings
 npm run test:ios                   # Sonobe Viewer on an iOS Simulator (Xcode)
 node evals/run.ts                  # Claude builds each eval case (uses your Claude account)
 ```

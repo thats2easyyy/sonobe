@@ -71,6 +71,8 @@ export interface PatchEditorUiState {
   namingComponent: Id | null;
   /** The most items a looped live value shown here has (0 when none is a loop): what the watched copy steps through. */
   loopCopies: number;
+  /** The view is zoomed far out (FAR_ZOOM): port text isn't painted, so output rows follow only what still shows of their live value. */
+  farZoom: boolean;
   set: (partial: Partial<Omit<PatchEditorUiState, "set">>) => void;
 }
 
@@ -95,6 +97,7 @@ export function createUiStore(initial: { minimap?: boolean } = {}): UiStore {
     pointerPort: null,
     namingComponent: null,
     loopCopies: 0,
+    farZoom: false,
     // The keyboard card on an input reads "Arm an output first" once nothing is armed, so it goes when the arm ends.
     set: (partial) =>
       set((state) => {

@@ -1,12 +1,13 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeProvider } from "../theme/ThemeProvider.tsx";
 import { CommandProvider } from "../ui/commands/CommandProvider.tsx";
+import { loadable } from "../ui/loadable.tsx";
 import { Toaster } from "../ui/Toast.tsx";
 import { EditorApp } from "./EditorApp.tsx";
 import { useRightDrawerInset } from "./rightDrawers.ts";
 
 /** The widget gallery is a design-system page, so it loads only when visited. */
-const Gallery = lazy(() => import("../gallery/Gallery.tsx").then((m) => ({ default: m.Gallery })));
+const Gallery = loadable(() => import("../gallery/Gallery.tsx").then((m) => m.Gallery), { name: "The widget gallery" });
 
 function currentRoute(): string {
   return window.location.hash.replace(/^#\/?/, "");
@@ -33,13 +34,7 @@ export function Root() {
   return (
     <ThemeProvider>
       <CommandProvider>
-        {route === "gallery" ? (
-          <Suspense fallback={null}>
-            <Gallery />
-          </Suspense>
-        ) : (
-          <EditorApp />
-        )}
+        {route === "gallery" ? <Gallery /> : <EditorApp />}
         <DrawerAwareToaster />
       </CommandProvider>
     </ThemeProvider>
