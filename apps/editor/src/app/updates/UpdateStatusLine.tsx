@@ -27,7 +27,8 @@ export function updateLine(status: UpdateStatus): UpdateLine | null {
       return { text: `${named} is ready to install.`, action: { label: "Restart to Update", run: "restart" } };
     case "failed": {
       const error = status.error;
-      const offerPage = error !== null && error.kind !== "network" && error.kind !== "no-release";
+      // A version that was found and didn't go in is on the release page. A check that failed is tried again.
+      const offerPage = error !== null && error.phase !== "check" && error.kind !== "network" && error.kind !== "no-release";
       return { text: error ? `${error.message} ${error.hint}`.trim() : "Sonobe couldn't check for updates.", action: offerPage ? { label: "Open release page", run: "openRelease" } : { label: "Check again", run: "check" } };
     }
     default:

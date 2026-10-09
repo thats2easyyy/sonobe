@@ -300,7 +300,7 @@ try {
     // and electron-updater left no per-install id behind, which it writes at its first check.
     const updates = await win.evaluate(() => window.sonobeHost.updates.status());
     const updaterLoaded = await app.evaluate(() => globalThis.__sonobeTest.updates.driverLoaded());
-    assert(updates.mode === "off" && updates.state === "idle" && updates.checkedAt === null && /SONOBE_UPDATES/.test(updates.reason ?? ""), "updates are off for this launch", updates);
+    assert(updates.mode === "off" && updates.state === "idle" && /SONOBE_UPDATES/.test(updates.reason ?? ""), "updates are off for this launch", updates);
     assert(updaterLoaded === false && !existsSync(path.join(userData, ".updaterId")), "the updater was never loaded and left nothing in the user data folder", { updaterLoaded });
     log("updates are off for this launch: no check, and the updater was never loaded");
 

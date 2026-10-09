@@ -710,7 +710,7 @@ try {
 
   // Updates: this run never checks, never loads the updater, and its menus have no update item.
   const updateStatus = await win.evaluate(() => window.sonobeHost.updates.status());
-  assert(updateStatus.mode === "off" && updateStatus.state === "idle" && updateStatus.checkedAt === null && updateStatus.current === hostInfo.version, "sonobeHost.updates.status() is off", updateStatus);
+  assert(updateStatus.mode === "off" && updateStatus.state === "idle" && updateStatus.asks === 0 && updateStatus.current === hostInfo.version, "sonobeHost.updates.status() is off", updateStatus);
   const updateItems = await app.evaluate(({ Menu }) => {
     const labels = (items) => items.flatMap((item) => [item.label, ...(item.submenu ? labels(item.submenu.items) : [])]);
     return { labels: labels(Menu.getApplicationMenu()?.items ?? []).filter((label) => /Update/.test(label)), loaded: globalThis.__sonobeTest.updates.driverLoaded() };

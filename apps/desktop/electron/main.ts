@@ -535,6 +535,8 @@ function main(): void {
 
   const publishUpdateStatus = (status: UpdateStatus) => {
     for (const w of windows.values()) if (!w.webContents.isDestroyed()) w.webContents.send(IPC.updatesChanged, status);
+    // "Sonobe was updated" is said once: by the first window that hears it, and not by one opened later.
+    if (status.updatedFrom && [...windows.values()].some((w) => w.showsUpdates())) updates?.updatedSaid();
     if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
   };
 
@@ -1254,7 +1256,9 @@ function main(): void {
     ipcMain.handle(IPC.updatesStatus, async (event): Promise<UpdateStatus> => {
       requireWindow(event);
       await updatesReady;
-      return requireUpdates().status();
+      const status = requireUpdates().status();
+      if (status.updatedFrom) requireUpdates().updatedSaid();
+      return status;
     });
     ipcMain.handle(IPC.updatesCheck, async (event): Promise<UpdateStatus> => {
       requireWindow(event);

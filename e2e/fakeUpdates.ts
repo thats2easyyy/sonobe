@@ -56,7 +56,7 @@ function fakeUpdates(options: FakeUpdatesOptions): void {
     progress: null,
     error: null,
     manual: false,
-    checkedAt: null,
+    asks: 0,
     autoCheck: true,
     updatedFrom: null,
     offerMove: false,
@@ -81,9 +81,12 @@ function fakeUpdates(options: FakeUpdatesOptions): void {
     status: async () => status,
     check: async () => {
       calls.push("check");
-      push({ state: "checking", manual: true, error: null });
+      // As main does: an ask is counted, and while an update is downloading or ready that's all that changes.
+      const asked = { manual: true, asks: status.asks + 1 };
+      if (status.state === "downloading" || status.state === "ready") return push(asked);
+      push({ ...asked, state: "checking", error: null });
       await new Promise((resolve) => setTimeout(resolve, 150));
-      return push({ state: "upToDate", checkedAt: Date.now(), ...options.found });
+      return push({ state: "upToDate", ...options.found });
     },
     restart: async () => {
       calls.push("restart");

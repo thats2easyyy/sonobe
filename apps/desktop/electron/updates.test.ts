@@ -62,21 +62,21 @@ describe("installLocation", () => {
 
   it("says why an app in the wrong place can't, and whether moving it helps", () => {
     const translocated = mac({ exePath: "/private/var/folders/x/T/AppTranslocation/1A2B/d/Sonobe.app/Contents/MacOS/Sonobe" });
-    expect(translocated).toMatchObject({ ok: false, kind: "translocated", canMove: true });
+    expect(translocated).toMatchObject({ ok: false, reason: expect.stringContaining("temporary copy"), canMove: true });
     const onDiskImage = mac({ exePath: "/Volumes/Sonobe 0.2.0/Sonobe.app/Contents/MacOS/Sonobe", inApplications: () => false, access: refuses("EROFS") });
-    expect(onDiskImage).toMatchObject({ ok: false, kind: "read-only", canMove: true });
+    expect(onDiskImage).toMatchObject({ ok: false, reason: expect.stringContaining("disk image"), canMove: true });
     const elsewhere = mac({ exePath: "/Users/me/Downloads/Sonobe.app/Contents/MacOS/Sonobe", inApplications: () => false });
-    expect(elsewhere).toMatchObject({ ok: false, kind: "not-in-applications", canMove: true });
+    expect(elsewhere).toMatchObject({ ok: false, reason: expect.stringContaining("only from an Applications folder"), canMove: true });
     // An administrator installed it: an update would stop to ask for their password.
     const adminOnly = mac({ access: refuses("EACCES", "/Applications") });
-    expect(adminOnly).toMatchObject({ ok: false, kind: "needs-admin", canMove: false });
+    expect(adminOnly).toMatchObject({ ok: false, reason: expect.stringContaining("takes an administrator"), canMove: false });
     for (const verdict of [translocated, onDiskImage, elsewhere, adminOnly]) expect(!verdict.ok && verdict.reason).toMatch(/can't update itself[.,] |only from an Applications folder[.] /);
   });
 
   it("updates an AppImage on Linux and nothing else there, and doesn't look on Windows", () => {
     const linux = { platform: "linux", exePath: "/opt/Sonobe/sonobe", inApplications: () => false, access: refuses("EACCES") };
     expect(installLocation({ ...linux, appImage: "/home/me/Sonobe.AppImage" })).toEqual({ ok: true });
-    expect(installLocation({ ...linux, appImage: undefined })).toMatchObject({ ok: false, kind: "not-appimage", canMove: false });
+    expect(installLocation({ ...linux, appImage: undefined })).toMatchObject({ ok: false, reason: expect.stringContaining("Only the AppImage"), canMove: false });
     expect(installLocation({ ...linux, platform: "win32", appImage: undefined })).toEqual({ ok: true });
   });
 });
@@ -121,7 +121,7 @@ describe("updateMode", () => {
   });
 
   it("only tells in an install build that can't be replaced where it is, and passes on why", () => {
-    const locationValue: InstallLocation = { ok: false, kind: "not-in-applications", reason: "Sonobe updates itself only from an Applications folder. Move it there.", canMove: true };
+    const locationValue: InstallLocation = { ok: false, reason: "Sonobe updates itself only from an Applications folder. Move it there.", canMove: true };
     expect(updateMode(input({ locationValue }))).toEqual({ mode: "notify", reason: locationValue.reason, canMove: true });
   });
 });
@@ -133,15 +133,17 @@ describe("update settings", () => {
     writeFileSync(file("lazy.json"), "{}");
     const settings = createUpdateSettings({ file: file("lazy.json") });
     writeFileSync(file("lazy.json"), JSON.stringify({ autoCheck: false }));
-    expect(settings.get()).toEqual({ autoCheck: false, lastRunVersion: null, previousVersion: null, moveOffered: false });
+    expect(settings.get()).toEqual({ autoCheck: false, lastRunVersion: null, moveOffered: false });
     expect(createUpdateSettings({ file: file("missing.json") }).get().autoCheck).toBe(true);
   });
 
   it("keeps the well-formed fields of a damaged file and the defaults for the rest", () => {
-    writeFileSync(file("odd.json"), JSON.stringify({ autoCheck: "no", lastRunVersion: "0.2.0", previousVersion: ["0.1.0"], moveOffered: true, extra: 1 }));
-    expect(createUpdateSettings({ file: file("odd.json") }).get()).toEqual({ autoCheck: true, lastRunVersion: "0.2.0", previousVersion: null, moveOffered: true });
+    writeFileSync(file("odd.json"), JSON.stringify({ autoCheck: "no", lastRunVersion: "0.2.0", moveOffered: true, extra: 1 }));
+    expect(createUpdateSettings({ file: file("odd.json") }).get()).toEqual({ autoCheck: true, lastRunVersion: "0.2.0", moveOffered: true });
+    writeFileSync(file("odd.json"), JSON.stringify({ autoCheck: false, lastRunVersion: ["0.2.0"], moveOffered: "yes" }));
+    expect(createUpdateSettings({ file: file("odd.json") }).get()).toEqual({ autoCheck: false, lastRunVersion: null, moveOffered: false });
     writeFileSync(file("broken.json"), "{ not json");
-    expect(createUpdateSettings({ file: file("broken.json") }).get()).toEqual({ autoCheck: true, lastRunVersion: null, previousVersion: null, moveOffered: false });
+    expect(createUpdateSettings({ file: file("broken.json") }).get()).toEqual({ autoCheck: true, lastRunVersion: null, moveOffered: false });
   });
 
   it("saves a change in one atomic write, and nothing when nothing changed", () => {
@@ -149,7 +151,7 @@ describe("update settings", () => {
     expect(settings.update({ autoCheck: true })).toMatchObject({ autoCheck: true });
     expect(readdirSync(temp)).not.toContain("save.json");
     settings.update({ autoCheck: false, lastRunVersion: "0.2.0" });
-    expect(JSON.parse(readFileSync(file("save.json"), "utf8"))).toEqual({ autoCheck: false, lastRunVersion: "0.2.0", previousVersion: null, moveOffered: false });
+    expect(JSON.parse(readFileSync(file("save.json"), "utf8"))).toEqual({ autoCheck: false, lastRunVersion: "0.2.0", moveOffered: false });
     expect(readdirSync(temp).filter((name) => name.includes(".sonobe-tmp-"))).toEqual([]);
     expect(createUpdateSettings({ file: file("save.json") }).get().autoCheck).toBe(false);
   });
@@ -170,7 +172,8 @@ describe("explainUpdateError", () => {
       [coded("ENOTFOUND", "getaddrinfo ENOTFOUND github.com"), "check", "network"],
       [new Error("connect ECONNREFUSED 127.0.0.1:5250"), "download", "network"],
       [coded("ERR_UPDATER_CHANNEL_FILE_NOT_FOUND", "Cannot find latest-mac.yml in the latest release artifacts: HttpError: 404"), "check", "no-release"],
-      [coded("ERR_UPDATER_LATEST_VERSION_NOT_FOUND", "Unable to find latest version on GitHub"), "check", "no-release"],
+      // Only pre-releases or drafts exist: GitHub answers 404 for the latest release.
+      [coded("ERR_UPDATER_LATEST_VERSION_NOT_FOUND", "Unable to find latest version on GitHub (https://github.com/thats2easyyy/sonobe/releases/latest), please ensure a production release exists: HttpError: 404 \n\"method: GET url: https://github.com/thats2easyyy/sonobe/releases/latest\""), "check", "no-release"],
       [new Error("No published versions on GitHub"), "check", "no-release"],
       [coded("ERR_CHECKSUM_MISMATCH", "sha512 checksum mismatch, expected abc, got def"), "download", "damaged"],
       [new Error("Code signature at URL file:///Users/me/Library/Caches/dev.sonobe.app.ShipIt/update.abc/Sonobe.app/ did not pass validation: code failed to satisfy specified code requirement(s)"), "download", "rejected"],
@@ -180,6 +183,7 @@ describe("explainUpdateError", () => {
     for (const [err, phase, kind] of cases) {
       const problem = explainUpdateError(err, phase);
       expect(problem.kind, String(err)).toBe(kind);
+      expect(problem.phase).toBe(phase);
       expect(problem.message).toMatch(/^\S.+[.]$/);
       expect(problem.hint.length).toBeGreaterThan(20);
     }
@@ -195,6 +199,33 @@ describe("explainUpdateError", () => {
 
   it("calls a missing download a failed download, not a missing release", () => {
     expect(explainUpdateError(new Error("HttpError: 404 Not Found"), "download").kind).toBe("other");
+  });
+
+  it("calls a check the feed didn't answer a failed check, with nothing to download", () => {
+    // What electron-updater throws for a 503, a rate limit, a refusal, and a proxy's or captive portal's page in place of the feed.
+    const failures = [
+      coded("HTTP_ERROR_503", '503 Service Unavailable\n"method: GET url: https://github.com/thats2easyyy/sonobe/releases.atom"\nHeaders: {}'),
+      coded("HTTP_ERROR_429", "429 Too Many Requests"),
+      coded("HTTP_ERROR_403", "403 Forbidden"),
+      coded("ERR_UPDATER_LATEST_VERSION_NOT_FOUND", "Unable to find latest version on GitHub (https://github.com/thats2easyyy/sonobe/releases/latest), please ensure a production release exists: HttpError: 502 Bad Gateway"),
+      coded("ERR_UPDATER_INVALID_RELEASE_FEED", "Cannot parse releases feed: Error: Unable to find latest version,\nXML:\n<html>Sign in to the guest network</html>"),
+    ];
+    for (const err of failures) {
+      const problem = explainUpdateError(err, "check");
+      expect(problem, err.message).toMatchObject({ kind: "other", phase: "check", message: "Sonobe couldn't check for updates." });
+      expect(problem.hint).toMatch(/^Try again later, or look at the release page for the newest version[.] \(The updater said: /);
+      expect(problem.hint).not.toMatch(/Download the new version/);
+    }
+  });
+
+  it("judges a failed check by its first line, not by the release notes the feed quotes after it", () => {
+    // ERR_UPDATER_INVALID_RELEASE_FEED carries the whole releases.atom, and release notes talk about anything.
+    const notes = "<feed><entry><content>Fixed the sha512 checksum of the zip, the code signature of the helper, a 404 on the docs page and ECONNRESET in the relay.</content></entry></feed>";
+    expect(explainUpdateError(coded("ERR_UPDATER_INVALID_RELEASE_FEED", `Cannot parse releases feed: TypeError: tag is not a string,\nXML:\n${notes}`), "check")).toMatchObject({ kind: "other", phase: "check" });
+    // A download's error is read whole: macOS says what it refused on a later line.
+    expect(explainUpdateError(new Error("The update couldn't be staged.\nCode signature at URL file:///x/Sonobe.app/ did not pass validation"), "download").kind).toBe("rejected");
+    // Whatever a check's error says, nothing was downloaded that could be damaged, refused or in the wrong place.
+    for (const text of ["sha512 checksum mismatch", "Code signature did not pass validation", "running on a read-only volume"]) expect(explainUpdateError(new Error(text), "check").kind, text).toBe("other");
   });
 });
 
@@ -243,7 +274,6 @@ function controller(over: { mode?: UpdateModeResult; saved?: Partial<UpdateSetti
       return fake.driver;
     },
     releasesUrl: RELEASES_URL,
-    now: () => 1_000,
     onChange: (status) => seen.push(status),
   });
   const states = () => seen.map((status) => status.state);
@@ -272,7 +302,7 @@ describe("update controller", () => {
     expect(c.calls).toEqual(["check"]);
     c.answerCheck(null);
     await settle();
-    expect(c.updates.status()).toMatchObject({ state: "upToDate", manual: false, checkedAt: 1_000 });
+    expect(c.updates.status()).toMatchObject({ state: "upToDate", manual: false, asks: 0 });
     await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
     expect(c.calls).toEqual(["check", "check"]);
   });
@@ -282,7 +312,7 @@ describe("update controller", () => {
     const c = controller({ mode: { mode: "off", reason: "Sonobe run from a checkout doesn't check for updates.", canMove: false }, file });
     c.updates.start();
     await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
-    expect(await c.updates.check({ manual: true })).toMatchObject({ mode: "off", state: "idle", checkedAt: null, updatedFrom: null });
+    expect(await c.updates.check({ manual: true })).toMatchObject({ mode: "off", state: "idle", asks: 0, updatedFrom: null });
     c.updates.setAutoCheck(false);
     expect(c.loads()).toBe(0);
     expect(readdirSync(temp)).not.toContain("off.json");
@@ -342,7 +372,9 @@ describe("update controller", () => {
     expect(c.calls).toEqual(["check"]);
     c.answerCheck(null);
     expect(await asked).toEqual(await scheduled);
-    expect(await asked).toMatchObject({ state: "upToDate", manual: true });
+    expect(await asked).toMatchObject({ state: "upToDate", manual: true, asks: 1 });
+    // The ask was published while the check was still running, so "Checking for updates…" answers at once.
+    expect(c.seen.map((status) => [status.state, status.manual])).toEqual([["checking", false], ["checking", true], ["upToDate", true]]);
   });
 
   it("stays ready through later checks, scheduled or asked for", async () => {
@@ -355,6 +387,29 @@ describe("update controller", () => {
     await settle();
     await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
     expect(await c.updates.check({ manual: true })).toMatchObject({ state: "ready", version: "0.3.0", manual: true });
+    expect(c.calls).toEqual(["check", "download"]);
+  });
+
+  it("answers every Check for Updates…, also while an update is downloading or ready", async () => {
+    const c = controller();
+    const first = c.updates.check({ manual: true });
+    await settle();
+    c.answerCheck({ version: "0.3.0" });
+    expect(await first).toMatchObject({ state: "downloading", manual: true, asks: 1 });
+    // Nothing changes but the count, and each ask is still published: the windows answer with where things stand.
+    let count = c.seen.length;
+    expect(await c.updates.check({ manual: true })).toMatchObject({ state: "downloading", asks: 2 });
+    expect(await c.updates.check({ manual: true })).toMatchObject({ state: "downloading", asks: 3 });
+    expect(c.seen.slice(count).map((status) => [status.state, status.asks])).toEqual([["downloading", 2], ["downloading", 3]]);
+    c.finishDownload();
+    await settle();
+    count = c.seen.length;
+    expect(await c.updates.check({ manual: true })).toMatchObject({ state: "ready", asks: 4 });
+    expect(await c.updates.check({ manual: true })).toMatchObject({ state: "ready", asks: 5 });
+    expect(c.seen.slice(count).map((status) => [status.state, status.asks])).toEqual([["ready", 4], ["ready", 5]]);
+    // A scheduled check in between asks nobody and publishes nothing.
+    await c.updates.check();
+    expect(c.seen).toHaveLength(count + 2);
     expect(c.calls).toEqual(["check", "download"]);
   });
 
@@ -380,7 +435,7 @@ describe("update controller", () => {
     const offline = c.updates.check({ manual: true });
     await settle();
     c.failCheck(new Error("net::ERR_INTERNET_DISCONNECTED"));
-    expect(await offline).toMatchObject({ state: "failed", manual: true, error: { kind: "network", hint: expect.stringContaining("internet connection") }, checkedAt: null });
+    expect(await offline).toMatchObject({ state: "failed", manual: true, error: { kind: "network", phase: "check", hint: expect.stringContaining("internet connection") } });
     const count = c.seen.length;
     // The updater also emits the error as an event; reporting it again changes nothing.
     c.updates.fail(new Error("net::ERR_INTERNET_DISCONNECTED"), "check");
@@ -392,7 +447,7 @@ describe("update controller", () => {
     await again;
     c.failDownload(new Error("Code signature at URL file:///x/Sonobe.app/ did not pass validation"));
     await settle();
-    expect(c.updates.status()).toMatchObject({ state: "failed", version: "0.3.0", progress: null, error: { kind: "rejected", hint: expect.stringContaining("release page") } });
+    expect(c.updates.status()).toMatchObject({ state: "failed", version: "0.3.0", progress: null, error: { kind: "rejected", phase: "download", hint: expect.stringContaining("release page") } });
     expect(c.states()).not.toContain("ready");
   });
 
@@ -402,9 +457,14 @@ describe("update controller", () => {
     const first = controller({ file });
     expect(first.updates.status()).toMatchObject({ updatedFrom: "0.1.0", notesUrl: `${RELEASES_URL}/tag/v0.2.0` });
     first.updates.start();
-    // Still said for the rest of this launch, and recorded so the next one doesn't.
+    // Still said in this launch until a window has heard it, and recorded so the next launch doesn't.
     expect(first.updates.status().updatedFrom).toBe("0.1.0");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ lastRunVersion: "0.2.0", previousVersion: "0.1.0" });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ autoCheck: true, lastRunVersion: "0.2.0", moveOffered: false });
+    // A window was told: one that opens later in the same launch isn't.
+    const before = first.seen.length;
+    first.updates.updatedSaid();
+    expect(first.updates.status()).toMatchObject({ updatedFrom: null, notesUrl: null });
+    expect(first.seen).toHaveLength(before);
     const second = controller({ file });
     second.updates.start();
     expect(second.updates.status()).toMatchObject({ updatedFrom: null, notesUrl: null });

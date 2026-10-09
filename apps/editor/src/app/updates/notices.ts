@@ -3,7 +3,7 @@
  * dismissed), the answer to Check for Updates…, a failure with what to do, "Sonobe was updated", and
  * the offer to move to the Applications folder. A notice is shown when the status changes into what it
  * describes, so one closed with its ✕ stays closed, and automatic checks say nothing until there is
- * something to act on.
+ * something to act on: a version, or a version that was found and didn't go in.
  */
 
 import type { StoreApi } from "zustand/vanilla";
@@ -43,12 +43,15 @@ export function describeUpdate(status: UpdateStatus): UpdateNotice | null {
       if (!error) return null;
       // Nothing to download while nothing is published, and the release page is no help without a connection.
       const offerPage = error.kind !== "network" && error.kind !== "no-release";
+      // A check that failed found nothing to lose: it's a warning that goes away. A version that didn't go in stays up.
+      const found = error.phase !== "check";
       return {
         id: UPDATE_NOTICE_ID,
         title: error.message,
         ...(error.hint ? { description: error.hint } : {}),
-        tone: error.kind === "no-release" ? "neutral" : error.kind === "network" ? "warn" : "danger",
-        ...(offerPage ? { duration: "persistent" as const, action: { label: "Open release page", run: "openRelease" as const } } : {}),
+        tone: error.kind === "no-release" ? "neutral" : error.kind === "network" || !found ? "warn" : "danger",
+        ...(offerPage && found ? { duration: "persistent" as const } : {}),
+        ...(offerPage ? { action: { label: "Open release page", run: "openRelease" as const } } : {}),
       };
     }
     default:
@@ -56,22 +59,28 @@ export function describeUpdate(status: UpdateStatus): UpdateNotice | null {
   }
 }
 
-/** Whether a failure is worth interrupting for when nobody asked: not a missing connection, and not "nothing is published yet". */
-const loud = (status: UpdateStatus) => status.error !== null && status.error.kind !== "network" && status.error.kind !== "no-release";
+/**
+ * Whether a failure is worth interrupting for when nobody asked: a version was found and its download or
+ * install failed. Never a check, whatever went wrong with it (a 503 from the feed, a rate limit, a proxy's
+ * page), and not a connection that dropped.
+ */
+const loud = (status: UpdateStatus) => status.error !== null && status.error.phase !== "check" && status.error.kind !== "network" && status.error.kind !== "no-release";
 
 /**
  * The notice to show for the change from `previous` to `next`, or null when there's nothing new to say.
- * A check the person asked for is always answered. An automatic one speaks only when a version is
- * ready or available, or when a download failed.
+ * A check the person asked for is always answered, each time they ask. An automatic one speaks only when
+ * a version is ready or available, or when one that was found didn't go in. A window's first status
+ * (`previous` null) answers nobody: it shows what there is to act on, never the answer to a check
+ * somebody asked for before the window opened.
  */
 export function noticeFor(previous: UpdateStatus | null, next: UpdateStatus): UpdateNotice | null {
   if (next.mode === "off") return null;
   const entered = !previous || previous.state !== next.state || previous.version !== next.version || previous.error?.message !== next.error?.message;
-  // Check for Updates… while an update is already downloading or ready changes nothing but `manual`.
-  const asked = next.manual && previous?.manual === false;
+  // Check for Updates… while an update is already downloading or ready changes nothing but `asks`.
+  const asked = previous !== null && next.asks !== previous.asks;
   const cancelled = previous?.restarting === true && !next.restarting;
   const quiet = next.state === "checking" || next.state === "upToDate" || next.state === "downloading" || (next.state === "failed" && !loud(next));
-  if (quiet ? !(next.manual && (entered || asked)) : !(entered || asked || cancelled)) return null;
+  if (quiet ? !(previous !== null && next.manual && (entered || asked)) : !(entered || asked || cancelled)) return null;
   return describeUpdate(next);
 }
 
@@ -93,29 +102,31 @@ export interface NoticeToaster {
 }
 
 /**
- * Shows the update notices as the store's status changes. "Sonobe was updated" and the move offer are
- * said once per window. Returns the unsubscribe.
+ * Shows the update notices as the store's status changes. "Sonobe was updated" is said once: the app
+ * reports it until one window has heard it. The move offer is made once per window, in one launch.
+ * Returns the unsubscribe.
  */
 export function attachUpdateNotices(store: StoreApi<UpdatesState> = updateStore, toast: NoticeToaster = kitToast, open: (url: string) => void = openReleasePage): () => void {
   let saidUpdated = false;
   let offeredMove = false;
 
-  const show = (notice: UpdateNotice) => {
+  /** `status` is the one the notice describes: its links are the ones the button opens, whatever the status is by then. */
+  const show = (notice: UpdateNotice, status: UpdateStatus) => {
     const { action, ...rest } = notice;
-    toast({ ...rest, ...(action ? { action: { label: action.label, onClick: () => run(action.run) } } : {}) });
+    toast({ ...rest, ...(action ? { action: { label: action.label, onClick: () => run(action.run, status) } } : {}) });
   };
 
-  const run = (action: UpdateNoticeAction) => {
-    const { status, restart, moveToApplications } = store.getState();
-    if (action === "openRelease" && status) open(status.releaseUrl);
-    else if (action === "openNotes" && status?.notesUrl) open(status.notesUrl);
+  const run = (action: UpdateNoticeAction, status: UpdateStatus) => {
+    const { restart, moveToApplications } = store.getState();
+    if (action === "openRelease") open(status.releaseUrl);
+    else if (action === "openNotes" && status.notesUrl) open(status.notesUrl);
     else if (action === "move") void moveToApplications();
     else if (action === "restart") {
       // The button took its notice down. If Sonobe is still here with the update ready (the person cancelled), it comes back.
       void restart().then((restarted) => {
         const now = store.getState().status;
         const notice = !restarted && now?.state === "ready" ? describeUpdate(now) : null;
-        if (notice) show(notice);
+        if (notice) show(notice, now!);
       });
     }
   };
@@ -123,18 +134,18 @@ export function attachUpdateNotices(store: StoreApi<UpdatesState> = updateStore,
   const onStatus = (next: UpdateStatus | null, previous: UpdateStatus | null) => {
     if (!next || next === previous) return;
     const notice = noticeFor(previous, next);
-    if (notice) show(notice);
+    if (notice) show(notice, next);
     // The notice that's up described a state that's over.
     else if (previous && (previous.state !== next.state || previous.version !== next.version)) toast.dismiss(UPDATE_NOTICE_ID);
     const updated = saidUpdated ? null : updatedNotice(next);
     if (updated) {
       saidUpdated = true;
-      show(updated);
+      show(updated, next);
     }
     const move = offeredMove ? null : moveNotice(next);
     if (move) {
       offeredMove = true;
-      show(move);
+      show(move, next);
     }
   };
 

@@ -15,7 +15,7 @@ export function updateStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatu
     progress: null,
     error: null,
     manual: false,
-    checkedAt: null,
+    asks: 0,
     autoCheck: true,
     updatedFrom: null,
     offerMove: false,
@@ -60,8 +60,11 @@ export function fakeUpdatesHost(initial: Partial<UpdateStatus> = {}, options: Fa
     status: async () => status,
     check: async () => {
       calls.push("check");
-      push({ state: "checking", manual: true, error: null });
-      return push({ state: "upToDate", checkedAt: 1, ...options.found });
+      // As main does: an ask is counted, and while an update is downloading or ready that's all that changes.
+      const asked = { manual: true, asks: status.asks + 1 };
+      if (status.state === "downloading" || status.state === "ready") return push(asked);
+      push({ ...asked, state: "checking", error: null });
+      return push({ state: "upToDate", ...options.found });
     },
     restart: async () => {
       calls.push("restart");

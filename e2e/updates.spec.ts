@@ -37,9 +37,18 @@ test.describe("updates", () => {
     // Closed with its ✕, it stays closed: the same status again says nothing.
     await ready.getByRole("button", { name: "Dismiss notification" }).click();
     await expect(ready).toBeHidden();
-    await pushFakeUpdate(page, { checkedAt: 5 });
+    await pushFakeUpdate(page, { progress: null });
     await page.waitForTimeout(300);
     await expect(ready).toBeHidden();
+
+    // Check for Updates… is answered every time: with the update already ready, the answer is the notice again.
+    await runCommand(page, "Check for Updates");
+    await expect(ready).toBeVisible();
+    await ready.getByRole("button", { name: "Dismiss notification" }).click();
+    await expect(ready).toBeHidden();
+    await runCommand(page, "Check for Updates");
+    await expect(ready).toBeVisible();
+    expect(await fakeUpdateCalls(page)).toEqual(["restart", "check", "check"]);
     expect(problems).toEqual([]);
   });
 
@@ -47,7 +56,7 @@ test.describe("updates", () => {
     await installFakeUpdates(page, { status: { mode: "notify", reason: BUILT_LOCALLY } });
     await openEditor(page);
     await pushFakeUpdate(page, { state: "checking" });
-    await pushFakeUpdate(page, { state: "available", version: "0.2.0", releaseUrl: "https://github.com/thats2easyyy/sonobe/releases/tag/v0.2.0", checkedAt: 1 });
+    await pushFakeUpdate(page, { state: "available", version: "0.2.0", releaseUrl: "https://github.com/thats2easyyy/sonobe/releases/tag/v0.2.0" });
     const available = notice(page, "Sonobe 0.2.0 is available");
     await expect(available).toContainText(BUILT_LOCALLY);
     await available.getByRole("button", { name: "Download" }).click();
@@ -55,23 +64,25 @@ test.describe("updates", () => {
   });
 
   test("Check for Updates… answers when nothing is new, and a failure says what to do", async ({ page }) => {
-    await installFakeUpdates(page, { status: { state: "upToDate", checkedAt: 1 } });
+    await installFakeUpdates(page, { status: { state: "upToDate" } });
     await openEditor(page);
     await runCommand(page, "Check for Updates");
     await expect(notice(page, "Sonobe is up to date")).toContainText("Version 0.1.0 is the newest.");
     expect(await fakeUpdateCalls(page)).toEqual(["check"]);
 
-    // An automatic check that only lacked a connection keeps to itself.
+    // An automatic check that fails keeps to itself, whether it lacked a connection or the feed answered with an error.
     await pushFakeUpdate(page, { state: "checking", manual: false });
-    await pushFakeUpdate(page, { state: "failed", error: { kind: "network", message: "Sonobe couldn't reach the release feed to check for updates.", hint: "Check your internet connection, then choose Check for Updates again." } });
+    await pushFakeUpdate(page, { state: "failed", error: { kind: "network", phase: "check", message: "Sonobe couldn't reach the release feed to check for updates.", hint: "Check your internet connection, then choose Check for Updates again." } });
+    await pushFakeUpdate(page, { state: "checking", error: null });
+    await pushFakeUpdate(page, { state: "failed", error: { kind: "other", phase: "check", message: "Sonobe couldn't check for updates.", hint: "Try again later, or look at the release page for the newest version. (The updater said: 503 Service Unavailable)" } });
     await page.waitForTimeout(300);
-    await expect(notice(page, /couldn't reach/)).toHaveCount(0);
+    await expect(notice(page, /couldn't/)).toHaveCount(0);
 
     // A download macOS refuses to install is said, with the way out.
     await pushFakeUpdate(page, { state: "downloading", version: "0.2.0", progress: 1, error: null });
     await pushFakeUpdate(page, {
       state: "failed",
-      error: { kind: "rejected", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." },
+      error: { kind: "rejected", phase: "download", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." },
       releaseUrl: "https://github.com/thats2easyyy/sonobe/releases/tag/v0.2.0",
     });
     const failed = notice(page, "macOS wouldn't install the update");
@@ -87,7 +98,9 @@ test.describe("updates", () => {
     const updated = notice(page, "Sonobe was updated to 0.2.0");
     await expect(updated).toBeVisible();
     await pushFakeUpdate(page, { state: "checking" });
-    await pushFakeUpdate(page, { state: "upToDate", checkedAt: 1 });
+    await pushFakeUpdate(page, { state: "upToDate" });
+    // The app reports it until one window has heard it: the notice and its link outlive that.
+    await pushFakeUpdate(page, { updatedFrom: null, notesUrl: null });
     await expect(page.locator(".sb-toast")).toHaveCount(1);
     await updated.getByRole("button", { name: "Release notes" }).click();
     expect(await fakeOpened(page)).toEqual(["https://github.com/thats2easyyy/sonobe/releases/tag/v0.2.0"]);
@@ -95,7 +108,7 @@ test.describe("updates", () => {
 
   test("About shows where this copy stands, and Settings has the switch for automatic checks", async ({ page }) => {
     const problems = collectConsoleProblems(page);
-    await installFakeUpdates(page, { status: { state: "upToDate", checkedAt: 1 }, found: { state: "ready", version: "0.2.0" }, restart: "restart" });
+    await installFakeUpdates(page, { status: { state: "upToDate" }, found: { state: "ready", version: "0.2.0" }, restart: "restart" });
     await openEditor(page);
 
     await runCommand(page, "About Sonobe");

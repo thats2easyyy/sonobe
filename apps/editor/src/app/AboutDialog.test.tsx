@@ -59,7 +59,7 @@ describe("About → the update line", () => {
     expect(lineText()).toBe("Checking for updates…");
     expect(lineButton()).toBeNull();
 
-    push(updates, { state: "upToDate", checkedAt: 1 });
+    push(updates, { state: "upToDate" });
     expect(lineText()).toBe("Sonobe is up to date.");
     expect(lineButton()?.textContent).toBe("Check again");
 
@@ -72,11 +72,16 @@ describe("About → the update line", () => {
     expect(lineText()).toBe("Sonobe 0.2.0 is ready to install.");
     expect(lineButton()?.textContent).toBe("Restart to Update");
 
-    push(updates, { state: "failed", error: { kind: "rejected", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." } });
+    push(updates, { state: "failed", error: { kind: "rejected", phase: "download", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." } });
     expect(lineText()).toBe("macOS wouldn't install the update: its signature doesn't match this copy of Sonobe. Download the new version from the release page and replace Sonobe in your Applications folder.");
     expect(lineButton()?.textContent).toBe("Open release page");
 
-    push(updates, { state: "failed", error: { kind: "network", message: "Sonobe couldn't reach the release feed to check for updates.", hint: "Check your internet connection, then choose Check for Updates again." } });
+    push(updates, { state: "failed", error: { kind: "network", phase: "check", message: "Sonobe couldn't reach the release feed to check for updates.", hint: "Check your internet connection, then choose Check for Updates again." } });
+    expect(lineButton()?.textContent).toBe("Check again");
+
+    // A check that failed found no version: the thing to do is to check again, not to go and download one.
+    push(updates, { state: "failed", version: null, error: { kind: "other", phase: "check", message: "Sonobe couldn't check for updates.", hint: "Try again later, or look at the release page for the newest version. (The updater said: 503 Service Unavailable)" } });
+    expect(lineText()).toBe("Sonobe couldn't check for updates. Try again later, or look at the release page for the newest version. (The updater said: 503 Service Unavailable)");
     expect(lineButton()?.textContent).toBe("Check again");
   });
 

@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("toUpdateStatus", () => {
   it("keeps a well-formed status as it is", () => {
-    const status = updateStatus({ state: "failed", version: "0.2.0", progress: 0.5, error: { kind: "network", message: "No connection.", hint: "Try again." }, manual: true, checkedAt: 12, updatedFrom: "0.0.9", notesUrl: "https://example.test/notes", canMove: true, offerMove: true, restarting: true, reason: "Why." });
+    const status = updateStatus({ state: "failed", version: "0.2.0", progress: 0.5, error: { kind: "network", phase: "download", message: "No connection.", hint: "Try again." }, manual: true, asks: 3, updatedFrom: "0.0.9", notesUrl: "https://example.test/notes", canMove: true, offerMove: true, restarting: true, reason: "Why." });
     expect(toUpdateStatus(status)).toEqual(status);
   });
 
@@ -22,8 +22,8 @@ describe("toUpdateStatus", () => {
   });
 
   it("gives a status with malformed fields their defaults", () => {
-    const status = toUpdateStatus({ mode: "notify", state: "available", current: "0.1.0", version: 2, releaseUrl: null, progress: "half", error: { kind: "weird", message: "It broke." }, manual: "yes", autoCheck: "no", checkedAt: Number.NaN, offerMove: 1 });
-    expect(status).toEqual(updateStatus({ mode: "notify", state: "available", releaseUrl: "", error: { kind: "other", message: "It broke.", hint: "" } }));
+    const status = toUpdateStatus({ mode: "notify", state: "available", current: "0.1.0", version: 2, releaseUrl: null, progress: "half", error: { kind: "weird", message: "It broke." }, manual: "yes", autoCheck: "no", asks: Number.NaN, offerMove: 1 });
+    expect(status).toEqual(updateStatus({ mode: "notify", state: "available", releaseUrl: "", error: { kind: "other", phase: "check", message: "It broke.", hint: "" } }));
     expect(toUpdateStatus({ mode: "install", state: "downloading", current: "0.1.0", progress: 7, error: { hint: "No message." } })).toMatchObject({ progress: 1, error: null });
   });
 });
@@ -46,7 +46,7 @@ describe("getUpdatesHost", () => {
     expect((await host.setAutoCheck(false))?.autoCheck).toBe(false);
     const seen: string[] = [];
     const off = host.onStatus((status) => seen.push(status.state));
-    fake.push({ state: "failed", error: { kind: "other", message: "No.", hint: "" } });
+    fake.push({ state: "failed", error: { kind: "other", phase: "check", message: "No.", hint: "" } });
     (fake.push as (patch: unknown) => unknown)({ state: "nonsense" });
     expect(seen).toEqual(["failed"]);
     off();

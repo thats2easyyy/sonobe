@@ -218,6 +218,11 @@ export interface UpdateProblem {
    * whole. rejected: the system refused to install it. location: the app can't be replaced where it is.
    */
   kind: "network" | "no-release" | "damaged" | "rejected" | "location" | "other";
+  /**
+   * What Sonobe was doing. A check that failed has found no version, so an automatic one stays quiet
+   * whatever its kind; a download or an install that failed is said even when nobody asked.
+   */
+  phase: "check" | "download" | "install";
   message: string;
   /** What to do about it. */
   hint: string;
@@ -247,11 +252,14 @@ export interface UpdateStatus {
   error: UpdateProblem | null;
   /** The person asked for the check behind this state (Check for Updates…), so it deserves an answer even when there's nothing new. */
   manual: boolean;
-  /** When a check last got an answer (epoch ms). */
-  checkedAt: number | null;
+  /**
+   * How many times the person has chosen Check for Updates… in this launch. Each one is answered: when
+   * only this changed (an update was already downloading or ready), the answer is the state as it stands.
+   */
+  asks: number;
   /** "Check for updates automatically". Check for Updates… works either way. */
   autoCheck: boolean;
-  /** The version this copy ran as before, on the first launch after an update. */
+  /** The version this copy ran as before, on the first launch after an update, until one window has been told. */
   updatedFrom: string | null;
   /** The app could update itself from the Applications folder, and nobody has been offered the move yet. */
   offerMove: boolean;
@@ -261,7 +269,10 @@ export interface UpdateStatus {
   restarting: boolean;
 }
 
-/** Updates, for the editor's notices, About and Settings. Every call answers with a status, never an error. */
+/**
+ * Updates, for the editor's notices, About and Settings. No call rejects: status(), check() and
+ * setAutoCheck() answer with a status, and restart() and moveToApplications() answer false when the app stayed.
+ */
 export interface SonobeUpdates {
   status(): Promise<UpdateStatus>;
   /** Check now (Check for Updates…). Resolves once the check has its answer; a download carries on after it. */
@@ -379,8 +390,8 @@ export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
  * - `document.save`: called when the user picks Save in the "unsaved changes" prompt (with
  *   `interactive: true`), and by save_document (with `noDialog`, and `path` for a new folder).
  *   Resolve `false` to cancel closing.
- * - `drafts.flush`: write unsaved edits to the window's draft now (before a quit on a signal, and
- *   when the unsaved-changes prompt opens).
+ * - `drafts.flush`: write unsaved edits to the window's draft now (before a quit on a signal, when
+ *   the unsaved-changes prompt opens, and again when Keep Draft is chosen in it).
  * - The MCP bridge methods of apps/editor/src/host/rpcHandlers.ts (`document.info`, `document.apply`...).
  *   Optional: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds({ layerId })` resolve a
  *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them, and

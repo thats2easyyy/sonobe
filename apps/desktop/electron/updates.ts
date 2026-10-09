@@ -32,7 +32,7 @@ type Log = (level: "info" | "warn" | "error", message: string) => void;
 
 export type InstallLocation =
   | { ok: true }
-  | { ok: false; kind: "translocated" | "read-only" | "not-in-applications" | "needs-admin" | "not-appimage"; /** For people: why an update can't replace this copy. */ reason: string; /** Moving to Applications fixes it. */ canMove: boolean };
+  | { ok: false; /** For people: why an update can't replace this copy. */ reason: string; /** Moving to Applications fixes it. */ canMove: boolean };
 
 export interface InstallLocationInput {
   platform: string;
@@ -51,7 +51,7 @@ export function installLocation(input: InstallLocationInput): InstallLocation {
   if (input.platform === "darwin") {
     // Gatekeeper runs an app that was never moved out of its download folder from a random read-only path.
     if (input.exePath.includes("/AppTranslocation/")) {
-      return { ok: false, kind: "translocated", reason: "macOS is running Sonobe from a temporary copy, so it can't update itself. Move it to your Applications folder.", canMove: true };
+      return { ok: false, reason: "macOS is running Sonobe from a temporary copy, so it can't update itself. Move it to your Applications folder.", canMove: true };
     }
     const bundle = input.exePath.replace(/\/Contents\/MacOS\/[^/]+$/, "");
     const denied = (target: string): string | null => {
@@ -64,19 +64,19 @@ export function installLocation(input: InstallLocationInput): InstallLocation {
     };
     const blocked = [denied(bundle), denied(path.dirname(bundle))];
     if (blocked.includes("EROFS")) {
-      return { ok: false, kind: "read-only", reason: "Sonobe is running from its disk image or another read-only place, so it can't update itself. Move it to your Applications folder.", canMove: true };
+      return { ok: false, reason: "Sonobe is running from its disk image or another read-only place, so it can't update itself. Move it to your Applications folder.", canMove: true };
     }
     if (!input.inApplications()) {
-      return { ok: false, kind: "not-in-applications", reason: "Sonobe updates itself only from an Applications folder. Move it there.", canMove: true };
+      return { ok: false, reason: "Sonobe updates itself only from an Applications folder. Move it there.", canMove: true };
     }
     // Squirrel would ask for an administrator's password in the middle of a background download.
     if (blocked.some((code) => code !== null)) {
-      return { ok: false, kind: "needs-admin", reason: "Replacing this copy of Sonobe takes an administrator, so it can't update itself. Download the new version instead.", canMove: false };
+      return { ok: false, reason: "Replacing this copy of Sonobe takes an administrator, so it can't update itself. Download the new version instead.", canMove: false };
     }
     return { ok: true };
   }
   if (input.platform === "linux" && !input.appImage) {
-    return { ok: false, kind: "not-appimage", reason: "Only the AppImage of Sonobe updates itself. Download the new version instead.", canMove: false };
+    return { ok: false, reason: "Only the AppImage of Sonobe updates itself. Download the new version instead.", canMove: false };
   }
   return { ok: true };
 }
@@ -128,8 +128,6 @@ export interface UpdateSettingsData {
   autoCheck: boolean;
   /** The version that last ran with this user data, to say "Sonobe was updated" once. */
   lastRunVersion: string | null;
-  /** The version before that one. */
-  previousVersion: string | null;
   /** The move to Applications has been offered; it isn't offered twice. */
   moveOffered: boolean;
 }
@@ -140,7 +138,7 @@ export interface UpdateSettings {
   update(patch: Partial<UpdateSettingsData>): UpdateSettingsData;
 }
 
-const DEFAULT_SETTINGS: UpdateSettingsData = { autoCheck: true, lastRunVersion: null, previousVersion: null, moveOffered: false };
+const DEFAULT_SETTINGS: UpdateSettingsData = { autoCheck: true, lastRunVersion: null, moveOffered: false };
 
 const VERSION = /^\d+\.\d+\.\d+/;
 
@@ -150,7 +148,6 @@ function sanitizeSettings(raw: unknown, base: UpdateSettingsData): UpdateSetting
   return {
     autoCheck: typeof o.autoCheck === "boolean" ? o.autoCheck : base.autoCheck,
     lastRunVersion: version(o.lastRunVersion, base.lastRunVersion),
-    previousVersion: version(o.previousVersion, base.previousVersion),
     moveOffered: typeof o.moveOffered === "boolean" ? o.moveOffered : base.moveOffered,
   };
 }
@@ -196,37 +193,45 @@ export function compareVersions(a: string, b: string): number {
 
 // --- Errors, in words for people ------------------------------------------------------------------
 
-export type UpdatePhase = "check" | "download" | "install";
+export type UpdatePhase = UpdateProblem["phase"];
 
-const RELEASE_PAGE = "Download the new version from the release page instead.";
-
-/** What an updater error means to the person and what they can do. `phase` is what Sonobe was doing. */
+/**
+ * What an updater error means to the person and what they can do. `phase` is what Sonobe was doing, and
+ * it stays with the problem: a check that failed has found no version, so nothing about it says to
+ * download one.
+ */
 export function explainUpdateError(err: unknown, phase: UpdatePhase): UpdateProblem {
   const code = String((err as { code?: unknown } | null)?.code ?? "");
-  const text = `${code} ${err instanceof Error ? err.message : String(err)}`;
-  if (/read-only volume/i.test(text)) {
-    return { kind: "location", message: "Sonobe can't update itself where it is now: it's on a read-only disk.", hint: "Move Sonobe to your Applications folder, then choose Check for Updates again." };
-  }
-  if (/did not pass validation|code signature|codesign|not signed|designated requirement/i.test(text)) {
-    return { kind: "rejected", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." };
-  }
-  if (/sha512|checksum|ERR_CHECKSUM_MISMATCH|size mismatch/i.test(text)) {
-    return { kind: "damaged", message: "The update didn't download in one piece.", hint: "Choose Check for Updates to download it again, or download the new version from the release page." };
+  const whole = err instanceof Error ? err.message : String(err);
+  const first = whole.split("\n")[0]!;
+  // A failed check can quote the whole release feed, release notes included, after its first line: only the
+  // code and that line say what went wrong.
+  const text = `${code} ${phase === "check" ? first : whole}`;
+  const problem = (kind: UpdateProblem["kind"], message: string, hint: string): UpdateProblem => ({ kind, phase, message, hint });
+  // Only something that was downloaded can be in the wrong place, refused or damaged.
+  if (phase !== "check") {
+    if (/read-only volume/i.test(text)) {
+      return problem("location", "Sonobe can't update itself where it is now: it's on a read-only disk.", "Move Sonobe to your Applications folder, then choose Check for Updates again.");
+    }
+    if (/did not pass validation|code signature|codesign|not signed|designated requirement/i.test(text)) {
+      return problem("rejected", "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", "Download the new version from the release page and replace Sonobe in your Applications folder.");
+    }
+    if (/sha512|checksum|ERR_CHECKSUM_MISMATCH|size mismatch/i.test(text)) {
+      return problem("damaged", "The update didn't download in one piece.", "Choose Check for Updates to download it again, or download the new version from the release page.");
+    }
   }
   if (/net::ERR_|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|socket hang up/i.test(text)) {
-    return {
-      kind: "network",
-      message: phase === "check" ? "Sonobe couldn't reach the release feed to check for updates." : "The update stopped downloading: the connection dropped.",
-      hint: "Check your internet connection, then choose Check for Updates again.",
-    };
+    return problem("network", phase === "check" ? "Sonobe couldn't reach the release feed to check for updates." : "The update stopped downloading: the connection dropped.", "Check your internet connection, then choose Check for Updates again.");
   }
-  if (phase === "check" && /ERR_UPDATER_CHANNEL_FILE_NOT_FOUND|ERR_UPDATER_LATEST_VERSION_NOT_FOUND|ERR_UPDATER_NO_PUBLISHED_VERSIONS|No published versions|\b404\b/i.test(text)) {
-    return { kind: "no-release", message: "There's no published release of Sonobe to update to yet.", hint: "Nothing to do for now. The first release will show up on Sonobe's release page, and here." };
+  // GitHub answers 404 for the latest release while only drafts or pre-releases exist. Any other answer (a 503, a
+  // rate limit, a page that isn't the feed) is a check that failed, not a missing release.
+  if (phase === "check" && /ERR_UPDATER_CHANNEL_FILE_NOT_FOUND|ERR_UPDATER_NO_PUBLISHED_VERSIONS|No published versions|\b404\b/i.test(text)) {
+    return problem("no-release", "There's no published release of Sonobe to update to yet.", "Nothing to do for now. The first release will show up on Sonobe's release page, and here.");
   }
-  const said = (err instanceof Error ? err.message : String(err)).split("\n")[0]!.slice(0, 200);
-  const message = phase === "check" ? "Sonobe couldn't check for updates." : phase === "download" ? "Sonobe couldn't download the update." : "Sonobe couldn't restart to install the update.";
-  const hint = phase === "install" ? "Quit Sonobe and open it again: the update installs when Sonobe quits. Or download the new version from the release page." : RELEASE_PAGE;
-  return { kind: "other", message, hint: `${hint} (The updater said: ${said})` };
+  const said = `(The updater said: ${first.slice(0, 200)})`;
+  if (phase === "check") return problem("other", "Sonobe couldn't check for updates.", `Try again later, or look at the release page for the newest version. ${said}`);
+  if (phase === "download") return problem("other", "Sonobe couldn't download the update.", `Download the new version from the release page instead. ${said}`);
+  return problem("other", "Sonobe couldn't restart to install the update.", `Quit Sonobe and open it again: the update installs when Sonobe quits. Or download the new version from the release page. ${said}`);
 }
 
 /** A native dialog that answers Check for Updates… when no window is open to show the editor's notice. */
@@ -283,7 +288,6 @@ export interface UpdateControllerOptions {
   driver(): Promise<UpdateDriver>;
   /** Sonobe's releases page (commands.ts RELEASES_URL). */
   releasesUrl: string;
-  now?: () => number;
   /** Called with each new status, and only when something changed. */
   onChange?(status: UpdateStatus): void;
   log?: Log;
@@ -296,7 +300,8 @@ export interface UpdateController {
   /**
    * Checks now. `manual`: the person asked, so the answer is announced even when nothing is new. Resolves
    * with the check's answer; in install mode the download carries on after it. A check joins one already
-   * in flight, and changes nothing while an update is downloading or ready.
+   * in flight, and while an update is downloading or ready it only counts the ask (`asks`), so the
+   * person is told where things stand.
    */
   check(options?: { manual?: boolean }): Promise<UpdateStatus>;
   setAutoCheck(enabled: boolean): UpdateStatus;
@@ -309,11 +314,12 @@ export interface UpdateController {
   setRestarting(restarting: boolean): UpdateStatus;
   /** The restart didn't happen: say so, with what to do. */
   fail(err: unknown, phase: UpdatePhase): UpdateStatus;
+  /** A window has been told "Sonobe was updated": no status says it again in this launch. */
+  updatedSaid(): void;
 }
 
 export function createUpdateController(options: UpdateControllerOptions): UpdateController {
   const { current, settings } = options;
-  const now = options.now ?? (() => Date.now());
   const log: Log = options.log ?? (() => undefined);
 
   let state: UpdateStatus["state"] = "idle";
@@ -321,7 +327,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   let progress: number | null = null;
   let error: UpdateProblem | null = null;
   let manual = false;
-  let checkedAt: number | null = null;
+  let asks = 0;
   let restarting = false;
   /** Set on first use: the version this user data last ran, when it was older than this one. */
   let updatedFrom: string | null | undefined;
@@ -337,7 +343,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
     const { mode, reason, canMove } = options.mode();
     // Off: nothing is read, and nothing more is said.
     if (mode === "off") {
-      return { mode, reason, state: "idle", current, version: null, releaseUrl: `${options.releasesUrl}/latest`, notesUrl: null, progress: null, error: null, manual: false, checkedAt: null, autoCheck: true, updatedFrom: null, offerMove: false, canMove: false, restarting: false };
+      return { mode, reason, state: "idle", current, version: null, releaseUrl: `${options.releasesUrl}/latest`, notesUrl: null, progress: null, error: null, manual: false, asks: 0, autoCheck: true, updatedFrom: null, offerMove: false, canMove: false, restarting: false };
     }
     const saved = settings.get();
     if (updatedFrom === undefined) updatedFrom = saved.lastRunVersion && compareVersions(current, saved.lastRunVersion) > 0 ? saved.lastRunVersion : null;
@@ -353,7 +359,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
       progress,
       error,
       manual,
-      checkedAt,
+      asks,
       autoCheck: saved.autoCheck,
       updatedFrom,
       offerMove: offerMove && canMove,
@@ -410,7 +416,6 @@ export function createUpdateController(options: UpdateControllerOptions): Update
       log("info", `A background update check failed: ${err instanceof Error ? err.message : String(err)}`);
       return status();
     }
-    checkedAt = now();
     error = null;
     version = found?.version ?? null;
     if (!found) state = "upToDate";
@@ -426,13 +431,16 @@ export function createUpdateController(options: UpdateControllerOptions): Update
   const check = ({ manual: asked = false }: { manual?: boolean } = {}): Promise<UpdateStatus> => {
     const { mode } = options.mode();
     if (mode === "off") return Promise.resolve(status());
-    if (asked && !manual) {
+    const settled = state === "downloading" || state === "ready";
+    if (asked) {
+      asks++;
       manual = true;
-      publish();
+      // Nothing else is about to change, and the person still gets an answer: where things stand now.
+      if (checking || settled) publish();
     }
     if (checking) return checking;
     // Downloading or ready: there is nothing newer to say until the app restarts.
-    if (state === "downloading" || state === "ready") return Promise.resolve(status());
+    if (settled) return Promise.resolve(status());
     // A scheduled check behind an "available" notice leaves it up, and only speaks if the version changes.
     const quiet = !asked && state === "available";
     manual = asked;
@@ -463,7 +471,7 @@ export function createUpdateController(options: UpdateControllerOptions): Update
       const saved = settings.get();
       // Recorded now, after the status read them: "Sonobe was updated" and the offer to move are said once.
       settings.update({
-        ...(saved.lastRunVersion !== current ? { lastRunVersion: current, previousVersion: saved.lastRunVersion } : {}),
+        ...(saved.lastRunVersion !== current ? { lastRunVersion: current } : {}),
         ...(first.offerMove ? { moveOffered: true } : {}),
       });
       const scheduled = () => {
@@ -488,5 +496,9 @@ export function createUpdateController(options: UpdateControllerOptions): Update
       return publish();
     },
     fail: failed,
+    updatedSaid() {
+      // Not published: the windows that said it keep their notice, and the next change carries the difference.
+      if (updatedFrom) updatedFrom = null;
+    },
   };
 }

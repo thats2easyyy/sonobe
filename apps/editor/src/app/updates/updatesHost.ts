@@ -9,10 +9,13 @@ import { getDesktopHostApi } from "../../host/detect.ts";
 export type UpdateMode = "install" | "notify" | "off";
 export type UpdateState = "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "failed";
 export type UpdateProblemKind = "network" | "no-release" | "damaged" | "rejected" | "location" | "other";
+export type UpdatePhase = "check" | "download" | "install";
 
 /** What went wrong with an update, in words for people. */
 export interface UpdateProblem {
   kind: UpdateProblemKind;
+  /** What Sonobe was doing. A check that failed has found no version; a download or an install that failed has one behind it. */
+  phase: UpdatePhase;
   message: string;
   /** What to do about it. */
   hint: string;
@@ -37,10 +40,11 @@ export interface UpdateStatus {
   error: UpdateProblem | null;
   /** The person asked for the check behind this state, so it deserves an answer even when nothing is new. */
   manual: boolean;
-  checkedAt: number | null;
+  /** How many times the person has chosen Check for Updates… in this launch. Each one is answered. */
+  asks: number;
   /** "Check for updates automatically". */
   autoCheck: boolean;
-  /** The version this copy ran as before, on the first launch after an update. */
+  /** The version this copy ran as before, on the first launch after an update, until one window has been told. */
   updatedFrom: string | null;
   /** Nobody has been offered the move to Applications yet. */
   offerMove: boolean;
@@ -63,6 +67,7 @@ export interface UpdatesHost {
 const MODES: readonly UpdateMode[] = ["install", "notify", "off"];
 const STATES: readonly UpdateState[] = ["idle", "checking", "upToDate", "available", "downloading", "ready", "failed"];
 const KINDS: readonly UpdateProblemKind[] = ["network", "no-release", "damaged", "rejected", "location", "other"];
+const PHASES: readonly UpdatePhase[] = ["check", "download", "install"];
 
 const text = (value: unknown): string | null => (typeof value === "string" && value ? value : null);
 const isFn = (v: unknown): v is (...args: never[]) => unknown => typeof v === "function";
@@ -86,9 +91,9 @@ export function toUpdateStatus(value: unknown): UpdateStatus | null {
     releaseUrl: text(v.releaseUrl) ?? "",
     notesUrl: text(v.notesUrl),
     progress: typeof v.progress === "number" && Number.isFinite(v.progress) ? Math.min(1, Math.max(0, v.progress)) : null,
-    error: message ? { kind: KINDS.find((k) => k === e?.kind) ?? "other", message, hint: text(e?.hint) ?? "" } : null,
+    error: message ? { kind: KINDS.find((k) => k === e?.kind) ?? "other", phase: PHASES.find((p) => p === e?.phase) ?? "check", message, hint: text(e?.hint) ?? "" } : null,
     manual: v.manual === true,
-    checkedAt: typeof v.checkedAt === "number" && Number.isFinite(v.checkedAt) ? v.checkedAt : null,
+    asks: typeof v.asks === "number" && Number.isFinite(v.asks) ? v.asks : 0,
     autoCheck: v.autoCheck !== false,
     updatedFrom: text(v.updatedFrom),
     offerMove: v.offerMove === true,

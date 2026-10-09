@@ -313,7 +313,7 @@ try {
   };
   await openTarget();
   const off = await app.evaluate(() => ({ status: globalThis.__sonobeTest.updates.status(), item: globalThis.__sonobeTest.updates.menuItem(), loaded: globalThis.__sonobeTest.updates.driverLoaded() }));
-  assert(off.status.mode === "off" && off.status.checkedAt === null && off.item === null && off.loaded === false, "a checkout never checks for updates and has no update item in its menu", off);
+  assert(off.status.mode === "off" && off.status.state === "idle" && off.item === null && off.loaded === false, "a checkout never checks for updates and has no update item in its menu", off);
 
   await app.evaluate(() => globalThis.__sonobeTest.updates.useFakeDriver({ version: "9.9.9" }));
   await app.evaluate(() => globalThis.__sonobeTest.updates.check());
