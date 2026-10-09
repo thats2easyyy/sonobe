@@ -40,6 +40,22 @@ describe("Toast timing", () => {
     expect(titles()).toEqual([]);
   });
 
+  it("keeps a toast shown again under an id that was just dismissed", () => {
+    let pressed = 0;
+    show(() => toast({ id: "t", title: "Ready", duration: "persistent", action: { label: "Restart", onClick: () => void pressed++ } }));
+    // The action takes its toast down; the answer comes back before the exit animation ends.
+    act(() => document.querySelector<HTMLButtonElement>(".sb-toast__action")!.click());
+    expect(pressed).toBe(1);
+    advance(100);
+    show(() => toast({ id: "t", title: "Still ready", duration: "persistent" }));
+    advance(5000);
+    expect(titles()).toEqual(["Still ready"]);
+    // Dismissed and left alone, it goes.
+    act(() => toast.dismiss("t"));
+    advance(300);
+    expect(titles()).toEqual([]);
+  });
+
   it("keeps a toast with an action for at least 8 s", () => {
     show(() => toast({ title: "Added to Knobs", action: { label: "Show", onClick: () => undefined } }));
     advance(7500);

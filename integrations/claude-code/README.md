@@ -67,7 +67,7 @@ claude mcp add --scope local sonobe-headless -- node "/absolute/path/to/sonobe/p
 ## Troubleshooting
 
 - **"Cannot find module …/dist/sonobe.mjs"**: the plugin's server isn't built yet. Run `node integrations/claude-code/build.ts`, then reconnect with `/mcp`.
-- **"the Sonobe app isn't running"**: open Sonobe, then reconnect with `/mcp` → `sonobe` → Reconnect. Stdio servers don't reconnect automatically.
+- **"the Sonobe app isn't running"**: open Sonobe, then reconnect with `/mcp` → `sonobe` → Reconnect. Claude Code doesn't start a stdio server again by itself. A session that was already connected is different: when Sonobe restarts under it, the relay finds the new launch within about 20 seconds. If Sonobe stays closed longer, calls fail until you open it again, and the next one finds it without `/mcp`.
 - **"rejected the token"**: `~/.sonobe/mcp.json` belongs to an earlier launch. Quit and reopen Sonobe.
 - **A custom settings folder**: set `SONOBE_HOME` to the folder that holds `mcp.json`.
 - **No Sonobe tools in one project**: `claude mcp list` there shows no `sonobe`, because an earlier setup added it to another folder only. Add it with `--scope user`. An old entry with local scope wins in its own folder; remove it there with `claude mcp remove --scope local sonobe`.

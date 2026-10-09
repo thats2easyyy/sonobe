@@ -17,6 +17,16 @@
  *                         for it); arm64,x64 builds both in one run, universal one app with both
  *   --dir                 an unpacked app only, no installer
  *   --skip-editor-build   reuse apps/editor/dist as is
+ *   --out <dir>           where the artifacts go instead of apps/desktop/release (never with --release)
+ *
+ * A rehearsal alone takes two more, for the two versions an update is tried between
+ * (tests/update-rehearsal.mjs):
+ *
+ *   --version 0.1.1                 the version this build claims to be, instead of the tree's. The app,
+ *                                   its Info.plist and its artifacts carry it; the bundled CLI keeps the tree's.
+ *   --launch-env SONOBE_NAME=value  once per variable: set in Info.plist (LSEnvironment), because macOS
+ *                                   opens an updated app without the environment of the one it replaced.
+ *                                   A build made with it refuses to run without those variables.
  *
  * A local build reuses the previous apps/editor/dist with a warning when the editor build fails. A
  * release or rehearsal stops instead, and also stops without the SF Symbols helper.
@@ -47,6 +57,9 @@ const { values } = parseArgs({
     "skip-editor-build": { type: "boolean", default: false },
     release: { type: "boolean", default: false },
     identity: { type: "string" },
+    out: { type: "string" },
+    version: { type: "string" },
+    "launch-env": { type: "string", multiple: true },
   },
 });
 
@@ -78,6 +91,9 @@ try {
     arch: values.arch,
     dir: values.dir,
     skipEditorBuild: values["skip-editor-build"],
+    out: values.out,
+    version: values.version,
+    launchEnv: values["launch-env"],
     env: process.env,
     identities: keychainIdentities(),
     fileExists: existsSync,
@@ -111,7 +127,12 @@ if (values["skip-editor-build"] && existsSync(editorIndex)) {
 
 // 3. Desktop bundles + CLI, 4. icons.
 step("building main, preload, player, scene renderer and CLI");
-execFileSync(process.execPath, [path.join(root, "scripts", "build.mjs"), "--arch", helperArch(plan.archs), "--licenses"], { cwd: root, stdio: "inherit" });
+const launchEnvNames = Object.keys(plan.launchEnv);
+execFileSync(
+  process.execPath,
+  [path.join(root, "scripts", "build.mjs"), "--arch", helperArch(plan.archs), "--licenses", ...(plan.version ? ["--version", plan.version] : []), ...(launchEnvNames.length ? ["--require-env", launchEnvNames.join(",")] : [])],
+  { cwd: root, stdio: "inherit" },
+);
 if (plan.strict) {
   // build.mjs only warns without the helper; a build other people get must have it, for every architecture it holds.
   const helper = path.join(root, "dist", "bin", "sfsymbol");
@@ -136,7 +157,7 @@ const useLocalElectron = plan.mode !== "release" && plan.archs.length === 1 && p
 const platform = process.platform === "darwin" ? Platform.MAC : process.platform === "win32" ? Platform.WINDOWS : Platform.LINUX;
 step(`electron-builder: ${platform.name} ${plan.targets.join(" + ")} ${plan.archs.join(" + ")} (Electron ${electronVersion}${useLocalElectron ? ", local" : ", downloaded"})`);
 
-const release = path.join(root, "release");
+const release = values.out ? path.resolve(values.out) : path.join(root, "release");
 /** What a release uploads. After a failed release none may stay behind for a later upload to find. */
 const distributable = (name) => /\.(dmg|zip|blockmap|yml|tar\.gz)$/.test(name);
 // Only this run's artifacts may be in release/ when a release is uploaded.
@@ -226,12 +247,15 @@ try {
       electronVersion,
       ...(useLocalElectron ? { electronDist: localDist } : {}),
       forceCodeSigning: plan.forceCodeSigning,
-      // What this build can do with an update, in the packaged package.json for the app to read (scripts/signing.ts).
-      extraMetadata: { sonobe: plan.build },
+      ...(values.out ? { directories: { output: release } } : {}),
+      // The packaged package.json. `sonobe` is what this build can do with an update, for the app to read
+      // (scripts/signing.ts). `name` decides where a downloaded update waits: electron-builder derives
+      // updaterCacheDirName from it, and "sonobe" gives sonobe-updater instead of @sonobedesktop-updater.
+      extraMetadata: { name: "sonobe", sonobe: plan.build, ...(plan.version ? { version: plan.version } : {}) },
       afterExtract,
       afterPack,
       afterSign,
-      mac: macSigningOptions(plan, entitlements, signAsync),
+      mac: { ...macSigningOptions(plan, entitlements, signAsync), ...(launchEnvNames.length ? { extendInfo: { LSEnvironment: plan.launchEnv } } : {}) },
       // A rehearsal's files say so, so none can be mistaken for a release.
       ...(plan.mode === "rehearsal" ? { artifactName: "${productName}-${version}-${os}-${arch}-rehearsal.${ext}" } : {}),
     },
@@ -242,7 +266,7 @@ try {
 
 // 6. What goes beside the installers of a release (and of a rehearsal, so one can be tried end to end).
 if (plan.targets.includes("zip")) {
-  const { version } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const version = plan.version ?? JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
   const suffix = plan.mode === "rehearsal" ? "-rehearsal" : "";
   // The source maps the app doesn't carry: with this archive a stack trace from this version can be read.
   const maps = path.join(temp, "sourcemaps");
@@ -259,5 +283,5 @@ if (plan.targets.includes("zip")) {
 }
 
 const unpacked = readdirSync(release).filter((name) => statSync(path.join(release, name)).isDirectory() && !name.startsWith("."));
-step(`done: ${[...artifacts.map((file) => path.relative(root, file)), ...unpacked.map((name) => `release/${name}/`)].join(", ")}`);
+step(`done: ${[...artifacts.map((file) => path.relative(root, file)), ...unpacked.map((name) => `${path.relative(root, path.join(release, name))}/`)].join(", ")}`);
 if (plan.mode === "rehearsal") console.log("[package] signed for rehearsal, not notarized: do not distribute");

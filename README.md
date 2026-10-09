@@ -62,6 +62,16 @@ Local builds are ad-hoc signed and not notarized. That's enough to run the app o
 
 Windows (NSIS) and Linux (AppImage, deb) targets are configured in `apps/desktop/electron-builder.yml`, but those builds haven't been verified yet.
 
+### Updates
+
+An installed Sonobe looks for a newer release a few seconds after it starts and every four hours while it runs. There is no release yet, so today the check finds nothing.
+
+- A build signed for release downloads the new version in the background and offers **Restart to Update**. The restart asks about unsaved changes first, and Sonobe opens again with what you had open. The update also goes in the next time you quit.
+- A build you make yourself is ad-hoc signed, and macOS won't let an update replace it. It tells you a new version exists and opens its release page.
+- Sonobe run from a checkout (`npm run desktop`) never checks.
+
+A check is a few ordinary web requests to GitHub: its list of Sonobe's releases, the newest one's tag, and that release's update file. GitHub sees what any site you visit sees: your network address and your system's language. The requests carry no identifier for you or your copy of Sonobe, and nothing about your prototypes. Turn the automatic check off in **Settings → Updates**; **Check for Updates…** in the Sonobe menu still works. `SONOBE_UPDATES=off` turns updates off altogether, the menu command included.
+
 ### From source, for development
 
 ```bash

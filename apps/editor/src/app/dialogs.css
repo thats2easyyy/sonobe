@@ -226,6 +226,30 @@
   gap: var(--space-6);
 }
 
+/* Where this copy stands with updates (desktop). */
+.sb-update-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--bg-field);
+}
+
+.sb-update-line__text {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  text-wrap: pretty;
+}
+
+.sb-update-line > .sb-btn {
+  flex: none;
+}
+
 .sb-about__text {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);

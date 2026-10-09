@@ -18,6 +18,14 @@
  *    editor, and the draft comes back over its project. Save As through the (stubbed) Save panel
  *    refuses a folder inside the project and reopens next to it. Closing the window with Don't Save
  *    removes a draft.
+ * 5. Restart to Update, with a stand-in updater (the test hook's fake driver; nothing is downloaded or
+ *    installed): with an unsaved change, Cancel in the prompt keeps the app and the window, and the
+ *    update stays ready. Keep Draft closes the window, writes down what was open and asks the updater
+ *    to install. The next launch opens the project again with the unsaved change and no welcome screen,
+ *    and an MCP call that arrives first waits for it instead of landing on the launch document.
+ * 6. Quit with that unsaved change: Cancel in the prompt keeps the app and its window. Quit again and
+ *    Don't Save: the app itself ends, not only its window (a quit that stopped to ask carries on once
+ *    it's answered, which is what lets a downloaded update go in "the next time you quit").
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -64,16 +72,17 @@ const home = path.join(temp, "home");
 const userData = path.join(temp, "userData");
 const draftsDir = path.join(userData, "Drafts");
 const tokenFile = path.join(home, "mcp.json");
-const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_TEST: "1" };
-for (const key of ["SONOBE_DEV_URL", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_EDITOR_DIST", "ELECTRON_RUN_AS_NODE"]) delete env[key];
+// Updates are off twice over (a checkout never checks): part 5 drives the restart with the test hook's stand-in updater.
+const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
+for (const key of ["SONOBE_DEV_URL", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_EDITOR_DIST", "SONOBE_UPDATE_FEED", "ELECTRON_RUN_AS_NODE"]) delete env[key];
 
 let app = null;
 let failed = false;
 const watchdog = setTimeout(() => {
-  console.error("[drafts-smoke] watchdog: exceeded 240 s");
+  console.error("[drafts-smoke] watchdog: exceeded 300 s");
   app?.process()?.kill("SIGKILL");
   process.exit(1);
-}, 240_000);
+}, 300_000);
 
 const launch = async () => {
   rmSync(tokenFile, { force: true });
@@ -294,6 +303,107 @@ try {
   await app.evaluate(() => globalThis.__sonobeTest?.destroyWindows());
   await app.close();
   app = null;
+
+  // ---------------------------------------------------------------------------------------------
+  // 5. Restart to Update with unsaved changes: Cancel keeps everything, Keep Draft comes back
+  // ---------------------------------------------------------------------------------------------
+
+  ({ app, page } = await launch());
+  mcp = await connectMcp();
+  const openTarget = async () => {
+    await app.evaluate((_electron, dir) => globalThis.__sonobeTest.openProject(dir), target);
+    await poll(async () => (await mcp.call("get_document_info")).text.includes(`Path: ${target}`), { message: "the saved project to open" });
+  };
+  await openTarget();
+  const off = await app.evaluate(() => ({ status: globalThis.__sonobeTest.updates.status(), item: globalThis.__sonobeTest.updates.menuItem(), loaded: globalThis.__sonobeTest.updates.driverLoaded() }));
+  assert(off.status.mode === "off" && off.status.state === "idle" && off.item === null && off.loaded === false, "a checkout never checks for updates and has no update item in its menu", off);
+
+  await app.evaluate(() => globalThis.__sonobeTest.updates.useFakeDriver({ version: "9.9.9" }));
+  await app.evaluate(() => globalThis.__sonobeTest.updates.check());
+  const ready = await poll(() => app.evaluate(() => (globalThis.__sonobeTest.updates.status().state === "ready" ? { status: globalThis.__sonobeTest.updates.status(), item: globalThis.__sonobeTest.updates.menuItem() } : null)), { message: "the stand-in update to be ready" });
+  assert(ready.status.version === "9.9.9" && ready.status.mode === "install" && ready.item === "restart", "the update is ready and the menu reads Restart to Update", ready);
+  const restartEdit = await mcp.call("add_layers", { label: "added a ribbon", layers: [{ type: "rectangle", name: "Unsaved before the update" }] });
+  assert(!restartEdit.isError, "add_layers before the restart", restartEdit.text);
+  const restartDraft = await poll(() => Object.entries(draftsOnDisk()).find(([, d]) => d.projectPath === target)?.[0], { message: "a draft of the unsaved change" });
+
+  // The native dialogs, answered by a stub that records them: the confirmation about connected Claude sessions, then the prompt.
+  const answerPrompts = (choice) =>
+    app.evaluate(({ dialog }, pick) => {
+      globalThis.__asked = [];
+      dialog.showMessageBox = async (...args) => {
+        const options = args.at(-1);
+        globalThis.__asked.push({ message: options.message, detail: options.detail, buttons: options.buttons });
+        const wanted = options.message.startsWith("Restart Sonobe") ? "Restart" : pick;
+        return { response: Math.max(0, options.buttons.indexOf(wanted)), checkboxChecked: false };
+      };
+    }, choice);
+  const recordFile = path.join(userData, "reopen-after-update.json");
+
+  await answerPrompts("Cancel");
+  const cancelled = await app.evaluate(() => globalThis.__sonobeTest.updates.restart());
+  const afterCancel = await app.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length, status: globalThis.__sonobeTest.updates.status(), installs: globalThis.__sonobeTest.updates.installs(), asked: globalThis.__asked }));
+  const unsavedPrompt = afterCancel.asked.find((q) => q.message.startsWith("Do you want to save"));
+  assert(cancelled === false && afterCancel.windows === 1 && afterCancel.installs === 0 && !existsSync(recordFile), "Cancel keeps the app and its window, installs nothing and writes no record", afterCancel);
+  assert(afterCancel.status.state === "ready" && afterCancel.status.restarting === false, "the update stays ready after a cancelled restart", afterCancel.status);
+  assert(unsavedPrompt?.buttons.join() === "Save,Keep Draft,Cancel" && unsavedPrompt.detail.includes("opens it again after the update"), "the restart's prompt offers Save, Keep Draft or Cancel", afterCancel.asked);
+  assert(afterCancel.asked[0].message === "Restart Sonobe to update to 9.9.9?" && afterCancel.asked[0].detail.includes("is connected"), "the restart says a Claude session is connected before it asks anything else", afterCancel.asked);
+  assert(draftsOnDisk()[restartDraft], "the draft is still there after Cancel");
+  log("Restart to Update, then Cancel: the app, the window and the ready update all stayed");
+
+  await answerPrompts("Keep Draft");
+  await mcp.close();
+  void app.evaluate(() => void globalThis.__sonobeTest.updates.restart()).catch(() => undefined);
+  await poll(() => app.evaluate(({ BrowserWindow }) => globalThis.__sonobeTest.updates.installs() === 1 && BrowserWindow.getAllWindows().length === 0), { message: "the window to close and the updater to be asked to install" });
+  const record = JSON.parse(readFileSync(recordFile, "utf8"));
+  assert(record.version === 1 && record.windows.length === 1 && record.windows[0].project === target && record.windows[0].draft === restartDraft, "the record names the project and the kept draft", record);
+  assert(draftsOnDisk()[restartDraft]?.projectPath === target, "Keep Draft left the draft on disk", draftsOnDisk());
+  // A real updater quits the app here. The stand-in doesn't, so the smoke does.
+  await kill("SIGKILL", 5000);
+  log("Restart to Update, then Keep Draft: the window closed, the record was written, and the updater was asked to install");
+
+  rmSync(tokenFile, { force: true });
+  app = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env, timeout: 30_000 });
+  app.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
+  // A relay that outlived the restart calls as soon as the endpoint answers, before the window exists.
+  mcp = await connectMcp();
+  const firstCall = await mcp.call("get_document_info");
+  assert(firstCall.text.includes(`Path: ${target}`) && firstCall.structuredContent.draft?.id === restartDraft, "an MCP call that arrives first waits for the reopened work", firstCall.text);
+  const backAfterUpdate = await mcp.call("get_outline", { detail: "compact" });
+  assert(backAfterUpdate.text.includes("Unsaved before the update"), "the unsaved change is back after the restart", backAfterUpdate.text);
+  assert(firstCall.text.includes("unsaved changes"), "the reopened document is still unsaved", firstCall.text);
+  assert(!existsSync(recordFile), "the record is used once");
+  page = await app.firstWindow();
+  assert((await page.evaluate(() => window.sonobeHost.reopening)) === true, "the editor is told this launch reopens work (sonobeHost.reopening)");
+  // The work is on screen with no welcome screen over it. (That the editor never shows one in this window, not even for a moment, is welcomeStore's unit test.)
+  await page.locator(".sb-shell").waitFor({ timeout: 10_000 });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert((await page.getByRole("dialog", { name: "Welcome to Sonobe" }).count()) === 0, "no welcome screen is over the reopened work");
+  await mcp.close();
+  log("the next launch opened the project again with its unsaved change, and the first MCP call waited for it");
+
+  // ---------------------------------------------------------------------------------------------
+  // 6. Quit with unsaved changes: Cancel keeps the app, Don't Save ends it (not only its window)
+  // ---------------------------------------------------------------------------------------------
+
+  const quit = () => void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+  const visibleWindows = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length);
+  await answerPrompts("Cancel");
+  quit();
+  const quitPrompt = await poll(() => app.evaluate(() => globalThis.__asked[0] ?? null), { message: "the unsaved-changes prompt of a quit" });
+  assert(quitPrompt.buttons.join() === "Save,Don't Save,Cancel" && quitPrompt.detail === "Your changes will be lost if you don't save them.", "quitting with an unsaved change asks Save, Don't Save or Cancel", quitPrompt);
+  await new Promise((r) => setTimeout(r, 500));
+  assert((await visibleWindows()) === 1 && draftsOnDisk()[restartDraft], "Cancel keeps the app, its window and the draft");
+
+  await answerPrompts("Don't Save");
+  const quitting = app.process();
+  const ended = new Promise((resolve) => quitting.once("exit", (code, signal) => resolve({ code, signal })));
+  quit();
+  const quitOutcome = await Promise.race([ended, new Promise((resolve) => setTimeout(() => resolve(null), 10_000))]);
+  assert(quitOutcome?.code === 0, "after Don't Save the quit carries on: the app ends, not only its window", quitOutcome ?? "still running 10 s after the prompt was answered");
+  assert(Object.keys(draftsOnDisk()).length === 0, "Don't Save removed the draft on the way out", draftsOnDisk());
+  await app.close().catch(() => undefined);
+  app = null;
+  log("Quit with an unsaved change: Cancel kept the app, and Don't Save ended it");
   log("PASS");
 } catch (err) {
   failed = true;

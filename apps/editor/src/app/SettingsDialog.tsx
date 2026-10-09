@@ -16,6 +16,7 @@ import { Tooltip } from "../ui/Tooltip.tsx";
 import { Toggle } from "../ui/Toggle.tsx";
 import { trustServiceFor } from "./sessionServices.ts";
 import { settingsStore, useSettings, type AgentPermission, type MotionPreference } from "./settings.ts";
+import { updateStore, useUpdates } from "./updates/updateStore.ts";
 import "./dialogs.css";
 
 const KIND_LABELS: Record<DevicePreset["kind"], string> = { phone: "Phones", tablet: "Tablets", computer: "Desktop", watch: "Watch", custom: "Custom" };
@@ -109,7 +110,34 @@ function SubscriptionSwitch() {
   );
 }
 
-/** Settings: theme, motion, the default device, the welcome screen, what Claude may do (and the experimental subscription switch), and trusted prototypes. */
+export const AUTO_UPDATE_SWITCH_LABEL = "Check for updates automatically";
+export const AUTO_UPDATE_SWITCH_DESCRIPTION = "Asks GitHub for the newest version. Nothing about you or your prototypes is sent.";
+
+/**
+ * Updates (desktop, in a copy that checks for them): the switch for the automatic checks, with what a
+ * check sends. Main keeps the setting; Check for Updates… works either way. A copy that never checks
+ * (the browser, a checkout) shows nothing.
+ */
+function UpdatesSection() {
+  const status = useUpdates((s) => s.status);
+  const descriptionId = useId();
+  const [saving, setSaving] = useState(false);
+  if (!status || status.mode === "off") return null;
+  const change = async (enabled: boolean) => {
+    setSaving(true);
+    await updateStore.getState().setAutoCheck(enabled).catch(() => toast.error("Couldn't change the setting"));
+    setSaving(false);
+  };
+  return (
+    <Section title="Updates">
+      <Row name={AUTO_UPDATE_SWITCH_LABEL} description={AUTO_UPDATE_SWITCH_DESCRIPTION} descriptionId={descriptionId}>
+        <Toggle aria-label={AUTO_UPDATE_SWITCH_LABEL} aria-describedby={descriptionId} checked={status.autoCheck} disabled={saving} onChange={(checked) => void change(checked)} />
+      </Row>
+    </Section>
+  );
+}
+
+/** Settings: theme, motion, the default device, the welcome screen, what Claude may do (and the experimental subscription switch), updates (desktop), and trusted prototypes. */
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange} width={DIALOG_WIDTH.md} className="sb-settings" modalScope="settings">
@@ -197,6 +225,8 @@ function SettingsContent({ onClose }: { onClose: () => void }) {
             {subscriptionSwitch ? <SubscriptionSwitch /> : null}
             {!desktop && !subscriptionSwitch && <p className="sb-settings__note">Claude connects through the desktop app. This applies there.</p>}
           </Section>
+
+          <UpdatesSection />
 
           <Section title="Trusted prototypes">
             <p className="sb-settings__desc">Prototypes you trust to run JavaScript patches. Remove one and Sonobe asks again.</p>

@@ -144,6 +144,28 @@ describe("draft keeper", () => {
     expect(writes).toHaveLength(1);
   });
 
+  it("says whether the draft on disk is missing edits: before a write, and after one that failed", async () => {
+    const { document, keeper, drafts } = setup();
+    const onError = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // A clean document, and a copy that's only marked unsaved, have nothing waiting: there is no draft to write.
+    expect(keeper.pending()).toBe(false);
+    document.getState().replaceDocument(createEmptyDocument({ name: "Tap to Grow" }), { projectPath: null, saved: false, label: "Opened example" });
+    expect(keeper.pending()).toBe(false);
+    document.getState().apply([addRect("Card")], { label: "Add Card" });
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    // The next write fails (a full disk): the draft on disk is the old one, and the keeper says so.
+    vi.mocked(drafts.write).mockRejectedValueOnce(new Error("ENOSPC"));
+    document.getState().apply([addRect("Badge")], { label: "Add Badge" });
+    await keeper.flush();
+    expect(keeper.current()).toMatchObject({ id: "draft-0001" });
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    onError.mockRestore();
+  });
+
   it("records the ids the session has seen, and continues a restored draft under its own id", async () => {
     const { document, keeper, writes, removed } = setup();
     document.getState().apply([addRect("Hero", "hero")], { label: "Add Hero" });

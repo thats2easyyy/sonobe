@@ -74,7 +74,8 @@ export type SonobeCommandId =
   | "help.explain"
   | "help.connectClaude"
   | "help.shortcuts"
-  | "help.reportIssue";
+  | "help.reportIssue"
+  | "help.about";
 
 /** A command as shown in menus, for the command palette and the editor keymap. */
 export interface SonobeCommandInfo {
@@ -210,6 +211,84 @@ export interface ViewerWindowStatus {
   error: string | null;
 }
 
+/** What went wrong with an update, in words for people. */
+export interface UpdateProblem {
+  /**
+   * network: nothing answered. no-release: nothing is published yet. damaged: the download didn't arrive
+   * whole. rejected: the system refused to install it. location: the app can't be replaced where it is.
+   */
+  kind: "network" | "no-release" | "damaged" | "rejected" | "location" | "other";
+  /**
+   * What Sonobe was doing. A check that failed has found no version, so an automatic one stays quiet
+   * whatever its kind; a download or an install that failed is said even when nobody asked.
+   */
+  phase: "check" | "download" | "install";
+  message: string;
+  /** What to do about it. */
+  hint: string;
+}
+
+/** Where this copy of Sonobe stands with updates (electron/updates.ts). */
+export interface UpdateStatus {
+  /**
+   * install: downloads a new version in the background and offers Restart to Update. notify: only says
+   * there is one, and where to get it. off: never checks (run from a checkout, an automated run,
+   * SONOBE_UPDATES=off, or a build with no update feed).
+   */
+  mode: "install" | "notify" | "off";
+  /** Why this copy can't do more, as a sentence for people; null when nothing needs saying. */
+  reason: string | null;
+  state: "idle" | "checking" | "upToDate" | "available" | "downloading" | "ready" | "failed";
+  /** This app's version. */
+  current: string;
+  /** The newer version, once a check found one. */
+  version: string | null;
+  /** The release page of `version`, or of the latest release. */
+  releaseUrl: string;
+  /** This version's release notes, on the first launch after an update (with `updatedFrom`). */
+  notesUrl: string | null;
+  /** 0 to 1 while downloading. */
+  progress: number | null;
+  error: UpdateProblem | null;
+  /** The person asked for the check behind this state (Check for Updates…), so it deserves an answer even when there's nothing new. */
+  manual: boolean;
+  /**
+   * How many times the person has chosen Check for Updates… in this launch. Each one is answered: when
+   * only this changed (an update was already downloading or ready), the answer is the state as it stands.
+   */
+  asks: number;
+  /** "Check for updates automatically". Check for Updates… works either way. */
+  autoCheck: boolean;
+  /** The version this copy ran as before, on the first launch after an update, until one window has been told. */
+  updatedFrom: string | null;
+  /** The app could update itself from the Applications folder, and nobody has been offered the move yet. */
+  offerMove: boolean;
+  /** moveToApplications() can help (macOS, a build that installs updates, outside an Applications folder). */
+  canMove: boolean;
+  /** Restart to Update is closing the windows. Back to false with the state still `ready` means the person cancelled. */
+  restarting: boolean;
+}
+
+/**
+ * Updates, for the editor's notices, About and Settings. No call rejects: status(), check() and
+ * setAutoCheck() answer with a status, and restart() and moveToApplications() answer false when the app stayed.
+ */
+export interface SonobeUpdates {
+  status(): Promise<UpdateStatus>;
+  /** Check now (Check for Updates…). Resolves once the check has its answer; a download carries on after it. */
+  check(): Promise<UpdateStatus>;
+  /**
+   * Restart to Update: closes every window through its unsaved-changes prompt, then installs and reopens
+   * what was open. Resolves false when the person cancelled or the restart didn't happen.
+   */
+  restart(): Promise<boolean>;
+  setAutoCheck(enabled: boolean): Promise<UpdateStatus>;
+  /** Move the app to the Applications folder and open it there (macOS). Resolves false when it stayed where it was. */
+  moveToApplications(): Promise<boolean>;
+  /** Status changes. Returns unsubscribe. */
+  onStatus(cb: (status: UpdateStatus) => void): () => void;
+}
+
 /** What the Import dialog asks the app to render and capture. */
 export interface DesignCaptureParams {
   url?: string;
@@ -311,8 +390,8 @@ export type RpcHandler = (params: unknown) => unknown | Promise<unknown>;
  * - `document.save`: called when the user picks Save in the "unsaved changes" prompt (with
  *   `interactive: true`), and by save_document (with `noDialog`, and `path` for a new folder).
  *   Resolve `false` to cancel closing.
- * - `drafts.flush`: write unsaved edits to the window's draft now (before a quit on a signal, and
- *   when the unsaved-changes prompt opens).
+ * - `drafts.flush`: write unsaved edits to the window's draft now (before a quit on a signal, when
+ *   the unsaved-changes prompt opens, and again when Keep Draft is chosen in it).
  * - The MCP bridge methods of apps/editor/src/host/rpcHandlers.ts (`document.info`, `document.apply`...).
  *   Optional: `canvas.bounds`, `graph.bounds` and `viewer.layerBounds({ layerId })` resolve a
  *   `{ x, y, width, height, scale? }` rect in viewport CSS pixels so screenshots can target them, and
@@ -334,6 +413,8 @@ export interface SonobeHost {
   readonly version: string;
   /** True when the app runs muted (SONOBE_MUTE). The editor then speaks silently too: system speech plays past Chromium's audio mute. */
   readonly muted: boolean;
+  /** True in the window that opens again what was open before a restart for an update: the editor skips its welcome screen there. */
+  readonly reopening: boolean;
 
   /** Native folder picker for a *.sonobe project. Resolves the project directory or null. */
   openProjectDialog(): Promise<string | null>;
@@ -416,6 +497,13 @@ export interface SonobeHost {
 
   /** Drafts of unsaved work, so it survives a crash, a quit or a killed process. */
   drafts: SonobeDrafts;
+
+  /**
+   * Updates: whether a newer version exists and what this copy can do about it. Status changes go to
+   * every window. While a window subscribes to them, its notices answer Check for Updates…; with no
+   * subscriber, the host answers with a native dialog.
+   */
+  updates: SonobeUpdates;
 }
 
 declare global {

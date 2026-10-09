@@ -9,7 +9,9 @@ import { createManualScheduler } from "../runtime/scheduler.ts";
 import { EditorProvider } from "../state/EditorProvider.tsx";
 import { createEditorSession, type EditorSession } from "../state/session.ts";
 import { ThemeProvider } from "../theme/ThemeProvider.tsx";
-import { SettingsDialog, SUBSCRIPTION_SWITCH_DESCRIPTION, SUBSCRIPTION_SWITCH_LABEL } from "./SettingsDialog.tsx";
+import { AUTO_UPDATE_SWITCH_DESCRIPTION, AUTO_UPDATE_SWITCH_LABEL, SettingsDialog, SUBSCRIPTION_SWITCH_DESCRIPTION, SUBSCRIPTION_SWITCH_LABEL } from "./SettingsDialog.tsx";
+import { fakeUpdatesHost, type FakeUpdatesHost } from "./updates/testing.ts";
+import { followUpdates, updateStore } from "./updates/updateStore.ts";
 
 // Each test gets its own controller over its own fake host; Settings asks the shared one.
 const h = vi.hoisted(() => ({ controller: null as AssistantController | null }));
@@ -20,6 +22,7 @@ vi.mock("../panels/assistant/controller.ts", async (importOriginal) => ({ ...(aw
 let container: HTMLDivElement;
 let root: Root;
 let session: EditorSession;
+let unfollow: () => void = () => undefined;
 
 beforeEach(() => {
   assistantStore.setState(initialAssistantData());
@@ -33,14 +36,19 @@ afterEach(() => {
   act(() => root.unmount());
   h.controller?.dispose();
   h.controller = null;
+  unfollow();
+  unfollow = () => undefined;
+  updateStore.setState({ status: null });
   delete (window as { sonobeHost?: unknown }).sonobeHost;
   session.dispose();
   container.remove();
   document.body.innerHTML = "";
 });
 
-async function mount(host: FakeAssistantHost | null) {
-  if (host) (window as { sonobeHost?: unknown }).sonobeHost = host;
+async function mount(host: FakeAssistantHost | null, updates?: FakeUpdatesHost) {
+  if (host || updates) (window as { sonobeHost?: unknown }).sonobeHost = { ...host, ...(updates ? { updates } : {}) };
+  // EditorApp follows the app's update status; here the test does.
+  if (updates) unfollow = followUpdates();
   h.controller = createAssistantController(host, assistantStore);
   await act(async () => {
     root.render(
@@ -131,9 +139,63 @@ describe("Settings → Claude → the experimental subscription switch", () => {
   });
 });
 
+const updateSwitch = () => document.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${AUTO_UPDATE_SWITCH_LABEL}"]`);
+
+describe("Settings → Updates", () => {
+  it("has the switch for automatic checks, on by default, and says what a check sends", async () => {
+    const updates = fakeUpdatesHost({ mode: "notify", state: "upToDate" });
+    await mount(null, updates);
+    const toggle = updateSwitch()!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    const row = toggle.closest('[role="group"]')!;
+    expect(row.textContent).toContain("Check for updates automatically");
+    expect(row.textContent).toContain("Asks GitHub for the newest version. Nothing about you or your prototypes is sent.");
+    expect(row.closest("section")?.getAttribute("aria-label")).toBe("Updates");
+    expect(document.getElementById(toggle.getAttribute("aria-describedby")!)?.textContent).toBe(AUTO_UPDATE_SWITCH_DESCRIPTION);
+    // Settings has the switch and nothing else: the state and its action are in About.
+    expect(row.closest("section")!.querySelectorAll("button")).toHaveLength(1);
+    expect(updates.calls).toEqual([]);
+  });
+
+  it("asks the app to turn the automatic checks off and on, and shows what the app says", async () => {
+    const updates = fakeUpdatesHost({ state: "ready", version: "0.2.0" });
+    await mount(null, updates);
+    await act(async () => updateSwitch()!.click());
+    expect(updates.calls).toEqual(["autoCheck:false"]);
+    expect(updateSwitch()!.getAttribute("aria-checked")).toBe("false");
+    expect(updateSwitch()!.disabled).toBe(false);
+    await act(async () => updateSwitch()!.click());
+    expect(updates.calls).toEqual(["autoCheck:false", "autoCheck:true"]);
+    expect(updateSwitch()!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("follows a change made in another window", async () => {
+    const updates = fakeUpdatesHost();
+    await mount(null, updates);
+    act(() => void updates.push({ autoCheck: false }));
+    expect(updateSwitch()!.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("isn't there in a copy that never checks, in the browser, or with an older preload", async () => {
+    await mount(null, fakeUpdatesHost({ mode: "off" }));
+    expect(updateSwitch()).toBeNull();
+    expect(document.querySelector('section[aria-label="Updates"]')).toBeNull();
+    for (const host of [null, fakeAssistantHost()]) {
+      act(() => root.unmount());
+      unfollow();
+      updateStore.setState({ status: null });
+      delete (window as { sonobeHost?: unknown }).sonobeHost;
+      root = createRoot(container);
+      await mount(host);
+      expect(updateSwitch()).toBeNull();
+      expect(document.body.textContent).not.toContain("Check for updates automatically");
+    }
+  });
+});
+
 describe("Settings helper text", () => {
   it("is at most 14 words a row", async () => {
-    await mount(null);
+    await mount(null, fakeUpdatesHost());
     const helpers = [...document.querySelectorAll(".sb-settings__desc")].map((el) => el.textContent ?? "");
     expect(helpers.length).toBeGreaterThan(4);
     for (const text of helpers) expect(text.trim().split(/\s+/).length, text).toBeLessThanOrEqual(14);

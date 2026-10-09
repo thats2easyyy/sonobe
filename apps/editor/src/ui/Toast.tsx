@@ -77,7 +77,8 @@ export function dismissToast(id: string): void {
   toasts = toasts.map((t) => (t.id === id ? { ...t, state: "closing" } : t));
   emit();
   setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id);
+    // Shown again under the same id meanwhile (an action that takes its toast down, then reports back): that one stays.
+    toasts = toasts.filter((t) => t.id !== id || t.state !== "closing");
     emit();
   }, EXIT_MS);
 }

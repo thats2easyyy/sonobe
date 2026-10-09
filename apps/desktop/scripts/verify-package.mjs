@@ -10,6 +10,7 @@
  *   Apple's secure timestamp
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
  * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
+ * - updates are off for this launch (SONOBE_UPDATES=off): the app says so, never loads the updater and asks no feed
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
  * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), and runs from a copy outside
  *   the checkout, where it has nothing but its own bundle to load
@@ -128,7 +129,7 @@ try {
   if (mac) for (const file of ["icon.icns", "licenses/LICENSE.electron.txt", "licenses/LICENSES.chromium.html"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   const { listPackage, extractFile } = await import("@electron/asar");
   const asarFiles = listPackage(path.join(resources, "app.asar")).map((f) => f.replaceAll("\\", "/"));
-  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
+  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   const under = (dir) => readdirSync(path.join(resources, dir), { recursive: true }).map((f) => String(f).replaceAll("\\", "/"));
   const editorMaps = under("editor").filter((f) => f.endsWith(".map"));
@@ -139,13 +140,18 @@ try {
   assert(cliExtras.length === 0, "no node_modules or native modules under Resources/cli", cliExtras.slice(0, 5));
   const notices = readFileSync(path.join(resources, "licenses", "THIRD-PARTY-NOTICES.txt"), "utf8");
   // ajv is in none of Sonobe's package.json files: the MCP SDK carries it inside its own published files.
-  for (const name of ["react", "elkjs", "zod", "ws", "ajv"]) assert(new RegExp(`^${name} \\d.*\\nLicense: \\S`, "m").test(notices), `licenses/THIRD-PARTY-NOTICES.txt lists ${name} with its license`);
+  // electron-updater is bundled into dist/updater.cjs, and its notice comes from that bundle's own file list.
+  for (const name of ["react", "elkjs", "zod", "ws", "ajv", "electron-updater"]) assert(new RegExp(`^${name} \\d.*\\nLicense: \\S`, "m").test(notices), `licenses/THIRD-PARTY-NOTICES.txt lists ${name} with its license`);
   const unlicensed = [...notices.matchAll(/^(\S+).*\nLicense: UNKNOWN$/gm)].map((match) => match[1]);
   assert(unlicensed.length === 0, "every package in licenses/THIRD-PARTY-NOTICES.txt has a license (scripts/build.mjs warns about one it couldn't read)", unlicensed);
   log(`app.asar holds ${asarFiles.length} entries; editor (no source maps), CLI, guides and licenses are in Resources`);
 
   // What this build can do with an update, as the app reads it (scripts/signing.ts).
   const recorded = JSON.parse(extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8")).sonobe;
+  // Where a downloaded update waits (~/Library/Caches/sonobe-updater on a Mac). The first signed release freezes
+  // the name. A --dir build has no app-update.yml, and never checks for updates.
+  const updateConfig = path.join(resources, "app-update.yml");
+  if (existsSync(updateConfig)) assert(/^updaterCacheDirName: sonobe-updater$/m.test(readFileSync(updateConfig, "utf8")), "Resources/app-update.yml names the update cache folder sonobe-updater", readFileSync(updateConfig, "utf8"));
   let signature = null;
   let notarized = false;
   let runnable = true;
@@ -234,10 +240,12 @@ try {
     log(`bundled CLI runs with the app runtime (${cliVersion}), and from a copy with only its own bundle`);
 
     // Launch muted with isolated state. SONOBE_TEST=1 keeps secrets on the test cipher: the real one is the login
-    // keychain, where a freshly built app raises a permission dialog on the person's screen.
+    // keychain, where a freshly built app raises a permission dialog on the person's screen. SONOBE_UPDATES=off:
+    // a packaged build checks for updates, and this launch must ask no feed and download nothing.
     const home = path.join(temp, "home");
-    const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: path.join(temp, "userData"), SONOBE_TEST: "1" };
-    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT"]) delete env[key];
+    const userData = path.join(temp, "userData");
+    const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
+    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED"]) delete env[key];
     if (values["mcp-port"]) env.SONOBE_MCP_PORT = values["mcp-port"];
     // macOS reads -AppleLanguages as the app's preferred languages, as a non-English system would set them.
     app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 });
@@ -272,7 +280,7 @@ try {
     assert(state.muted && state.muteSwitch, "audio muted", state);
     assert(state.url.startsWith("file:") && state.url.includes("/Resources/editor/index.html".replace("/Resources", mac ? "/Resources" : "/resources")), "loads the bundled editor", state.url);
     const host = await win.evaluate(() => ({ keys: Object.keys(window.sonobeHost ?? {}).sort(), version: window.sonobeHost?.version, language: navigator.language }));
-    for (const key of ["getMcpStatus", "notifyDocumentChanged", "openExternal", "popOutViewer", "secrets"]) assert(host.keys.includes(key), `sonobeHost.${key}`, host.keys);
+    for (const key of ["getMcpStatus", "notifyDocumentChanged", "openExternal", "popOutViewer", "secrets", "updates"]) assert(host.keys.includes(key), `sonobeHost.${key}`, host.keys);
     assert(host.version === pkg.version, "sonobeHost.version", host.version);
     if (values.lang) log(`with the system language ${JSON.stringify(state.preferred)}: app.getLocale() is ${state.locale}, navigator.language is ${host.language}`);
     // The experimental Claude subscription is offered only from a checkout, never in a packaged build.
@@ -287,6 +295,14 @@ try {
     await win.screenshot({ path: screenshot });
     assert(mounted, "the bundled editor renders (#root has content)", pageErrors.length ? pageErrors.slice(0, 5).join("\n  ") : "no page errors reported");
     log(`window loads and renders the bundled editor; sonobeHost v${host.version}; the Claude subscription isn't offered${values.screenshot ? `; screenshot → ${values.screenshot}` : ""}`);
+
+    // Updates are off: the app answers so (the answer waits until the window is up), the updater was never loaded,
+    // and electron-updater left no per-install id behind, which it writes at its first check.
+    const updates = await win.evaluate(() => window.sonobeHost.updates.status());
+    const updaterLoaded = await app.evaluate(() => globalThis.__sonobeTest.updates.driverLoaded());
+    assert(updates.mode === "off" && updates.state === "idle" && /SONOBE_UPDATES/.test(updates.reason ?? ""), "updates are off for this launch", updates);
+    assert(updaterLoaded === false && !existsSync(path.join(userData, ".updaterId")), "the updater was never loaded and left nothing in the user data folder", { updaterLoaded });
+    log("updates are off for this launch: no check, and the updater was never loaded");
 
     await app.close();
     app = null;

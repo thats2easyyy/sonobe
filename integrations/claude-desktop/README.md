@@ -67,6 +67,7 @@ Headless screenshots are drawn without the app: text uses approximate font metri
 
 - **The extension fails to start** with "the Sonobe app isn't running": open Sonobe first, then toggle the extension off and on.
 - **"rejected the token"**: the connection file is from an earlier launch. Quit and reopen Sonobe.
+- **Sonobe restarted while the extension was running**: it finds Sonobe again by itself within about 20 seconds. If Sonobe stayed closed longer, calls fail until you open it again, and the next one finds it.
 - **Logs**:
   - macOS: `~/Library/Logs/Claude/mcp-server-Sonobe.log`
   - Windows: `%APPDATA%\Claude\logs`
