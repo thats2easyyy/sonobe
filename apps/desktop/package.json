@@ -12,6 +12,7 @@
     "smoke:import": "node tests/import-smoke.mjs",
     "smoke:drafts": "node tests/drafts-smoke.mjs",
     "rehearse:update": "node tests/update-rehearsal.mjs",
+    "bench:startup": "node tests/startup-bench.mjs",
     "test": "vitest run --config vitest.config.ts",
     "icons": "node scripts/icons.mjs",
     "package": "node scripts/package.mjs",

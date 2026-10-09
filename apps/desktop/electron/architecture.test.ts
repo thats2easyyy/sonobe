@@ -63,6 +63,23 @@ describe("§12 quality gates", () => {
     expect(read("../tests/smoke.mjs")).toContain("SONOBE_SMOKE_SKIP_EDITOR_BUILD");
   });
 
+  it("documents the startup benchmark as its own command, by hand and outside CI", () => {
+    const pkg = JSON.parse(read("../package.json")) as { name: string; scripts: Record<string, string> };
+    expect(pkg.scripts["bench:startup"]).toBe("node tests/startup-bench.mjs");
+    const bullet = gates.split("\n").find((line) => line.startsWith(`- \`npm run bench:startup -w ${pkg.name}\``))!;
+    expect(bullet).toBeDefined();
+    expect(bullet).toMatch(/by hand and outside CI/);
+    expect(read("../../../.github/workflows/ci.yml")).not.toMatch(/bench:startup|startup-bench/);
+    // Every flag the script takes is in its own header, and the ones that change what is timed are in the bullet.
+    const bench = read("../tests/startup-bench.mjs");
+    const flags = [...bench.matchAll(/^    "?([a-z-]+)"?: \{ type: "(?:boolean|string)"/gm)].map((m) => `--${m[1]}`);
+    expect(flags).toEqual(expect.arrayContaining(["--baseline", "--cli", "--dev"]));
+    for (const flag of flags) expect(bench.slice(0, bench.indexOf("\nimport ")), flag).toContain(` ${flag}`);
+    for (const flag of ["--baseline", "--cli", "--dev"]) expect(bullet, flag).toContain(`\`${flag}`);
+    // It launches nothing that isn't isolated and muted, and cleans up after itself.
+    for (const needle of ["SONOBE_USER_DATA", "SONOBE_HOME", 'SONOBE_MUTE: "1"', 'SONOBE_UPDATES: "off"', "lsregister"]) expect(bench, needle).toContain(needle);
+  });
+
   it("documents package verification with every flag it takes, and keeps it off the keychain and the tracked screenshot", () => {
     const pkg = JSON.parse(read("../package.json")) as { name: string; scripts: Record<string, string> };
     expect(pkg.scripts["package:verify"]).toBe("node scripts/verify-package.mjs");
