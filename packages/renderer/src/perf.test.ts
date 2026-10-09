@@ -240,9 +240,10 @@ describe("render performance (engine frames, 500 layers)", { retry: 2 }, () => {
     const { runtime, renderer } = screen(true);
     const { step, draw, writesPerFrame } = measureLive(runtime, renderer, 60);
     report("300 boxes + 200 wrapped paragraphs, one box turning: draw", draw);
-    report("300 boxes + 200 wrapped paragraphs, one box turning: engine step (lays the text out)", step, `budget ${BUDGET_MS * 2}`);
+    // The measurer keeps a wrapped layout, so a paragraph is wrapped once, not on every frame (that took over 4 ms here).
+    report("300 boxes + 200 wrapped paragraphs, one box turning: engine step (lays the text out)", step, `budget ${BUDGET_MS / 2}`);
     expect(writesPerFrame.every((w) => w === 1)).toBe(true);
     expect(draw).toBeLessThan(BUDGET_MS);
-    expect(step).toBeLessThan(BUDGET_MS * 2);
+    expect(step).toBeLessThan(BUDGET_MS / 2);
   });
 });
