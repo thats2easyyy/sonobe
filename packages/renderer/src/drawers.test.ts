@@ -2,7 +2,9 @@
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDomRenderer } from "./renderer.ts";
+import type { MediaState } from "./host.ts";
 import type { DomRenderer, DomRendererOptions } from "./renderer.ts";
+import { ShaderHost } from "./shader.ts";
 import { writtenStyle } from "./style.ts";
 import { DomTextMeasurer } from "./textMeasurer.ts";
 
@@ -260,6 +262,30 @@ describe("layer drawing", () => {
       play.mockRestore();
       pause.mockRestore();
     });
+
+    it("reports what a video that isn't playing learns between frames, without another frame from the host", () => {
+      const reports: MediaState[] = [];
+      make({ onMediaState: (_key, _layerId, state) => reports.push(state) });
+      draw(node("v", "video", { video: { url: "https://x.test/clip.mp4" }, playing: false }));
+      const video = body("v").querySelector("video")!;
+      const frames = renderer.getStats().frames;
+      expect(reports).toEqual([]);
+      // The metadata arrives: the renderer draws its last frame again and reads the element.
+      Object.defineProperties(video, { readyState: { value: 1, configurable: true }, duration: { value: 4, configurable: true }, videoWidth: { value: 640 }, videoHeight: { value: 360 } });
+      video.dispatchEvent(new Event("loadedmetadata"));
+      expect(reports).toEqual([{ currentTime: 0, duration: 4, naturalSize: [640, 360] }]);
+      expect(renderer.getStats().frames).toBe(frames + 1);
+      // A seek that lands is reported the same way.
+      video.currentTime = 2.5;
+      video.dispatchEvent(new Event("seeked"));
+      expect(reports.at(-1)).toEqual({ currentTime: 2.5, duration: 4, naturalSize: [640, 360] });
+      // Nothing is drawn for an element whose renderer is gone.
+      const drawn = renderer.getStats().frames;
+      renderer.dispose();
+      video.dispatchEvent(new Event("durationchange"));
+      expect(renderer.getStats().frames).toBe(drawn);
+      expect(reports).toHaveLength(2);
+    });
   });
 
   describe("shape", () => {
@@ -457,6 +483,25 @@ describe("layer drawing", () => {
       expect(body("fx").querySelector(".sonobe-placeholder")!.getAttribute("data-tone")).toBe("error");
       renderer.render({ ...frame([node("fx", "shader")]), time: 1 });
       expect(onShaderError).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands a shader one ordinary frame of iTimeDelta after a gap, since a prototype at rest draws no frames", () => {
+      const deltas: number[] = [];
+      const drawShader = vi.spyOn(ShaderHost.prototype, "draw").mockImplementation((_code, _canvas, _w, _h, inputs) => {
+        deltas.push(inputs.timeDelta);
+        return null;
+      });
+      const at = (time: number) => renderer.render({ ...frame([node("fx", "shader")]), time });
+      at(1);
+      at(1.02);
+      at(1.04);
+      // Ten seconds at rest: the frame that ends it moves the shader by the last ordinary frame.
+      at(11.04);
+      at(11.05);
+      // The same frame drawn again (a texture loaded) moves it by nothing.
+      at(11.05);
+      expect(deltas.slice(1).map((d) => Math.round(d * 1000))).toEqual([20, 20, 20, 10]);
+      drawShader.mockRestore();
     });
 
     it("shows a lottie placeholder for missing assets, and for empty layers in editor mode", () => {

@@ -224,6 +224,8 @@ interface LottieState {
   token: number;
   playhead: number;
   lastTime: number | null;
+  /** Play was on, and Scrub off, when the last frame was drawn. */
+  running: boolean;
   drawn: number;
   /** Latest props, so an animation that finishes loading between renders starts in the right place. */
   rate: number;
@@ -329,6 +331,7 @@ export const lottieDrawer: Drawer = {
       token: 0,
       playhead: 0,
       lastTime: null,
+      running: false,
       drawn: Number.NaN,
       rate: 1,
       scrubTime: null,
@@ -350,6 +353,7 @@ export const lottieDrawer: Drawer = {
       st.signature = signature;
       st.playhead = 0;
       st.lastTime = null;
+      st.running = false;
       st.drawn = Number.NaN;
       st.reported = "";
       st.error = "";
@@ -365,16 +369,20 @@ export const lottieDrawer: Drawer = {
 
     // The clock starts once the animation is ready; a time jump backwards is a restart.
     const now = ctx.frame.time;
+    const playing = st.scrubTime === null && p.bool("playing", true);
     if (st.status === "ready" && st.anim) {
       const duration = durationOf(st.anim);
       const dt = st.lastTime === null ? 0 : now - st.lastTime;
       if (dt < -1e-6) st.playhead = rate < 0 ? duration : 0;
       if (st.scrubTime !== null) st.playhead = advancePlayhead(0, st.scrubTime, duration, false);
-      else if (p.bool("playing", true) && dt > 0) st.playhead = advancePlayhead(st.playhead, dt * rate, duration, loop);
+      // While it plays, the playhead follows the frame clock. On the frame where Play turns on it
+      // moves one frame at most: the prototype may have been at rest since the last one (ctx.frameDelta).
+      else if (playing && dt > 0) st.playhead = advancePlayhead(st.playhead, (st.running ? dt : Math.min(dt, ctx.frameDelta)) * rate, duration, loop);
       draw(st);
       report(host, ctx, st);
     }
     st.lastTime = st.status === "ready" ? now : null;
+    st.running = playing;
 
     if (st.status === "error") setParts(host, [st.box, placeholder(host, ctx, st.error, "neutral")]);
     else if (st.status === "empty") setParts(host, ctx.editorMode ? [placeholder(host, ctx, "No animation", "neutral")] : []);

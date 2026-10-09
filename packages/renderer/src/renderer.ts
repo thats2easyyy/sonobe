@@ -5,7 +5,7 @@
 
 import type { LayerRef } from "@sonobe/core";
 import type { InputEvent, SceneFrame, SceneNode } from "@sonobe/engine";
-import { paintIndices } from "@sonobe/engine";
+import { MAX_LIVE_DT, paintIndices } from "@sonobe/engine";
 import { DRAWERS, FALLBACK_DRAWER, cssPath, hasSquircle, nodeHeight, nodeWidth } from "./drawers.ts";
 import { SVG_NS } from "./host.ts";
 import type { Drawer, Host, MediaState, RenderContext, RendererStats, ShaderErrorInfo, ShapeInfo } from "./host.ts";
@@ -253,6 +253,10 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   let cloneDepth = 0;
   let visited = 0;
   let disposed = false;
+  let rendering = false;
+  let invalidated = false;
+  /** The last frame-to-frame time that wasn't a gap (see RenderContext.frameDelta). */
+  let ordinaryDelta = 1 / 60;
   let maskCounter = 0;
   const plusDarker = win?.CSS?.supports?.("mix-blend-mode", "plus-darker") ? "plus-darker" : "color-burn";
 
@@ -261,6 +265,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     stats,
     frame: { frame: 0, time: 0, size: [0, 0], background: { r: 0, g: 0, b: 0, a: 0 }, roots: [] },
     prevTime: 0,
+    frameDelta: 0,
     scale,
     dpr: opts.devicePixelRatio ?? win?.devicePixelRatio ?? 1,
     editorMode: opts.editorMode ?? false,
@@ -290,6 +295,11 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
       }
       const key = ref.instance !== undefined ? `${ref.layerId}#${ref.instance}` : ref.layerId;
       return index.byKey.get(key) ?? index.byLayer.get(ref.layerId);
+    },
+    invalidate: () => {
+      // Asked for while drawing: once more when this frame is done.
+      if (rendering) invalidated = true;
+      else rerender();
     },
     onShaderError: opts.onShaderError,
     onMediaState: opts.onMediaState,
@@ -658,9 +668,13 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
 
   function render(frame: SceneFrame): void {
     if (disposed) return;
+    rendering = true;
     gen++;
     stats.frames++;
     ctx.frame = frame;
+    const gap = frame.time - ctx.prevTime;
+    if (gap > 0 && gap <= MAX_LIVE_DT) ordinaryDelta = gap;
+    ctx.frameDelta = gap > MAX_LIVE_DT ? ordinaryDelta : Math.max(0, gap);
     index = null;
     hasCursors = false;
     cloneDepth = 0;
@@ -678,11 +692,17 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
     ctx.prevTime = frame.time;
     lastFrame = frame;
     if (hasCursors || container.style.cursor) updateCursor();
+    rendering = false;
+    if (invalidated) {
+      invalidated = false;
+      render(frame);
+    }
   }
 
-  const rerender = () => {
+  /** Fonts, shader textures and media that loaded between frames: the last frame is drawn again with them, without a step. */
+  function rerender(): void {
     if (lastFrame) render(lastFrame);
-  };
+  }
   const unsubscribeFonts = measurer.onInvalidate(rerender);
   const unsubscribeTextures = shaders.onTextureChange(rerender);
 
