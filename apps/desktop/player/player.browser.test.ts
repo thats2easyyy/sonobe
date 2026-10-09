@@ -477,12 +477,15 @@ describe.skipIf(!playwright)("web player on a phone", () => {
       await page.goto(motion.url);
       await page.waitForFunction(() => document.getElementById("status")?.dataset.state === "live", null, { timeout: 15_000 });
       await page.waitForTimeout(500);
-      const before = await framesAsked(page);
+      // The count and the page's clock are read together, so a slow round trip to the page adds no frames.
+      const sample = () => page.evaluate(() => ({ frames: (window as unknown as { __frames: number }).__frames, at: performance.now() }));
+      const before = await sample();
       await page.waitForTimeout(1_000);
-      const asked = (await framesAsked(page)) - before;
+      const after = await sample();
+      const perSecond = ((after.frames - before.frames) * 1000) / (after.at - before.at);
       // A frame a display refresh, as before (60 Hz in Playwright's Chromium; a busy machine drops some).
-      expect(asked).toBeGreaterThan(30);
-      expect(asked).toBeLessThan(75);
+      expect(perSecond).toBeGreaterThan(30);
+      expect(perSecond).toBeLessThan(75);
     } finally {
       await context.close();
       await motion.close();
