@@ -56,7 +56,7 @@ npm install
 npm run package -w @sonobe/desktop
 ```
 
-On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-0.1.0-mac-arm64.dmg`. Open the DMG and drag Sonobe into Applications. For an Intel Mac, add `-- --arch x64`.
+On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-0.1.0-mac-arm64.dmg`. Open the DMG and drag Sonobe into Applications. The app needs macOS 13 or later. For an Intel Mac, add `-- --arch x64`; that build hasn't been launched on an Intel Mac yet.
 
 Local builds are ad-hoc signed and not notarized. That's enough to run the app on the Mac that built it, but not to give it to other people. To check a build, run `npm run package:verify -w @sonobe/desktop -- --dmg`. It launches the app from inside the DMG with audio muted, then checks the editor, the MCP endpoint, and the bundled CLI.
 

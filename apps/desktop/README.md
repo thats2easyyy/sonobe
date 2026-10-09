@@ -16,7 +16,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
 | `player/` | The web player for phones and the pop-out viewer: the editor viewer's platform services, the phone's device info, the three-finger menu and the Sonobe Viewer bridge |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
-| `scripts/` | `build.mjs`, `sfsymbol.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
+| `scripts/` | `build.mjs`, `sfsymbol.ts`, `notices.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
 
 ## Scripts
 
@@ -60,6 +60,14 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 Every build is signed with the hardened runtime and the entitlements in `build/entitlements.mac.plist` (JIT, camera, microphone) and `build/entitlements.mac.inherit.plist` (the helpers and everything else inside the app). A local build adds `disable-library-validation`, which an ad-hoc signature needs under the hardened runtime. After electron-builder signs, the script reads the signature back and stops if it isn't the one that build asked for, before any DMG or zip is made.
 
+A release or rehearsal builds, for each architecture, a DMG and the zip an update downloads, with the zips' blockmaps and one `latest-mac.yml` that lists them all (arm64 and x64 by default, in one run, because a second run would overwrite the feed). It also writes `Sonobe-<version>-sourcemaps.tar.gz`: the editor's and the app's source maps, which no build carries inside the app. Nothing is published from here; `electron-builder.yml`'s `publish` block only names where releases live.
+
+The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace.
+
 The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
 
 On macOS the app also ships `Resources/bin/sfsymbol`, outside app.asar so it can run. Design imports use it to draw `<svg data-sf-symbol>` placeholders as real SF Symbols (macOS 13 or later), and the bundled CLI points headless servers at it through `SONOBE_SFSYMBOL`. It is built for the architecture being packaged, and as one file with both slices when a run builds more than one. Try it by hand: `sfsymbol heart.fill --size 17 --weight semibold --color '#FF3B30'` prints the SVG, and `sfsymbol --list` prints every name.
+
+`Resources/licenses` holds Sonobe's license (`LICENSE.txt`), `THIRD-PARTY-NOTICES.txt` with the license of every npm package bundled into the app, the editor and the CLI, and on macOS Electron's `LICENSE.electron.txt` and `LICENSES.chromium.html`. `build.mjs --licenses` writes them, and `scripts/notices.ts` takes the package list from esbuild's metafiles and the editor build's source maps.
+
+On macOS the app ships Chromium's English locale only, asks for the camera and the microphone in Sonobe's own words (`mac.extendInfo`), and needs macOS 13 or later, which is Electron's own floor.

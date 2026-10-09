@@ -7,6 +7,15 @@ productName: Sonobe
 copyright: Copyright © 2026 Sonobe contributors
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
+# Where releases live. Nothing is ever published from a build (scripts/package.mjs always passes
+# publish: "never", and the release workflow uploads the files itself). This block is what puts the feed's
+# address into the app (Resources/app-update.yml) and, with the zip target, writes latest-mac.yml and the
+# blockmaps an update is downloaded with. The first release freezes it: installed apps look here.
+publish:
+  provider: github
+  owner: thats2easyyy
+  repo: sonobe
+
 directories:
   output: release
   # icon.icns, icon.ico, icon.png and icons/ come from scripts/icons.mjs.
@@ -18,18 +27,27 @@ files:
   - "!dist/**/*.map"
   - "!dist/cli/**"
   - "!dist/bin/**"
+  - "!dist/licenses/**"
   - package.json
   - "!node_modules/**/*"
 
 extraResources:
-  # The editor build, loaded from Resources/editor/index.html when packaged.
+  # The editor build, loaded from Resources/editor/index.html when packaged. Its source maps stay out of
+  # the app (17 MB that only DevTools reads); a release collects them into Sonobe-<version>-sourcemaps.tar.gz.
   - from: ../editor/dist
     to: editor
     filter:
       - "**/*"
+      - "!**/*.map"
   # The `sonobe` CLI: Resources/cli/sonobe runs sonobe.mjs with the app's runtime in Node mode.
   - from: dist/cli
     to: cli
+    filter:
+      - "**/*"
+  # Sonobe's license and the notices of every bundled npm package, and on macOS Electron's and Chromium's
+  # licenses (scripts/build.mjs --licenses).
+  - from: dist/licenses
+    to: licenses
     filter:
       - "**/*"
 
@@ -52,6 +70,17 @@ mac:
   category: public.app-category.graphics-design
   darkModeSupport: true
   icon: build/icon.icns
+  # No minimumSystemVersion: the floor is Electron's own (macOS 13 for Electron 44), so it can never be
+  # lower than what the framework runs on.
+  # What macOS shows when a prototype first asks for the camera or the microphone. Electron's other usage
+  # strings (Bluetooth, audio capture) stay: an unused one is harmless, a missing one ends the app.
+  extendInfo:
+    NSCameraUsageDescription: Prototypes that use the Camera patch show your camera in the viewer.
+    NSMicrophoneUsageDescription: Prototypes that use the Microphone patch listen through your microphone.
+  # The app is English only, so Chromium's other 219 locale folders (48 MB) stay out. Under mac, not at the
+  # top level: there the same setting would delete en-US.pak, the only English locale, on Windows and Linux.
+  electronLanguages:
+    - en
   # No identity, hardenedRuntime, notarize or entitlements here: scripts/package.mjs passes them for the
   # build it was asked for, and a value set here couldn't be unset from there (`identity: "-"` would
   # override any certificate). The entitlement files are build/entitlements.mac.plist for the app and

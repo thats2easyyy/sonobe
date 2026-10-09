@@ -453,4 +453,36 @@ describe("electron-builder.yml", () => {
     expect(packageScript).toContain('publish: "never"');
     expect(packageScript).not.toMatch(/publish: "(always|onTag|onTagOrDraft)"/);
   });
+
+  it("ships Sonobe's own permission wording, English only on macOS, the licenses, and no editor source maps", () => {
+    const usage = (key: string) => new RegExp(`^    ${key}: (.+)$`, "m").exec(yml)?.[1] ?? "";
+    expect(usage("NSCameraUsageDescription")).toMatch(/Camera patch/);
+    expect(usage("NSMicrophoneUsageDescription")).toMatch(/Microphone patch/);
+    // Electron's own strings start "This app needs access to".
+    for (const key of ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]) {
+      expect(usage(key), key).not.toMatch(/^This app needs/);
+    }
+    // Under mac only: at the top level the same list would delete en-US.pak on Windows and Linux.
+    expect(yml).toMatch(/^mac:\n(?:(?:  .*|#.*)?\n)*?  electronLanguages:\n    - en\n/m);
+    expect(yml).not.toMatch(/^electronLanguages:/m);
+    expect(yml).toMatch(
+      /- from: \.\.\/editor\/dist\s+to: editor\s+filter:\s+- "\*\*\/\*"\s+- "!\*\*\/\*\.map"/,
+    );
+    expect(yml).toMatch(/- from: dist\/licenses\s+to: licenses/);
+    expect(yml).toContain('- "!dist/licenses/**"');
+    expect(read("../scripts/package.mjs")).toContain('"--licenses"');
+  });
+
+  it("names the release feed and builds what an update downloads, while nothing publishes from a build", () => {
+    expect(yml).toMatch(/^publish:\n  provider: github\n  owner: thats2easyyy\n  repo: sonobe\n/m);
+    expect(yml).toMatch(
+      /^  target:\n    - target: dmg\n      arch: \[arm64, x64\]\n    - target: zip\n/m,
+    );
+    const packageScript = read("../scripts/package.mjs");
+    // What the build can do with an update, for the app to read from its packaged package.json.
+    expect(packageScript).toContain("extraMetadata: { sonobe: plan.build }");
+    expect(packageScript).toContain(
+      'rmSync(path.join(resources, "default_app.asar"), { force: true });',
+    );
+  });
 });

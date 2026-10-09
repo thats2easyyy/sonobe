@@ -9,6 +9,10 @@
  *   node scripts/build.mjs --watch       rebuild on change (skips the CLI bundle)
  *   node scripts/build.mjs --arch x64    the SF Symbols helper for another architecture (arm64, x64 or
  *                                        universal; scripts/package.mjs passes the app's)
+ *   node scripts/build.mjs --licenses    also write dist/licenses, which a packaged app ships: Sonobe's
+ *                                        license, the notices of every npm package in the bundles and the
+ *                                        editor build (scripts/notices.ts), and on macOS Electron's and
+ *                                        Chromium's licenses
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
@@ -20,10 +24,12 @@
  */
 
 import { build, context } from "esbuild";
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
+import { metafileInputs, npmPackageDirs, readNoticePackage, renderNotices, sourceMapInputs } from "./notices.ts";
 import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
 import { buildSymbolHelper } from "./sfsymbol.ts";
 
@@ -31,6 +37,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
 const dist = path.join(root, "dist");
 const watch = process.argv.includes("--watch");
+const licenses = process.argv.includes("--licenses");
 const archFlag = process.argv.indexOf("--arch");
 const helperArch = archFlag < 0 ? undefined : process.argv[archFlag + 1];
 if (helperArch !== undefined && !["arm64", "x64", "universal"].includes(helperArch)) {
@@ -48,6 +55,8 @@ const common = {
   target: "node24",
   external: ["electron"],
   sourcemap: true,
+  // The metafiles say which npm packages each bundle holds (writeLicenses).
+  metafile: true,
   logLevel: watch ? "info" : "warning",
   define: { __SONOBE_VERSION__: JSON.stringify(pkg.version) },
 };
@@ -129,7 +138,7 @@ node "%~dp0sonobe.mjs" %*\r
 async function buildCli() {
   const out = path.join(dist, "cli");
   mkdirSync(out, { recursive: true });
-  await build({
+  const { metafile } = await build({
     absWorkingDir: repo,
     entryPoints: [path.join(repo, "packages", "cli", "src", "main.ts")],
     outfile: path.join(out, "sonobe.mjs"),
@@ -140,6 +149,7 @@ async function buildCli() {
     minify: false,
     sourcemap: false,
     legalComments: "none",
+    metafile: true,
     logLevel: "warning",
     // CommonJS dependencies bundled into ESM still call require() for Node built-ins. (esbuild keeps
     // main.ts's own #! line above the banner.)
@@ -151,7 +161,33 @@ async function buildCli() {
   writeFileSync(path.join(out, "sonobe"), POSIX_LAUNCHER);
   chmodSync(path.join(out, "sonobe"), 0o755);
   writeFileSync(path.join(out, "sonobe.cmd"), WINDOWS_LAUNCHER);
-  return `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB`;
+  return { metafile, summary: `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB` };
+}
+
+/**
+ * dist/licenses, which electron-builder ships as Resources/licenses: Sonobe's own license, the notices of
+ * the npm packages bundled into main, the preload, the player and scene pages, the CLI and the editor build
+ * (read from what the bundlers report, scripts/notices.ts), and on macOS Electron's and Chromium's licenses,
+ * which the Windows and Linux packages already carry beside the executable.
+ */
+function writeLicenses(bundled) {
+  const out = path.join(dist, "licenses");
+  mkdirSync(out, { recursive: true });
+  const editor = path.join(repo, "apps", "editor", "dist");
+  const editorFiles = sourceMapInputs(editor);
+  if (!editorFiles.length) console.warn("[sonobe] no source maps in apps/editor/dist, so the third-party notices leave out the editor's packages. Build the editor first (npm run build -w @sonobe/editor).");
+  const notices = renderNotices(npmPackageDirs([...bundled, ...editorFiles]).map(readNoticePackage));
+  if (notices.missing.length) console.warn(`[sonobe] no license file in ${notices.missing.join(", ")}: the notices give the license's name and the package's source instead.`);
+  writeFileSync(path.join(out, "THIRD-PARTY-NOTICES.txt"), notices.text);
+  cpSync(path.join(repo, "LICENSE"), path.join(out, "LICENSE.txt"));
+  if (process.platform === "darwin") {
+    const electron = path.join(path.dirname(createRequire(path.join(root, "package.json")).resolve("electron/package.json")), "dist");
+    for (const [from, to] of [["LICENSE", "LICENSE.electron.txt"], ["LICENSES.chromium.html", "LICENSES.chromium.html"]]) {
+      if (existsSync(path.join(electron, from))) cpSync(path.join(electron, from), path.join(out, to));
+      else console.warn(`[sonobe] node_modules/electron/dist has no ${from}, so the package ships without it.`);
+    }
+  }
+  return `licenses (${notices.text.match(/^License: /gm)?.length ?? 0} packages)`;
 }
 
 /** The SF Symbols helper in dist/bin on macOS (scripts/sfsymbol.ts). Without it imports keep placeholders, so it only warns. */
@@ -181,8 +217,9 @@ if (watch) {
   console.log("[sonobe] watching electron/, player/ and scene/ for changes…");
 } else {
   const started = performance.now();
-  const [, cli] = await Promise.all([Promise.all(targets.map((options) => build(options))), buildCli()]);
+  const [built, cli] = await Promise.all([Promise.all(targets.map((options) => build(options))), buildCli()]);
   const helper = symbolHelper();
+  const notices = licenses ? [writeLicenses([...built.flatMap((result) => metafileInputs(result.metafile, root)), ...metafileInputs(cli.metafile, repo)])] : [];
   const sizes = targets.map((t) => `${path.relative(dist, path.join(root, t.outfile))} ${(statSync(path.join(root, t.outfile)).size / 1024).toFixed(1)} KB`);
-  console.log(`[sonobe] built ${[...sizes, cli, ...helper].join(", ")} in ${Math.round(performance.now() - started)} ms`);
+  console.log(`[sonobe] built ${[...sizes, cli.summary, ...helper, ...notices].join(", ")} in ${Math.round(performance.now() - started)} ms`);
 }

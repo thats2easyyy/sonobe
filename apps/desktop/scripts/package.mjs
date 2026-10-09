@@ -21,12 +21,14 @@
  * A local build reuses the previous apps/editor/dist with a warning when the editor build fails. A
  * release or rehearsal stops instead, and also stops without the SF Symbols helper.
  *
- * Output: apps/desktop/release/ (e.g. Sonobe-<version>-mac-arm64.dmg and mac-arm64/Sonobe.app). Nothing
- * is ever published from here. Verify with `npm run package:verify -w @sonobe/desktop`.
+ * Output: apps/desktop/release/ (e.g. Sonobe-<version>-mac-arm64.dmg and mac-arm64/Sonobe.app). A release
+ * or rehearsal also writes the zips, their blockmaps and latest-mac.yml (what an update downloads), and
+ * Sonobe-<version>-sourcemaps.tar.gz (the editor's and the app's source maps, which stay out of the app).
+ * Nothing is ever published from here. Verify with `npm run package:verify -w @sonobe/desktop`.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -106,7 +108,7 @@ if (values["skip-editor-build"] && existsSync(editorIndex)) {
 
 // 3. Desktop bundles + CLI, 4. icons.
 step("building main, preload, player, scene renderer and CLI");
-execFileSync(process.execPath, [path.join(root, "scripts", "build.mjs"), "--arch", helperArch(plan.archs)], { cwd: root, stdio: "inherit" });
+execFileSync(process.execPath, [path.join(root, "scripts", "build.mjs"), "--arch", helperArch(plan.archs), "--licenses"], { cwd: root, stdio: "inherit" });
 if (plan.strict) {
   // build.mjs only warns without the helper; a build other people get must have it, for every architecture it holds.
   const helper = path.join(root, "dist", "bin", "sfsymbol");
@@ -140,10 +142,22 @@ if (plan.mode === "release") rmSync(release, { recursive: true, force: true });
 // resolves them against wherever this script was started.
 const committed = { app: path.join(root, "build", "entitlements.mac.plist"), inherit: path.join(root, "build", "entitlements.mac.inherit.plist") };
 const temp = mkdtempSync(path.join(tmpdir(), "sonobe-package-"));
+process.on("exit", () => rmSync(temp, { recursive: true, force: true }));
 let entitlements = committed;
 if (plan.disableLibraryValidation) {
   entitlements = { app: path.join(temp, "entitlements.mac.plist"), inherit: path.join(temp, "entitlements.mac.inherit.plist") };
   for (const key of ["app", "inherit"]) writeFileSync(entitlements[key], withLibraryValidationDisabled(readFileSync(committed[key], "utf8")));
+}
+
+/**
+ * Runs on the Electron that electron-builder just unpacked, before it measures the asar files for
+ * Info.plist. Electron's default_app.asar (the "drop your app here" page) is never loaded by a packaged
+ * app. electron-builder deletes it from a downloaded Electron but not from the local one, so it goes here
+ * and every build ships the same files.
+ */
+function afterExtract(context) {
+  const resources = context.electronPlatformName === "darwin" ? path.join(context.appOutDir, context.packager.info.framework.distMacOsAppName, "Contents", "Resources") : path.join(context.appOutDir, "resources");
+  rmSync(path.join(resources, "default_app.asar"), { force: true });
 }
 
 /**
@@ -163,8 +177,14 @@ function afterSign(context) {
   step(`signature checked: ${path.relative(root, app)}`);
 }
 
+/** Stops after electron-builder has started: nothing a release would upload may stay behind. */
+function abandon(err) {
+  if (plan.mode === "release" && existsSync(release)) for (const name of readdirSync(release).filter(distributable)) rmSync(path.join(release, name), { force: true });
+  if (!(err instanceof SigningError)) throw err;
+  fail(err);
+}
+
 let artifacts;
-let failure;
 try {
   artifacts = await build({
     projectDir: root,
@@ -174,6 +194,9 @@ try {
       electronVersion,
       ...(useLocalElectron ? { electronDist: localDist } : {}),
       forceCodeSigning: plan.forceCodeSigning,
+      // What this build can do with an update, in the packaged package.json for the app to read (scripts/signing.ts).
+      extraMetadata: { sonobe: plan.build },
+      afterExtract,
       afterSign,
       mac: macSigningOptions(plan, entitlements),
       // A rehearsal's files say so, so none can be mistaken for a release.
@@ -181,14 +204,29 @@ try {
     },
   });
 } catch (err) {
-  failure = err;
-} finally {
-  rmSync(temp, { recursive: true, force: true });
+  abandon(err);
 }
-if (failure) {
-  if (plan.mode === "release" && existsSync(release)) for (const name of readdirSync(release).filter(distributable)) rmSync(path.join(release, name), { force: true });
-  if (!(failure instanceof SigningError)) throw failure;
-  fail(failure);
+
+// 6. What goes beside the installers of a release (and of a rehearsal, so one can be tried end to end).
+if (plan.targets.includes("zip")) {
+  const { version } = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const suffix = plan.mode === "rehearsal" ? "-rehearsal" : "";
+  // The source maps the app doesn't carry: with this archive a stack trace from this version can be read.
+  const maps = path.join(temp, "sourcemaps");
+  const onlyMaps = (file) => statSync(file).isDirectory() || file.endsWith(".map");
+  cpSync(path.join(repo, "apps", "editor", "dist"), path.join(maps, "editor"), { recursive: true, filter: onlyMaps });
+  cpSync(path.join(root, "dist"), path.join(maps, "desktop"), { recursive: true, filter: onlyMaps });
+  const archive = path.join(release, `Sonobe-${version}-sourcemaps${suffix}.tar.gz`);
+  execFileSync("tar", ["-czf", archive, "-C", maps, "editor", "desktop"], { stdio: "inherit", env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  artifacts.push(archive);
+  // An update downloads an architecture's zip through latest-mac.yml. A feed that leaves one out, or a zip
+  // without its blockmap, breaks updating for everyone on that architecture once the release is published.
+  const feed = existsSync(path.join(release, "latest-mac.yml")) ? readFileSync(path.join(release, "latest-mac.yml"), "utf8") : "";
+  const missing = plan.archs.flatMap((arch) => {
+    const base = `Sonobe-${version}-mac-${arch}${suffix}`;
+    return [...[`${base}.dmg`, `${base}.zip`, `${base}.zip.blockmap`].filter((name) => !existsSync(path.join(release, name))), ...(feed.includes(`${base}.zip`) ? [] : [`${base}.zip in latest-mac.yml`])];
+  });
+  if (missing.length) abandon(new SigningError(`The ${plan.mode} build is incomplete: release/ has no ${missing.join(", ")}.`, "electron-builder's log above says what it built. A release needs every architecture's DMG, zip and blockmap, and one latest-mac.yml that lists every zip; upload nothing from this run."));
 }
 
 const unpacked = readdirSync(release).filter((name) => statSync(path.join(release, name)).isDirectory() && !name.startsWith("."));
