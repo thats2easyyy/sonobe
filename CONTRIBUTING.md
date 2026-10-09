@@ -99,6 +99,16 @@ The subscription path is experimental and off by default. Only the app run from 
 
 [evals/README.md](evals/README.md) has the case format and the options.
 
+## Measuring editor speed
+
+`npm run bench -w @sonobe/editor` builds the editor into a temp folder, serves it, and drives it in headless Chromium (`apps/editor/scripts/bench`). It times boot and first opens, then eleven interactions on `examples/02-like-toggle` and on a generated 302-patch, 302-layer document, and prints main-thread time per second, frame times and long tasks. It asserts nothing and isn't part of `npm test` or CI.
+
+1. Compare two builds in one run, never against numbers from another day or another machine. Serve the build to compare against (`npx vite preview --outDir <its dist> --port 5260` from `apps/editor`) and pass `--baseline http://localhost:5260`: the builds take turns, and the table shows both with the difference. Run a build against itself once to see how much the numbers move on their own.
+2. Narrow a run while you work: `--only stress --filter scrub,dragLayer --reps 3`. `--throttle 4` stands in for a slower machine, `--profile <folder>` writes a CPU profile per interaction for DevTools, and `--trace` prints the timeline's busiest events (Layerize, Layout, Paint).
+3. Frame times rarely move on a fast machine, so read main-thread ms per second first. Put the before and after numbers in the commit message, and leave out a change that doesn't show.
+
+The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. `run.ts` lists the options.
+
 ## UI rules
 
 The editor should feel like a quiet, dense Mac instrument: hairline-separated dark panels in one tone family, one indigo that means "you are here" or "you can press this", Claude's coral only on things Claude wrote or is doing, and patch category colors only inside the graph. Hierarchy comes from a real size and weight ladder and from removing boxes, not from more grey, tiles or glow. Build with the kit in `apps/editor/src/ui` (open `#gallery` in the browser editor) and the tokens in `apps/editor/src/theme/tokens.css`: no hard-coded colors, no off-scale sizes, no one-off copies of a kit component. Check a change in both themes and at the 1024 × 680 minimum window.
