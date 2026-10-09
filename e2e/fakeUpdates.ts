@@ -26,6 +26,7 @@ declare global {
     /** Addresses the page opened in the browser. */
     __fakeOpened?: string[];
     __pushFakeUpdate?: (patch: Partial<UpdateStatus>) => void;
+    __fakeUpdateStatus?: () => UpdateStatus;
   }
 }
 
@@ -40,6 +41,9 @@ export async function pushFakeUpdate(page: Page, patch: Partial<UpdateStatus>): 
 }
 
 export const fakeUpdateCalls = (page: Page): Promise<string[]> => page.evaluate(() => window.__fakeUpdateCalls ?? []);
+
+/** Where the fake stands now, e.g. to wait for a cancelled restart to finish before judging a notice. */
+export const fakeUpdateStatus = (page: Page): Promise<UpdateStatus | undefined> => page.evaluate(() => window.__fakeUpdateStatus?.());
 
 export const fakeOpened = (page: Page): Promise<string[]> => page.evaluate(() => window.__fakeOpened ?? []);
 
@@ -73,6 +77,7 @@ function fakeUpdates(options: FakeUpdatesOptions): void {
     return status;
   };
   window.__pushFakeUpdate = (patch) => void push(patch);
+  window.__fakeUpdateStatus = () => status;
   window.open = (url?: string | URL) => {
     opened.push(String(url));
     return null;
