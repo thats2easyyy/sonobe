@@ -12,8 +12,7 @@
  *   node scripts/build.mjs --licenses    also write dist/licenses, which a packaged app ships: Sonobe's
  *                                        license, the notices of every npm package in the bundles and the
  *                                        editor build, and of the packages those carry inside their own
- *                                        files (scripts/notices.ts), and on macOS Electron's and Chromium's
- *                                        licenses
+ *                                        files (scripts/notices.ts)
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
@@ -25,8 +24,7 @@
  */
 
 import { build, context } from "esbuild";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
@@ -169,8 +167,8 @@ async function buildCli() {
  * dist/licenses, which electron-builder ships as Resources/licenses: Sonobe's own license, the notices of
  * the npm packages bundled into main, the preload, the player and scene pages, the CLI and the editor build,
  * and of the packages those carry inside their own files (read from what the bundlers report,
- * scripts/notices.ts), and on macOS Electron's and Chromium's licenses, which the Windows and Linux packages
- * already carry beside the executable.
+ * scripts/notices.ts). Electron's and Chromium's licenses join them when the app is packaged, from the
+ * Electron being packaged (scripts/package.mjs).
  */
 function writeLicenses(bundled) {
   const out = path.join(dist, "licenses");
@@ -191,13 +189,6 @@ function writeLicenses(bundled) {
   if (noFile.length) console.warn(`[sonobe] no license file in ${noFile.join(", ")}: the notices give the license's name and the package's source instead.`);
   writeFileSync(path.join(out, "THIRD-PARTY-NOTICES.txt"), notices.text);
   cpSync(path.join(repo, "LICENSE"), path.join(out, "LICENSE.txt"));
-  if (process.platform === "darwin") {
-    const electron = path.join(path.dirname(createRequire(path.join(root, "package.json")).resolve("electron/package.json")), "dist");
-    for (const [from, to] of [["LICENSE", "LICENSE.electron.txt"], ["LICENSES.chromium.html", "LICENSES.chromium.html"]]) {
-      if (existsSync(path.join(electron, from))) cpSync(path.join(electron, from), path.join(out, to));
-      else console.warn(`[sonobe] node_modules/electron/dist has no ${from}, so the package ships without it.`);
-    }
-  }
   return `licenses (${notices.text.match(/^License: /gm)?.length ?? 0} packages)`;
 }
 

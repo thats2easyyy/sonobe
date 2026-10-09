@@ -44,8 +44,8 @@ extraResources:
     to: cli
     filter:
       - "**/*"
-  # Sonobe's license and the notices of every bundled npm package, and on macOS Electron's and Chromium's
-  # licenses (scripts/build.mjs --licenses).
+  # Sonobe's license and the notices of every bundled npm package (scripts/build.mjs --licenses). On macOS
+  # scripts/package.mjs adds Electron's and Chromium's licenses to the folder, from the Electron it packages.
   - from: dist/licenses
     to: licenses
     filter:

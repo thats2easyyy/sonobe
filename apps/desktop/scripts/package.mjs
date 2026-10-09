@@ -154,16 +154,41 @@ if (plan.disableLibraryValidation) {
   for (const key of ["app", "inherit"]) writeFileSync(entitlements[key], withLibraryValidationDisabled(readFileSync(committed[key], "utf8")));
 }
 
+/** Electron's and Chromium's licenses, as the Electron download names them and as the app ships them. */
+const ELECTRON_LICENSES = [["LICENSE", "LICENSE.electron.txt"], ["LICENSES.chromium.html", "LICENSES.chromium.html"]];
+
 /**
  * Runs on the Electron that electron-builder just unpacked, before it measures the asar files for
  * Info.plist. Electron's default_app.asar (the "drop your app here" page) is never loaded by a packaged
  * app. electron-builder deletes it from a downloaded Electron but not from the local one, so it goes here
- * and every build ships the same files.
+ * and every build ships the same files. A downloaded Electron also unpacks its licenses beside the app,
+ * where electron-builder removes them on macOS before the app is finished: they are kept for afterPack.
  */
 function afterExtract(context) {
   const macResources = () => path.join(context.appOutDir, context.packager.info.framework.distMacOsAppName, "Contents", "Resources");
   const resources = context.electronPlatformName === "darwin" ? macResources() : path.join(context.appOutDir, "resources");
   rmSync(path.join(resources, "default_app.asar"), { force: true });
+  for (const [from] of ELECTRON_LICENSES) if (existsSync(path.join(context.appOutDir, from))) cpSync(path.join(context.appOutDir, from), path.join(temp, from));
+}
+
+/**
+ * Runs once the app's files are in place and before it is signed. A Mac app carries Electron's and
+ * Chromium's licenses in Resources/licenses (on Windows and Linux they sit beside the executable), and
+ * they come from the Electron being packaged: the download's own (afterExtract), or the local one's in
+ * node_modules/electron/dist. Electron fetches its binary on first use, so a fresh install (CI, the
+ * release runner) has no local one to read them from.
+ */
+function afterPack(context) {
+  if (context.electronPlatformName !== "darwin") return;
+  const licenses = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, "Contents", "Resources", "licenses");
+  for (const [from, to] of ELECTRON_LICENSES) {
+    const source = [path.join(temp, from), path.join(localDist, from)].find((file) => existsSync(file));
+    if (!source) {
+      const hint = "Neither the Electron download nor node_modules/electron/dist has it. Fetch Electron with `node node_modules/electron/install.js` from the repository root, then package again.";
+      throw new SigningError(`Electron's ${from} isn't in the Electron being packaged, and the app has to ship it.`, hint);
+    }
+    cpSync(source, path.join(licenses, to));
+  }
 }
 
 /**
@@ -204,6 +229,7 @@ try {
       // What this build can do with an update, in the packaged package.json for the app to read (scripts/signing.ts).
       extraMetadata: { sonobe: plan.build },
       afterExtract,
+      afterPack,
       afterSign,
       mac: macSigningOptions(plan, entitlements, signAsync),
       // A rehearsal's files say so, so none can be mistaken for a release.
