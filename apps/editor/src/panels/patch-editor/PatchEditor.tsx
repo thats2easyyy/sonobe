@@ -299,8 +299,8 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, []);
 
   // -- Document → graph ------------------------------------------------------
-  // The document as the graph reads it: an edit the graph can't show (a layer moved, a color changed)
-  // doesn't render the patch editor at all (state/graphDocument.ts).
+  // The document as the graph reads it: for an edit the graph can't show (a layer moved, a color changed)
+  // this is the document it already had, so this component doesn't render (state/graphDocument.ts).
   const liveDoc = useStore(session.document, useMemo(() => graphDocumentSelector(componentId, registry), [componentId, registry]));
   // While a gesture is open (an inspector scrub, a canvas drag), the graph follows at low priority, or
   // for a large graph a few times a second, so the pointer, the inspector and the viewer never wait for it.
