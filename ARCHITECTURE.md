@@ -413,7 +413,7 @@ rt.resting                                   // nothing will change until someth
 - `updateDocument` patches literal-only edits (input and property literals, patch positions outside cycles) into the compiled graph in place, and recompiles for anything else.
 - Knobs compile to constants: every input that reads `$knob.<id>` gets a constant binding registered as a knob reader, so a tune or a preset switch is an in-place write too, on the viewer, the phone, simulations and trace replays alike. A knob that goes, changes type or options, appears for a link that named it, or feeds a patch whose ports come from its node recompiles, keeping state. Knobs nothing reads never force a recompile. `getValue("$knob.<id>")` returns a knob's running value.
 - `trace` replays the input log since the last restart. Past its budget (7,200 frames) it throws `TraceUnavailableError` instead of tracing a restarted copy.
-- Scene node props inherit their layer's defaults. Copy them with `plainSceneFrame` before JSON or structured clone.
+- Scene node props inherit their layer type's defaults: one object for every layer of a type, in every compile (a component instance layer has its own, with its component's size and published inputs). It is read and never written, and not frozen, because a bound value is assigned over the inherited one on the node's own props. Sharing it is what keeps the scene build's prop reads fast on a screen of hundreds of different layers; the gain shrinks as layers set more varied combinations of props. Copy props with `plainSceneFrame` before JSON or structured clone.
 
 ---
 

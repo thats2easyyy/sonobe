@@ -132,6 +132,20 @@ describe("runtime: performance", { retry: 2 }, () => {
     expect(repeat).toBeLessThan(Math.max(budget(8, 24), auto * 3));
   });
 
+  it("builds 500 different layers about as fast as 5 layers copied 100 times", () => {
+    // An imported screen is hundreds of different layers. Their props inherit one defaults object per
+    // layer type (compile.ts defaultsFor); with one per layer this ratio was about 5.
+    const reg = createMockRegistry([]);
+    const different = createTestRuntime(buildDoc({ layers: shapedLayers(500, 25) as never }, reg), reg);
+    const copied = createTestRuntime(buildDoc({ layers: shapedLayers(5, 5).map((layer) => ({ ...layer, props: { ...layer.props, repeat: 100 } })) as never }, reg), reg);
+    const copies = perFrame(copied, { warm: 30, frames: 40 });
+    const layers = perFrame(different, { warm: 30, frames: 40 });
+    report("5 layers x 100 copies", copies, "the measure for different layers");
+    report("500 different layers in 25 shapes", layers, "budget 2.5x the copies");
+    expect([different.scene().roots.length, copied.scene().roots.length]).toEqual([500, 500]);
+    expect(layers).toBeLessThan(copies * 2.5);
+  });
+
   it("runs a mixed document (patches, layers and a loop) under taps within the frame budget", () => {
     const reg = createMockRegistry([]);
     const layers: { id: string; type: string; name: string; props: Record<string, unknown>; children?: unknown[] }[] = [];

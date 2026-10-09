@@ -236,8 +236,9 @@ export function buildScene(env: SceneEnv): SceneBuild {
         const index = looping ? n : (inherited?.index ?? 0);
         const key = looping || inherited ? `${baseKey}#${index}` : baseKey;
         // Defaults come through the prototype and bound values are own properties, so a layer replicated
-        // thousands of times doesn't copy every default per copy per frame. Enumerate with for...in, or
-        // plainProps before JSON or structured clone.
+        // thousands of times doesn't copy every default per copy per frame, and every layer of a type
+        // shares one prototype (CLayer.defaults). Enumerate with for...in, or plainProps before JSON or
+        // structured clone.
         const props = Object.create(layer.defaults) as Record<string, Value>;
         for (let j = 0; j < bound.length; j++) {
           const p = bound[j]!;

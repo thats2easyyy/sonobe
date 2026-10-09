@@ -128,7 +128,11 @@ export interface CLayer {
   node: LayerNode;
   scope: Scope;
   spec: LayerTypeSpec;
-  /** Every prop default (published inputs included for component instances). */
+  /**
+   * Every prop default: one object shared by every layer of the type (compile.ts defaultsFor), so
+   * read it and never write it. A component instance layer has its own, with its component's size
+   * and published inputs.
+   */
   defaults: Record<string, Value>;
   bound: CProp[];
   props: Map<string, ResolvedProp>;
