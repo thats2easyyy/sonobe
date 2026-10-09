@@ -110,6 +110,8 @@ The subscription path is experimental and off by default. Only the app run from 
 
 The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. The example is still, so its idle rows should read about 0 rAF/s and 0 steps/s, with main-thread time near the `paused.idle` row; the stress document never stops moving, so its rows show what a frame costs. `run.ts` lists the options.
 
+What one frame costs without a browser is in two test files, which print it per case and hold it to a budget: `packages/engine/src/runtime/benchmark.test.ts` (the engine's step) and `packages/renderer/src/perf.test.ts` (the draw, with its style writes counted). Run them with `npx vitest run <file> --reporter=default` before and after a change to the scene build, layout or the renderer, and add a case when yours needs one.
+
 ## UI rules
 
 The editor should feel like a quiet, dense Mac instrument: hairline-separated dark panels in one tone family, one indigo that means "you are here" or "you can press this", Claude's coral only on things Claude wrote or is doing, and patch category colors only inside the graph. Hierarchy comes from a real size and weight ladder and from removing boxes, not from more grey, tiles or glow. Build with the kit in `apps/editor/src/ui` (open `#gallery` in the browser editor) and the tokens in `apps/editor/src/theme/tokens.css`: no hard-coded colors, no off-scale sizes, no one-off copies of a kit component. Check a change in both themes and at the 1024 × 680 minimum window.

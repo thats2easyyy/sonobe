@@ -165,6 +165,7 @@ A receiver resolves statically by trimmed name, scope, and type: local looks onl
 
 - A `{ "layer": id }` input becomes a `LayerRef`. When that layer was replicated on the previous frame it becomes a Loop of references with `instance` set, so an Interaction on a looped layer evaluates per copy and its outputs loop.
 - References are scoped to the instance that created them: `services.pointer(ref)` inside `"main/card#2"` targets `card#2/button`.
+- A patch gets the same reference objects from frame to frame, and new ones when the layer's copy count changes. Read them, never write to one.
 - Layer outputs: host-reported values from `setLayerOutputs`; Text `textSize` from the previous layout; Text Field `value`, `isFocused`, and `submitted` from `text`, `focus`, and `submit` events. Changing a Text Field's Text prop replaces what was typed.
 - Layer pulse props (Text Field's `setText`, `beginEditing`, `endEditing`) fire like a patch's pulse inputs, on a pulse or a connected boolean's rising edge. A `layerPulse` input event (`{ layerId, key?, prop }`) fires one directly, as the Inspector's Fire button does; traces replay it.
 
