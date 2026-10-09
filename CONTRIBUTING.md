@@ -130,6 +130,7 @@ Text people read in the UI uses one word for one thing. Prompts and text written
 - TypeScript, strict ESM. Relative imports use explicit `.ts`/`.tsx` extensions.
 - Import types with `import type`. Don't use enums, namespaces, or parameter properties, because the code runs under Node type stripping.
 - Keep doc comments short on public APIs and skip filler comments.
+- A panel or dialog whose code loads on demand is a `loadable` (`apps/editor/src/ui/loadable.tsx`), not `React.lazy` under Suspense, which holds content back 300 ms after its fallback shows. `e2e/boot.spec.ts` checks that with the page's clock stopped.
 - Format with Prettier (`npm run format`).
 
 ## Clean-room policy
