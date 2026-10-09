@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHeadlessHost } from "./headless.ts";
-import { rasterizeSvg, renderSceneScreenshot } from "./screenshot.ts";
+import { rasterizeSvg, renderSceneScreenshot, screenshotsUnavailable } from "./screenshot.ts";
 import {
   buildGrowCard,
   connectClient,
@@ -331,6 +331,35 @@ describe("headless screenshots", () => {
     expect(px[0]).toBeLessThan(70);
     expect(shot.text).toContain("Note: Video layers show a dark placeholder");
   }, 30_000);
+
+  it("tells the CLI inside the app to use the app, and everyone else what to install", () => {
+    for (const url of [
+      "file:///Applications/Sonobe.app/Contents/Resources/cli/sonobe.mjs",
+      "file:///C:/Program%20Files/Sonobe/resources/cli/sonobe.mjs",
+    ]) {
+      const inApp = screenshotsUnavailable("Cannot find package '@resvg/resvg-js'", url);
+      expect(inApp.code).toBe("screenshots_unavailable");
+      expect(inApp.message).toBe(
+        "The CLI inside the Sonobe app doesn't include the headless screenshot renderer.",
+      );
+      expect(inApp.hint).toMatch(/^Open the project in the Sonobe app/);
+      expect(inApp.hint).toContain("get_outline");
+      expect(inApp.hint).not.toMatch(/install|resvg/i);
+    }
+    for (const url of [
+      "file:///repo/packages/mcp/src/screenshot.ts",
+      "file:///repo/apps/desktop/dist/cli/sonobe.mjs",
+      "file:///Applications/Sonobe.app/Contents/Resources/app.asar/dist/main.cjs",
+    ]) {
+      const elsewhere = screenshotsUnavailable("", url);
+      expect(elsewhere.message).toBe(
+        "Sonobe's headless screenshot renderer isn't installed next to this server.",
+      );
+      expect(elsewhere.hint).toBe(
+        "The native module @resvg/resvg-js couldn't load (not found). Install it where Sonobe runs, or open the project in the Sonobe app. Meanwhile, check structure with get_outline and behavior with sim_get_values or sim_trace.",
+      );
+    }
+  });
 
   it("keeps drawing after the native renderer crashes", async () => {
     // resvg 2.6 panics, aborting its process, on a layer far outside the canvas. Rasterizing in a separate process keeps the server alive.

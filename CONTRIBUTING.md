@@ -109,6 +109,90 @@ The subscription path is experimental and off by default. Only the app run from 
 
 The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. `run.ts` lists the options.
 
+## Releasing
+
+A release is built by `.github/workflows/release.yml` from a version tag: the macOS app for Apple silicon and Intel, signed with a Developer ID certificate and notarized. The workflow stops at a draft GitHub release. Publishing the draft is yours to do.
+
+No release has been cut yet, and the workflow has never run: the first run is its first test. Until then the README is right to say there are no prebuilt downloads.
+
+### Confirm before the first release
+
+The first signed release freezes three things. Every installed copy carries them, and changing one later strands the people who already installed Sonobe: an update can't reach them, and macOS treats the new app as a different one (saved API keys, camera and microphone permission).
+
+- **The bundle id**, `dev.sonobe.app` (`appId` in `apps/desktop/electron-builder.yml`). Keep it only if the domain behind it is yours.
+- **The Apple Developer team** that owns the Developer ID certificate. macOS replaces an installed app only with one signed by the same team.
+- **The release repository**, `thats2easyyy/sonobe` (the `publish` block in `apps/desktop/electron-builder.yml`). It is written into every app as the place to look for a newer version.
+
+Two smaller things to decide before the first tag:
+
+- **The update cache folder**, `@sonobedesktop-updater`. `Resources/app-update.yml` in every app that ships in a DMG or zip names it as `updaterCacheDirName`, and electron-builder derives it from `apps/desktop`'s package name (`@sonobe/desktop`). It is where a downloaded update waits. Changing it later only leaves old downloads behind, but the first signed build already carries it, so pick the name you mean to keep.
+- **The DMG is not signed.** `dmg.sign` is `false`, and only the app inside is signed, notarized and stapled. Gatekeeper assesses the app when someone opens the DMG and launches it, and that is what package verification checks; the clean-Mac check below is its first real test. A tool that assesses the disk image itself (`spctl -a -t open --context context:primary-signature`) rejects an unsigned one, as some managed Macs and download scanners do. If that matters to you, sign, notarize and staple the DMG too; nothing does today.
+
+### The checklist
+
+1. **Set the version.** `node scripts/set-version.ts 0.2.0` writes it everywhere it lives and rebuilds the examples. It takes three plain numbers and nothing else: the update feed is stable-only, so there are no `-beta` versions.
+2. **Run the checks**: `npm run typecheck`, `npm test` and `npm run e2e`. The e2e run rewrites the screenshots; keep `apps/editor/screenshots/app-13-about.png`, which shows the version, and restore the rest.
+3. **Merge that change**, then tag the merge commit and push the tag: `git tag v0.2.0`, `git push origin v0.2.0`. The tag must be `v` plus the version, and the workflow refuses any other.
+4. **Watch the Release workflow.** It checks the tag against the version, runs typecheck and the tests, builds with `package.mjs --release`, verifies both apps and the app inside each DMG with `verify-package.mjs --release` (the Intel ones under Rosetta), and drafts the release.
+5. **Read the draft.** It must hold eight files: a DMG, a zip and the zip's `.blockmap` for `arm64` and for `x64`, one `latest-mac.yml` that lists both zips, and `Sonobe-<version>-sourcemaps.tar.gz`. Edit the generated notes.
+6. **Try it on a clean Mac** (below).
+7. **Publish the draft.** That makes the download public.
+
+A release that's wrong is fixed by the next version, never by swapping its files. And never publish a release as the latest one without `latest-mac.yml` in it, for example one that carries only the Claude Desktop extension: the newest release's `latest-mac.yml` is the feed an installed app reads to find an update. The app doesn't check for updates yet, but the first release already carries the feed, so the first app that does check finds it.
+
+Keep `Sonobe-<version>-sourcemaps.tar.gz` on every release. The app ships without source maps, and a stack trace from that version can only be read with that archive.
+
+### Secrets
+
+The workflow reads five repository secrets (Settings → Secrets and variables → Actions). Only its build job sees them, and that job's token can only read the repository.
+
+| Secret | What it is |
+| --- | --- |
+| `CSC_LINK` | The Developer ID Application certificate with its private key: the `.p12` file, base64-encoded |
+| `CSC_KEY_PASSWORD` | The password the `.p12` was exported with |
+| `APPLE_API_KEY_P8` | The text of an App Store Connect API key (the `.p8` file) |
+| `APPLE_API_KEY_ID` | That key's ID |
+| `APPLE_API_ISSUER` | The issuer ID shown above the list of keys |
+
+To create them:
+
+- **The certificate.** Only the team's Account Holder can create a Developer ID Application certificate, at developer.apple.com under Certificates. Install it, then export it with its private key from Keychain Access as a `.p12` with a password. `base64 -i DeveloperID.p12 | pbcopy` copies what `CSC_LINK` holds.
+- **The notarization key.** In App Store Connect, under Users and Access → Integrations, create a team API key with Developer access. The `.p8` downloads once. Paste the file's text into `APPLE_API_KEY_P8`; the workflow writes it back to a file, because notarization takes a path.
+
+Run the workflow by hand from a branch first (Actions → Release → Run workflow). That signs, notarizes and verifies with the real secrets, keeps the files on the run for two weeks, and makes no release.
+
+### Building a release on your Mac
+
+With the Developer ID certificate in your keychain, store the notarization key once and name the profile:
+
+```bash
+xcrun notarytool store-credentials sonobe-notary --key AuthKey_XXXXXXXXXX.p8 --key-id <key id> --issuer <issuer id>
+APPLE_KEYCHAIN_PROFILE=sonobe-notary node apps/desktop/scripts/package.mjs --release
+node apps/desktop/scripts/verify-package.mjs --release
+```
+
+`--release` never falls back. Without a Developer ID certificate, or without notarization credentials, it stops before it builds anything and says what's missing. A Mac that only has an "Apple Development" certificate is refused by name: Gatekeeper rejects that signature on every other Mac.
+
+To try a signed build without a Developer ID, build a rehearsal: `node apps/desktop/scripts/package.mjs --identity "Apple Development"`. It is signed with that certificate and the real entitlements, isn't notarized, and names every file `-rehearsal`. It exists for trying an update between two signed builds. Don't give one to anyone.
+
+### On a clean Mac
+
+Use a Mac that has never built or run Sonobe, on the oldest macOS you mean to support (the app needs 13). The Intel build has never been launched anywhere: the Mac it was built on has no Rosetta, so it was only read (`verify-package.mjs --static`). Its first launch is the release workflow's Rosetta step, so try it on an Intel Mac if you can.
+
+- Download the DMG with a browser, so macOS quarantines it. Open it, drag Sonobe into Applications and launch it. macOS asks once whether to open an app from the internet, and nothing else.
+- Open a prototype that uses the Camera patch, then one that uses the Microphone patch. Each permission dialog carries Sonobe's wording, and after Allow the viewer shows the camera and hears the microphone. Under the hardened runtime a missing entitlement fails here, silently. Nobody has tried this yet in any build with the hardened runtime, a local `npm run package` build included, so try it in a local build before the first tag.
+- Pop out the viewer.
+- Import a design that has an SF Symbol in it: the real symbol arrives, not a gray placeholder.
+- Run `/Applications/Sonobe.app/Contents/Resources/cli/sonobe --version`.
+- Connect Claude, and have it read the open prototype.
+- Save an API key in Settings, quit, and reopen: the key is still there. Package verification uses a test cipher, so this is the only check of the real keychain.
+
+### What shares the version
+
+`scripts/set-version.ts` writes the root and workspace `package.json` files and their entries in `package-lock.json`, `EDITOR_VERSION` in `apps/editor/src/app/about.ts`, `GENERATOR` in `packages/core/src/document.ts` (the stamp in every saved project, so the examples are rebuilt), and the Claude Code plugin and Claude Desktop extension manifests, which bundle this version's CLI. `packages/cli/src/versions.test.ts` fails when they disagree, and `node scripts/set-version.ts --check` lists them.
+
+Some numbers stay their own: saved documents that record the version that wrote them (the eval cases' start projects, the node-size fixtures), the Chrome extension's manifest and the generator names in Chrome and Figma captures, Sonobe Viewer's version in Xcode, and the versions tests make up.
+
 ## UI rules
 
 The editor should feel like a quiet, dense Mac instrument: hairline-separated dark panels in one tone family, one indigo that means "you are here" or "you can press this", Claude's coral only on things Claude wrote or is doing, and patch category colors only inside the graph. Hierarchy comes from a real size and weight ladder and from removing boxes, not from more grey, tiles or glow. Build with the kit in `apps/editor/src/ui` (open `#gallery` in the browser editor) and the tokens in `apps/editor/src/theme/tokens.css`: no hard-coded colors, no off-scale sizes, no one-off copies of a kit component. Check a change in both themes and at the 1024 × 680 minimum window.
@@ -155,6 +239,6 @@ Sonobe reimplements interaction-prototyping concepts from public documentation a
 ## Pull requests
 
 - Keep PRs focused. Update docs and tests alongside the code.
-- `npm run typecheck && npm test` must pass. CI (`.github/workflows/ci.yml`) runs them and `npm run e2e` on every pull request.
+- `npm run typecheck && npm test` must pass. CI (`.github/workflows/ci.yml`) runs them and `npm run e2e` on every pull request. A second CI job builds the desktop package and runs `npm run package:verify -w @sonobe/desktop` on it, so a change that breaks packaging fails there.
 - For UI changes, attach a screenshot or short recording.
 - Be kind. People of every experience level contribute here, and helping beginners is part of the mission.

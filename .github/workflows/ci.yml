@@ -1,6 +1,7 @@
 # The quality gates in ARCHITECTURE.md §12 that run on every push and pull request: typecheck, the
-# Vitest suite and the Playwright e2e run in Chromium. The Electron end-to-end run, Sonobe Viewer's
-# simulator tests and the Claude evals run by hand.
+# Vitest suite and the Playwright e2e run in Chromium, and beside them the desktop package, built and
+# verified the way a contributor's Mac does it. The Electron end-to-end run, Sonobe Viewer's simulator
+# tests and the Claude evals run by hand. Signed builds are release.yml's: nothing here has credentials.
 name: CI
 
 on:
@@ -39,3 +40,20 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  package:
+    # The local desktop build, so packaging can't rot unnoticed: ad-hoc signed with the hardened runtime
+    # and the real entitlements, then checked and launched (apps/desktop/scripts/verify-package.mjs). Its
+    # own job, in parallel with the checks above, so it adds nothing to their time.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run package -w @sonobe/desktop
+      - run: npm run package:verify -w @sonobe/desktop
+      - run: npm run package:verify -w @sonobe/desktop -- --dmg

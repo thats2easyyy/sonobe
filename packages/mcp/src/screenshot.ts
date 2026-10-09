@@ -78,14 +78,33 @@ export interface RasterImage {
   height: number;
 }
 
-const unavailable = () =>
-  new HostError(
+/**
+ * The error for a server without the rasterizer. `moduleUrl` is this module's own URL: the CLI inside
+ * an installed Sonobe app (Resources/cli/sonobe.mjs) ships without the native module on purpose, and
+ * nothing can be installed into a signed app, so its hint points to the app instead.
+ */
+export function screenshotsUnavailable(error: string, moduleUrl: string): HostError {
+  const meanwhile =
+    "Meanwhile, check structure with get_outline and behavior with sim_get_values or sim_trace.";
+  if (/\/resources\/cli\/[^/]+$/i.test(moduleUrl)) {
+    return new HostError(
+      "screenshots_unavailable",
+      "The CLI inside the Sonobe app doesn't include the headless screenshot renderer.",
+      {
+        hint: `Open the project in the Sonobe app and connect to it (sonobe mcp without --headless): there get_screenshot draws what the viewer shows. ${meanwhile}`,
+      },
+    );
+  }
+  return new HostError(
     "screenshots_unavailable",
     "Sonobe's headless screenshot renderer isn't installed next to this server.",
     {
-      hint: `The native module @resvg/resvg-js couldn't load (${loadError || "not found"}). Install it where Sonobe runs, or open the project in the Sonobe app. Meanwhile, check structure with get_outline and behavior with sim_get_values or sim_trace.`,
+      hint: `The native module @resvg/resvg-js couldn't load (${error || "not found"}). Install it where Sonobe runs, or open the project in the Sonobe app. ${meanwhile}`,
     },
   );
+}
+
+const unavailable = () => screenshotsUnavailable(loadError, import.meta.url);
 
 /**
  * The rasterizer runs in its own Node process: a native panic in resvg aborts the process it runs

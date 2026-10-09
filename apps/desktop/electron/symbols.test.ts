@@ -34,6 +34,11 @@ const dir = mkdtempSync(path.join(tmpdir(), "sonobe-sfsymbol-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 const built = process.platform === "darwin" ? buildSymbolHelper({ out: path.join(dir, "bin", "sfsymbol") }) : { skipped: "not a Mac", path: undefined };
 const helper = built.path;
+// The helper for an Intel Mac, and with both slices in one file, as scripts/package.mjs asks for them.
+// Built here, outside any test's timeout: the first build on a machine compiles each slice.
+const intel = helper ? buildSymbolHelper({ out: path.join(dir, "x64", "sfsymbol"), arch: "x64" }).path : undefined;
+const universal = helper ? buildSymbolHelper({ out: path.join(dir, "universal", "sfsymbol"), arch: "universal" }).path : undefined;
+const slices = (file: string) => execFileSync("lipo", ["-archs", file], { encoding: "utf8" }).trim().split(" ").sort();
 const renderer = () => desktopSymbols({ packaged: false, resourcesPath: dir, mainDir: dir, platform: process.platform, systemVersion: "26.0", exists: existsSync });
 
 const request = (name: string, extra: Partial<SymbolRequest> = {}): SymbolRequest => ({ name, size: 17, weight: "regular", scale: "medium", colors: ["#000000FF"], ...extra });
@@ -78,6 +83,15 @@ describe.skipIf(!helper)(`the sfsymbol helper${built.skipped ? ` (skipped: ${bui
       }
     }
     expect(best).toBeLessThan(0.01);
+  });
+
+  it("is built for the architecture asked for, and with both slices in one cached file for a universal app", () => {
+    expect(slices(helper!)).toEqual([process.arch === "x64" ? "x86_64" : "arm64"]);
+    expect(slices(intel!)).toEqual(["x86_64"]);
+    expect(slices(universal!)).toEqual(["arm64", "x86_64"]);
+    expect(buildSymbolHelper({ out: path.join(dir, "again", "sfsymbol"), arch: "universal" })).toMatchObject({ cached: true });
+    // This Mac runs its own slice of the merged file.
+    expect(execFileSync(universal!, ["heart.fill", "--size", "17"], { encoding: "utf8" })).toMatch(/^<svg [^>]*width="21" height="18"/);
   });
 
   it("names close symbols for one this Mac doesn't have", async () => {
