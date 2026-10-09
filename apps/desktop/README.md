@@ -16,7 +16,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
 | `player/` | The web player for phones and the pop-out viewer: the editor viewer's platform services, the phone's device info, the three-finger menu and the Sonobe Viewer bridge |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
-| `scripts/` | `build.mjs`, `sfsymbol.ts`, `icons.mjs`, `package.mjs`, `verify-package.mjs` |
+| `scripts/` | `build.mjs`, `sfsymbol.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
 
 ## Scripts
 
@@ -31,7 +31,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 | `npm run smoke:import` | Muted design import run against a local dev server: `import_design` by URL and HTML, the Import dialog bridge, and pasting a capture (build the editor and shell first) |
 | `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save (build the editor and shell first) |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
-| `npm run package` | Unsigned local build: editor, bundles, icons, then electron-builder into `release/` |
+| `npm run package` | A local build: editor, bundles, icons, then electron-builder into `release/`, ad-hoc signed on macOS. `--identity` and `--release` build signed ones (see Packaging) |
 | `npm run package:verify` | Launches the packaged app muted and checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG) |
 
 ## Host API additions
@@ -48,9 +48,17 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 ## Packaging
 
-`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--dir` skips the installer, and `--skip-editor-build` reuses `apps/editor/dist`.
+`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--arch arm64,x64` builds both in one run, `--dir` skips the installer, and `--skip-editor-build` reuses `apps/editor/dist`.
 
-Local builds are ad-hoc signed (`mac.identity: "-"`) with hardened runtime off. That's enough to run on your own Mac but not to distribute. For distribution, set a Developer ID identity, turn on `hardenedRuntime`, and notarize.
+`scripts/package.mjs` decides how the app is signed (`scripts/signing.ts`), and `electron-builder.yml` sets none of it:
+
+| Build | Command | Signing |
+| --- | --- | --- |
+| Local (the default) | `npm run package` | Ad-hoc. It runs on the Mac that built it, needs no credentials, and ignores any in the shell |
+| Rehearsal | `node scripts/package.mjs --identity "<name>"` | A certificate from your keychain, by enough of its name to match it alone. Not notarized, and every file is named `-rehearsal`: for trying an update between two signed builds, never for other people |
+| Release | `node scripts/package.mjs --release` | A Developer ID Application certificate, notarized. It stops before building when there's no such certificate (in the keychain, or in `CSC_LINK` with `CSC_KEY_PASSWORD`) or no complete notarization credentials (`APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`; or `APPLE_KEYCHAIN_PROFILE`; or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`). It never falls back to another certificate, and it also refuses `--dir`, `--skip-editor-build`, a failed editor build and a missing SF Symbols helper |
+
+Every build is signed with the hardened runtime and the entitlements in `build/entitlements.mac.plist` (JIT, camera, microphone) and `build/entitlements.mac.inherit.plist` (the helpers and everything else inside the app). A local build adds `disable-library-validation`, which an ad-hoc signature needs under the hardened runtime. After electron-builder signs, the script reads the signature back and stops if it isn't the one that build asked for, before any DMG or zip is made.
 
 The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
 
