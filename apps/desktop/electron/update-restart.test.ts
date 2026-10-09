@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeWindowsForRestart,
+  createQuitResume,
   moveConflict,
   reopenPlan,
   resolveClosePrompt,
@@ -27,26 +28,34 @@ afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
 const DRAFT = "draft-0001-abcd";
 
-/** The prompt over a scripted person and editor: what was asked, in order, and what came of it. */
-function prompt(over: { reason?: CloseReason; canSave?: boolean; flush?: FlushReply | null | "hangs" | "fails"; choose?: string; save?: string | null | false | Error }) {
+type Flush = FlushReply | null | "hangs" | "fails";
+
+/**
+ * The prompt over a scripted person and editor: what was asked, in order, and what came of it. `flush` and
+ * `choose` may be lists, one entry for each time the draft is written and each time the question is asked
+ * (the last entry repeats).
+ */
+function prompt(over: { reason?: CloseReason; canSave?: boolean; flush?: Flush | Flush[]; choose?: string | string[]; save?: string | null | false | Error }) {
   const events: string[] = [];
-  let asked: ClosePromptQuestion | null = null;
+  const questions: ClosePromptQuestion[] = [];
   let landFlush: (reply: FlushReply | null) => void = () => undefined;
-  const flush = "flush" in over ? over.flush : { draft: DRAFT, pending: false };
+  const flushes: Flush[] = "flush" in over ? (Array.isArray(over.flush) ? [...over.flush] : [over.flush as Flush]) : [{ draft: DRAFT, pending: false }];
+  const choices = Array.isArray(over.choose) ? [...over.choose] : [over.choose ?? "Cancel"];
   const deps: ClosePromptDeps = {
     reason: over.reason ?? "close",
     name: "Checkout",
     canSave: over.canSave ?? true,
     flush: () => {
       events.push("flush");
+      const flush = flushes.length > 1 ? flushes.shift() : flushes[0];
       if (flush === "fails") return Promise.reject(new Error("timeout"));
       if (flush === "hangs") return new Promise((resolve) => (landFlush = resolve));
       return Promise.resolve(flush ?? null);
     },
     ask: async (question) => {
       events.push("ask");
-      asked = question;
-      return over.choose ?? "Cancel";
+      questions.push(question);
+      return (choices.length > 1 ? choices.shift() : choices[0])!;
     },
     save: async () => {
       events.push("save");
@@ -56,7 +65,7 @@ function prompt(over: { reason?: CloseReason; canSave?: boolean; flush?: FlushRe
     discard: async () => void events.push("discard"),
     showError: async (message, detail) => void events.push(`error: ${message} ${detail}`),
   };
-  return { outcome: resolveClosePrompt(deps), events, question: () => asked!, landFlush: (reply: FlushReply | null) => landFlush(reply) };
+  return { outcome: resolveClosePrompt(deps), events, question: () => questions.at(-1)!, questions, landFlush: (reply: FlushReply | null) => landFlush(reply) };
 }
 
 describe("the unsaved-changes prompt, closing a window or quitting", () => {
@@ -98,11 +107,41 @@ describe("the unsaved-changes prompt, closing a window or quitting", () => {
   });
 });
 
+describe("a quit that stops at the unsaved-changes prompt", () => {
+  it("carries on once the window has closed, at each window that asks in turn", () => {
+    let quits = 0;
+    const resume = createQuitResume(() => void quits++);
+    resume.began();
+    // Save or Don't Save in the first window: the quit is asked for again, and stops at the second.
+    resume.answered(true);
+    expect(quits).toBe(1);
+    resume.began();
+    resume.answered(true);
+    expect(quits).toBe(2);
+  });
+
+  it("is off once the person cancels, so closing a window later doesn't quit the app", () => {
+    let quits = 0;
+    const resume = createQuitResume(() => void quits++);
+    resume.began();
+    resume.answered(false);
+    resume.answered(true);
+    expect(quits).toBe(0);
+  });
+
+  it("never quits for a window that was only closed", () => {
+    let quits = 0;
+    createQuitResume(() => void quits++).answered(true);
+    expect(quits).toBe(0);
+  });
+});
+
 describe("the unsaved-changes prompt, restarting for an update", () => {
-  it("offers Keep Draft once the draft holds every edit, and closes without deleting it", async () => {
+  it("offers Keep Draft once the draft holds every edit, writes it once more on Keep Draft, and closes without deleting it", async () => {
     const p = prompt({ reason: "restart", choose: "Keep Draft" });
     expect(await p.outcome).toEqual({ closed: true, draft: DRAFT });
-    expect(p.events).toEqual(["flush", "ask"]);
+    // Claude can edit while the question is up: the second write is what Keep Draft keeps.
+    expect(p.events).toEqual(["flush", "ask", "flush"]);
     expect(p.question()).toMatchObject({ detail: "Sonobe keeps your changes as a draft and opens it again after the update.", buttons: ["Save", "Keep Draft", "Cancel"] });
   });
 
@@ -111,7 +150,31 @@ describe("the unsaved-changes prompt, restarting for an update", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(p.events).toEqual(["flush"]);
     p.landFlush({ draft: DRAFT, pending: false });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Asked, answered Keep Draft, and writing the draft again: the window isn't closed before that lands.
+    expect(p.events).toEqual(["flush", "ask", "flush"]);
+    p.landFlush({ draft: DRAFT, pending: false });
     expect(await p.outcome).toEqual({ closed: true, draft: DRAFT });
+  });
+
+  it("asks again without Keep Draft when an edit made while the question was up didn't reach the draft", async () => {
+    for (const second of [{ draft: DRAFT, pending: true }, null, "fails"] as const) {
+      const p = prompt({ reason: "restart", flush: [{ draft: DRAFT, pending: false }, second], choose: ["Keep Draft", "Cancel"] });
+      expect(await p.outcome, String(second)).toEqual({ closed: false });
+      expect(p.events).toEqual(["flush", "ask", "flush", "ask"]);
+      expect(p.questions.map((q) => q.buttons)).toEqual([["Save", "Keep Draft", "Cancel"], ["Save", "Don't Save", "Cancel"]]);
+      expect(p.questions[1]!.detail).toBe("Sonobe couldn't keep a draft of your changes. Your changes will be lost if you don't save them.");
+    }
+    // Save is still there the second time, and saves what the document holds now.
+    const saved = prompt({ reason: "restart", flush: [{ draft: DRAFT, pending: false }, { draft: DRAFT, pending: true }], choose: ["Keep Draft", "Save"] });
+    expect(await saved.outcome).toEqual({ closed: true, savedTo: "/Users/me/Checkout.sonobe" });
+    expect(saved.events).toEqual(["flush", "ask", "flush", "ask", "save", "discard"]);
+  });
+
+  it("doesn't keep a draft other than the one it offered", async () => {
+    const p = prompt({ reason: "restart", flush: [{ draft: DRAFT, pending: false }, { draft: "draft-0002-efgh", pending: false }], choose: ["Keep Draft", "Cancel"] });
+    expect(await p.outcome).toEqual({ closed: false });
+    expect(p.questions[1]!.buttons).toEqual(["Save", "Don't Save", "Cancel"]);
   });
 
   it("keeps the restart from happening on Cancel", async () => {
@@ -196,7 +259,7 @@ describe("closeWindowsForRestart", () => {
 
 describe("the reopen record", () => {
   const file = path.join(temp, "reopen-after-update.json");
-  const record: ReopenRecord = { version: 1, fromVersion: "0.2.0", toVersion: "0.3.0", at: 1_000, windows: [{ project: "/p/A.sonobe", draft: DRAFT }, { project: null, draft: "draft-0002-efgh" }] };
+  const record: ReopenRecord = { version: 1, windows: [{ project: "/p/A.sonobe", draft: DRAFT }, { project: null, draft: "draft-0002-efgh" }] };
   afterEach(() => rmSync(file, { force: true }));
 
   it("round-trips, and is gone once taken", () => {
@@ -208,8 +271,8 @@ describe("the reopen record", () => {
   });
 
   it("keeps only what it can open: absolute folders and well-formed draft ids", () => {
-    writeFileSync(file, JSON.stringify({ version: 1, fromVersion: 2, windows: [{ project: "relative.sonobe", draft: "../../etc" }, { project: "/p/B.sonobe" }, "nonsense", { draft: DRAFT, project: 7 }] }));
-    expect(takeReopenRecord(file)).toEqual({ version: 1, fromVersion: "", toVersion: null, at: 0, windows: [{ project: "/p/B.sonobe", draft: null }, { project: null, draft: DRAFT }] });
+    writeFileSync(file, JSON.stringify({ version: 1, toVersion: "0.3.0", windows: [{ project: "relative.sonobe", draft: "../../etc" }, { project: "/p/B.sonobe" }, "nonsense", { draft: DRAFT, project: 7 }] }));
+    expect(takeReopenRecord(file)).toEqual({ version: 1, windows: [{ project: "/p/B.sonobe", draft: null }, { project: null, draft: DRAFT }] });
   });
 
   it("is deleted, and opens nothing, when it's damaged, from another format, or empty", () => {
@@ -240,10 +303,10 @@ describe("restartConfirmation", () => {
   it("names the sessions a restart interrupts, and says they carry on", () => {
     expect(restartConfirmation(["Claude Code"], "0.3.0", "darwin")).toEqual({
       message: "Restart Sonobe to update to 0.3.0?",
-      detail: "Claude Code is connected. A tool call that's running now will stop. The session carries on once Sonobe is back.",
+      detail: "Claude Code is connected. A tool call that's running now will stop. The session carries on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.",
       buttons: ["Restart", "Cancel"],
     });
-    expect(restartConfirmation(["Claude Code", "Claude Desktop", "Claude Code"], "0.3.0", "linux")?.detail).toBe("2 Claude Code sessions and Claude Desktop are connected. A tool call that's running now will stop. The sessions carry on once Sonobe is back.");
+    expect(restartConfirmation(["Claude Code", "Claude Desktop", "Claude Code"], "0.3.0", "linux")?.detail).toBe("2 Claude Code sessions and Claude Desktop are connected. A tool call that's running now will stop. The sessions carry on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.");
     expect(restartConfirmation(["Claude Code"], null, "darwin")?.message).toBe("Restart Sonobe?");
   });
 
@@ -357,7 +420,7 @@ describe("restartKeepingWork", () => {
 
 it("keeps the record's text readable for someone who finds the file", () => {
   const file = path.join(temp, "readable.json");
-  writeReopenRecord(file, { version: 1, fromVersion: "0.2.0", toVersion: "0.3.0", at: 1, windows: [{ project: "/p/A.sonobe", draft: null }] });
+  writeReopenRecord(file, { version: 1, windows: [{ project: "/p/A.sonobe", draft: null }] });
   expect(readFileSync(file, "utf8")).toContain('"project": "/p/A.sonobe"');
   rmSync(file);
 });

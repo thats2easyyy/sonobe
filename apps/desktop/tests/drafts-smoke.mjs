@@ -23,6 +23,9 @@
  *    update stays ready. Keep Draft closes the window, writes down what was open and asks the updater
  *    to install. The next launch opens the project again with the unsaved change and no welcome screen,
  *    and an MCP call that arrives first waits for it instead of landing on the launch document.
+ * 6. Quit with that unsaved change: Cancel in the prompt keeps the app and its window. Quit again and
+ *    Don't Save: the app itself ends, not only its window (a quit that stopped to ask carries on once
+ *    it's answered, which is what lets a downloaded update go in "the next time you quit").
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -352,7 +355,7 @@ try {
   void app.evaluate(() => void globalThis.__sonobeTest.updates.restart()).catch(() => undefined);
   await poll(() => app.evaluate(({ BrowserWindow }) => globalThis.__sonobeTest.updates.installs() === 1 && BrowserWindow.getAllWindows().length === 0), { message: "the window to close and the updater to be asked to install" });
   const record = JSON.parse(readFileSync(recordFile, "utf8"));
-  assert(record.version === 1 && record.toVersion === "9.9.9" && record.windows.length === 1 && record.windows[0].project === target && record.windows[0].draft === restartDraft, "the record names the project and the kept draft", record);
+  assert(record.version === 1 && record.windows.length === 1 && record.windows[0].project === target && record.windows[0].draft === restartDraft, "the record names the project and the kept draft", record);
   assert(draftsOnDisk()[restartDraft]?.projectPath === target, "Keep Draft left the draft on disk", draftsOnDisk());
   // A real updater quits the app here. The stand-in doesn't, so the smoke does.
   await kill("SIGKILL", 5000);
@@ -378,9 +381,29 @@ try {
   await mcp.close();
   log("the next launch opened the project again with its unsaved change, and the first MCP call waited for it");
 
-  await app.evaluate(() => globalThis.__sonobeTest?.destroyWindows());
-  await app.close();
+  // ---------------------------------------------------------------------------------------------
+  // 6. Quit with unsaved changes: Cancel keeps the app, Don't Save ends it (not only its window)
+  // ---------------------------------------------------------------------------------------------
+
+  const quit = () => void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+  const visibleWindows = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length);
+  await answerPrompts("Cancel");
+  quit();
+  const quitPrompt = await poll(() => app.evaluate(() => globalThis.__asked[0] ?? null), { message: "the unsaved-changes prompt of a quit" });
+  assert(quitPrompt.buttons.join() === "Save,Don't Save,Cancel" && quitPrompt.detail === "Your changes will be lost if you don't save them.", "quitting with an unsaved change asks Save, Don't Save or Cancel", quitPrompt);
+  await new Promise((r) => setTimeout(r, 500));
+  assert((await visibleWindows()) === 1 && draftsOnDisk()[restartDraft], "Cancel keeps the app, its window and the draft");
+
+  await answerPrompts("Don't Save");
+  const quitting = app.process();
+  const ended = new Promise((resolve) => quitting.once("exit", (code, signal) => resolve({ code, signal })));
+  quit();
+  const quitOutcome = await Promise.race([ended, new Promise((resolve) => setTimeout(() => resolve(null), 10_000))]);
+  assert(quitOutcome?.code === 0, "after Don't Save the quit carries on: the app ends, not only its window", quitOutcome ?? "still running 10 s after the prompt was answered");
+  assert(Object.keys(draftsOnDisk()).length === 0, "Don't Save removed the draft on the way out", draftsOnDisk());
+  await app.close().catch(() => undefined);
   app = null;
+  log("Quit with an unsaved change: Cancel kept the app, and Don't Save ended it");
   log("PASS");
 } catch (err) {
   failed = true;

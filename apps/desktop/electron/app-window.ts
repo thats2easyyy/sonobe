@@ -29,11 +29,15 @@ export interface AppWindowOptions {
   onCreated?(appWindow: AppWindow): void;
   /** The person chose Save or Don't Save while closing: the window's drafts aren't needed anymore. */
   onDiscardDrafts?(webContentsId: number): Promise<void>;
+  /** The unsaved-changes prompt ended, with the window closing (true) or kept open. A quit it held up carries on from here. */
+  onCloseAnswered?(closed: boolean): void;
 }
 
 export interface AppWindow {
   readonly win: BrowserWindow;
   readonly webContents: WebContents;
+  /** Settles once the window has been told to show. macOS doesn't always send `show` (a sleeping display), so nothing waits for that event. */
+  readonly shown: Promise<void>;
   /** Current trust boundary for navigation and IPC. */
   content(): AppContent;
   /** Set by the preload when onCommand subscribers change. */
@@ -209,10 +213,13 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
     wc.reload();
   });
 
-  win.once("ready-to-show", () => {
-    if (state.maximized) win.maximize();
-    if (state.fullScreen) win.setFullScreen(true);
-    win.show();
+  const shown = new Promise<void>((resolve) => {
+    win.once("ready-to-show", () => {
+      if (state.maximized) win.maximize();
+      if (state.fullScreen) win.setFullScreen(true);
+      win.show();
+      resolve();
+    });
   });
 
   const warn = (what: string) => (err: unknown) => opts.log("warn", `${what}: ${err instanceof Error ? err.message : String(err)}`);
@@ -257,6 +264,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
           forceClose = true;
           win.close();
         }
+        opts.onCloseAnswered?.(outcome.closed);
         return outcome;
       }));
 
@@ -282,6 +290,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   const appWindow: AppWindow = {
     win,
     webContents: wc,
+    shown,
     content: () => content,
     setCommandListeners(count) {
       commandListeners = Math.max(0, Math.floor(count));

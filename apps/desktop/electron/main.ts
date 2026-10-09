@@ -34,7 +34,7 @@ import { createRendererRpcHub, type RendererRpcHub, type RpcIpcEvent } from "./r
 import { createSecretStore, createTestCipher, type SecretStore } from "./secrets.ts";
 import { ALLOWED_PERMISSIONS, isAppUrl, isExternalUrl, isMailtoUrl } from "./security.ts";
 import { desktopSymbols } from "./symbols.ts";
-import { moveConflict, reopenPlan, restartConfirmation, restartKeepingWork, takeReopenRecord, writeReopenRecord, type ReopenRecord, type ReopenStep, type ReopenWindow, type RestartWindow } from "./update-restart.ts";
+import { createQuitResume, moveConflict, reopenPlan, restartConfirmation, restartKeepingWork, takeReopenRecord, writeReopenRecord, type ReopenRecord, type ReopenStep, type ReopenWindow, type RestartWindow } from "./update-restart.ts";
 import type { NativeUpdaterLike } from "./updater-driver.ts";
 import { createUpdateController, createUpdateSettings, installLocation, manualCheckDialog, updateMode, type UpdateController, type UpdateDriver, type UpdateModeResult } from "./updates.ts";
 
@@ -159,6 +159,8 @@ function main(): void {
   let reopenInNextWindow = false;
   /** Settles once a launch that reopens work has done so. MCP calls wait for it: one that got in first would land on the blank launch document. */
   let reopened: Promise<void> = Promise.resolve();
+  /** A quit that stopped at a window's unsaved-changes prompt carries on once that window has closed (update-restart.ts). */
+  const quitResume = createQuitResume(() => app.quit());
 
   /** Every editor window writes its unsaved edits to its draft (at most 1.5 s each). */
   const flushDrafts = () =>
@@ -289,6 +291,7 @@ function main(): void {
       appName: APP_NAME,
       log,
       onDiscardDrafts: async (id) => drafts?.discard(id),
+      onCloseAnswered: (closed) => quitResume.answered(closed),
       onCreated: (w) => {
         const id = w.webContents.id;
         windows.set(id, w);
@@ -609,6 +612,9 @@ function main(): void {
 
   const reopen = async (steps: readonly ReopenStep[]) => {
     for (const step of steps) {
+      // Restoring a draft opens its project underneath. Main wrote the record for a folder the person had open, so the
+      // editor may read it again, whatever its name and whether or not it's still among the recent ones.
+      if (step.kind === "draft" && step.project) access.approve(step.project);
       const dir = step.kind === "project" ? step.path : (await recoverDraftFolder(step.id)) ? null : step.project;
       if (!dir) continue;
       await openProjects([dir]);
@@ -621,7 +627,7 @@ function main(): void {
   const recoverAfterRestart = async (open: ReopenWindow[]) => {
     // The record was for a launch that isn't coming.
     takeReopenRecord(reopenFile());
-    const steps = await reopenSteps({ version: 1, fromVersion: VERSION, toVersion: null, at: Date.now(), windows: open });
+    const steps = await reopenSteps({ version: 1, windows: open });
     reopenInNextWindow = steps.length > 0;
     await ensureWindow();
     await reopen(steps);
@@ -653,7 +659,7 @@ function main(): void {
         },
         windows: restartWindows,
         setRestarting,
-        record: (open) => writeReopenRecord(reopenFile(), { version: 1, fromVersion: VERSION, toVersion: status.version, at: Date.now(), windows: open }),
+        record: (open) => writeReopenRecord(reopenFile(), { version: 1, windows: open }),
         noWindowsLeft,
         // When it works the app is gone before this settles. It rejects when the updater reports an error instead.
         install: () =>
@@ -687,7 +693,7 @@ function main(): void {
         confirm: async () => true,
         windows: restartWindows,
         setRestarting,
-        record: (open) => writeReopenRecord(reopenFile(), { version: 1, fromVersion: VERSION, toVersion: null, at: Date.now(), windows: open }),
+        record: (open) => writeReopenRecord(reopenFile(), { version: 1, windows: open }),
         noWindowsLeft,
         install: () => {
           const moved = app.moveToApplicationsFolder({
@@ -1084,6 +1090,8 @@ function main(): void {
   app.on("window-all-closed", () => {
     if (platform !== "darwin" && !restarting) app.quit();
   });
+
+  app.on("before-quit", () => quitResume.began());
 
   app.on("activate", () => {
     if (ready && windows.size === 0 && !restarting) void ensureWindow();
@@ -1577,9 +1585,7 @@ function main(): void {
       updatesStarted();
       if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
     };
-    const afterShow = () => setTimeout(beginUpdates, UPDATES_START_MS).unref();
-    if (first.win.isDestroyed() || first.win.isVisible()) afterShow();
-    else first.win.once("show", afterShow);
+    void first.shown.then(() => setTimeout(beginUpdates, UPDATES_START_MS).unref());
     // A window that never shows (closed at once) doesn't hold updates back for good.
     setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
 

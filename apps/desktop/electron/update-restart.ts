@@ -1,7 +1,8 @@
 /**
  * Restarting without losing work, for Restart to Update and for Move to Applications. Every window
  * closes through its unsaved-changes prompt, what was open is written down, and only then does the app
- * quit; the next launch opens it all again. Cancelling any prompt calls the restart off.
+ * quit; the next launch opens it all again. Cancelling any prompt calls the restart off. The prompt is
+ * the one every close and quit goes through, so what a plain quit does once it's answered is here too.
  *
  * Electron-free: app-window.ts gives the prompt its dialogs and the editor's RPC, and main.ts gives the
  * sequence its windows and the updater, so the decisions that could lose work are unit tested here.
@@ -60,38 +61,71 @@ const LOSE = "Your changes will be lost if you don't save them.";
  * better than Don't Save: when the draft holds every edit, the middle button is Keep Draft, which closes
  * the window and leaves the draft for the next launch to open again. Without such a draft (a copy that's
  * only marked unsaved has none, and a write can fail) the choice stays Save or Don't Save, and says so.
+ *
+ * The person can't edit while the question is up, but Claude and the Assistant can. So Keep Draft writes
+ * the draft once more before the window closes, and when that draft isn't whole the question comes
+ * back without Keep Draft.
  */
 export async function resolveClosePrompt(deps: ClosePromptDeps): Promise<CloseOutcome> {
   const restarting = deps.reason !== "close";
-  const flushing = deps.flush().catch(() => null);
+  let flushing = deps.flush().catch(() => null);
   // A restart waits for the draft, since the buttons depend on it. A close asks at once.
-  const kept = restarting ? await flushing : null;
-  const draft = kept && !kept.pending ? kept.draft : null;
-  const discardLabel = draft ? KEEP_DRAFT : "Don't Save";
-  const detail = draft
-    ? `Sonobe keeps your changes as a draft and opens it again ${deps.reason === "move" ? "once it has moved" : "after the update"}.`
-    : restarting && (!kept || kept.pending)
-      ? `Sonobe couldn't keep a draft of your changes. ${LOSE}`
-      : LOSE;
-  const buttons = deps.canSave ? ["Save", discardLabel, "Cancel"] : [discardLabel, "Cancel"];
-  const choice = await deps.ask({ message: `Do you want to save the changes you made to “${deps.name}”?`, detail, buttons });
-  if (choice !== "Save" && choice !== discardLabel) return { closed: false };
-  let savedTo: string | null = null;
-  if (choice === "Save") {
-    try {
-      const saved = await deps.save();
-      if (saved === false) return { closed: false };
-      savedTo = saved;
-    } catch (err) {
-      await deps.showError("Sonobe couldn't save your prototype.", err instanceof Error ? err.message : String(err));
-      return { closed: false };
+  let kept = restarting ? await flushing : null;
+  for (;;) {
+    const draft = kept && !kept.pending ? kept.draft : null;
+    const discardLabel = draft ? KEEP_DRAFT : "Don't Save";
+    const detail = draft
+      ? `Sonobe keeps your changes as a draft and opens it again ${deps.reason === "move" ? "once it has moved" : "after the update"}.`
+      : restarting && (!kept || kept.pending)
+        ? `Sonobe couldn't keep a draft of your changes. ${LOSE}`
+        : LOSE;
+    const buttons = deps.canSave ? ["Save", discardLabel, "Cancel"] : [discardLabel, "Cancel"];
+    const choice = await deps.ask({ message: `Do you want to save the changes you made to “${deps.name}”?`, detail, buttons });
+    if (choice !== "Save" && choice !== discardLabel) return { closed: false };
+    if (choice === KEEP_DRAFT) {
+      flushing = deps.flush().catch(() => null);
+      const now = await flushing;
+      if (now && !now.pending && now.draft === draft) return { closed: true, draft: draft! };
+      // The draft lacks an edit made since the question, or isn't the one that was offered: ask again, without it.
+      kept = null;
+      continue;
     }
+    let savedTo: string | null = null;
+    if (choice === "Save") {
+      try {
+        const saved = await deps.save();
+        if (saved === false) return { closed: false };
+        savedTo = saved;
+      } catch (err) {
+        await deps.showError("Sonobe couldn't save your prototype.", err instanceof Error ? err.message : String(err));
+        return { closed: false };
+      }
+    }
+    // Saved, or the person chose not to keep the changes: the draft goes with the window (after the flush lands).
+    await flushing;
+    await deps.discard();
+    return { closed: true, ...(savedTo ? { savedTo } : {}) };
   }
-  if (choice === KEEP_DRAFT) return { closed: true, draft: draft! };
-  // Saved, or the person chose not to keep the changes: the draft goes with the window (after the flush lands).
-  await flushing;
-  await deps.discard();
-  return { closed: true, ...(savedTo ? { savedTo } : {}) };
+}
+
+/**
+ * A quit that the unsaved-changes prompt held up. Quitting closes every window, a window with unsaved
+ * changes stops the quit to ask, and nothing carries on by itself once the person has answered: the
+ * window closes and the app stays, with an update that was to go in "the next time you quit" still
+ * waiting. This remembers that a quit is under way. When a prompt ends with its window closed, the quit
+ * is asked for again (it stops at the next window with something to ask); when the person cancels, it's off.
+ */
+export function createQuitResume(quit: () => void): { /** The app was asked to quit (`before-quit`). */ began(): void; /** A window's unsaved-changes prompt ended. */ answered(closed: boolean): void } {
+  let quitting = false;
+  return {
+    began() {
+      quitting = true;
+    },
+    answered(closed) {
+      if (!closed) quitting = false;
+      else if (quitting) quit();
+    },
+  };
 }
 
 // --- What was open -------------------------------------------------------------------------------
@@ -130,10 +164,6 @@ export async function closeWindowsForRestart(windows: readonly RestartWindow[], 
 /** <userData>/reopen-after-update.json: what to open again at the next launch, once. */
 export interface ReopenRecord {
   version: 1;
-  fromVersion: string;
-  /** The version the restart installs, or null for a move. */
-  toVersion: string | null;
-  at: number;
   windows: ReopenWindow[];
 }
 
@@ -161,14 +191,7 @@ export function takeReopenRecord(file: string): ReopenRecord | null {
     const draft = typeof w.draft === "string" && DRAFT_ID.test(w.draft) ? w.draft : null;
     return project || draft ? [{ project, draft }] : [];
   });
-  if (!windows.length) return null;
-  return {
-    version: 1,
-    fromVersion: typeof o.fromVersion === "string" ? o.fromVersion : "",
-    toVersion: typeof o.toVersion === "string" ? o.toVersion : null,
-    at: typeof o.at === "number" ? o.at : 0,
-    windows,
-  };
+  return windows.length ? { version: 1, windows } : null;
 }
 
 export type ReopenStep = { kind: "draft"; id: string; /** Opened instead when the draft can't be. */ project: string | null } | { kind: "project"; path: string };
@@ -190,7 +213,8 @@ export function reopenPlan(record: ReopenRecord, state: { /** Drafts no window c
 /**
  * What to ask before a restart while Claude sessions are connected, or null when none is. `sessions`
  * are their labels ("Claude Code"). The relay finds the app again by itself; on Windows the installer
- * stops it, so the session has to be reconnected.
+ * stops it, so the session has to be reconnected. A session that carries on keeps the tool list it read
+ * from the old version: the relay doesn't tell Claude to read it again.
  */
 export function restartConfirmation(sessions: readonly string[], version: string | null, platform: string): ClosePromptQuestion | null {
   if (!sessions.length) return null;
@@ -199,7 +223,10 @@ export function restartConfirmation(sessions: readonly string[], version: string
   const names = [...counts].map(([label, count]) => (count > 1 ? `${count} ${label} sessions` : label));
   const listed = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]!;
   const one = sessions.length === 1;
-  const after = platform === "win32" ? `Reconnect ${one ? "it" : "them"} once Sonobe is back.` : `The session${one ? " carries" : "s carry"} on once Sonobe is back.`;
+  const after =
+    platform === "win32"
+      ? `Reconnect ${one ? "it" : "them"} once Sonobe is back.`
+      : `The session${one ? " carries" : "s carry"} on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.`;
   return {
     message: version ? `Restart Sonobe to update to ${version}?` : "Restart Sonobe?",
     detail: `${listed} ${one ? "is" : "are"} connected. A tool call that's running now will stop. ${after}`,
