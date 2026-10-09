@@ -10,7 +10,7 @@
  * DOM writes and layout come from the Chromium stress view in `demo/screenshot.mjs`.
  */
 import type { Runtime, SceneFrame, SceneNode } from "@sonobe/engine";
-import { buildDoc, createTestRuntime } from "@sonobe/engine/testing";
+import { buildDoc, createMockRegistry, createTestRuntime, defineMock, port } from "@sonobe/engine/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDomRenderer } from "./renderer.ts";
 import type { DomRenderer } from "./renderer.ts";
@@ -192,11 +192,26 @@ describe("render performance (engine frames, 500 layers)", { retry: 2 }, () => {
   const open: { dispose(): void }[] = [];
 
   const PARAGRAPH = "The quick brown fox jumps over the lazy dog, then turns around and does it again, because a pangram is only useful when there is enough of it to wrap over several lines of a narrow column.";
-  /** 300 boxes (one turning), then 200 texts: one line each, or a paragraph wrapped at 180 pt. */
-  const screen = (wrapped: boolean) => {
+  /** A color that is a new object with the same channels on every frame, as Transition and Pop Animation output while they hold still. */
+  const tint = defineMock({
+    type: "tint",
+    name: "Tint",
+    inputs: [],
+    outputs: [port("output", "color")],
+    evaluate(ctx) {
+      ctx.output("output", { r: 0.04, g: 0.52, b: 1, a: 1 });
+    },
+  });
+  const reg = createMockRegistry([tint]);
+  /**
+   * 300 boxes (one turning), then 200 texts: one line each, or a paragraph wrapped at 180 pt.
+   * `tinted`: every box's color and every text's color come from the tint patch.
+   */
+  const screen = (wrapped: boolean, tinted = false) => {
+    const color = tinted ? { link: "tint.output" } : "#0A84FFFF";
     const layers: { id: string; type: string; name: string; props: Record<string, unknown> }[] = [];
     for (let i = 0; i < 300; i++) {
-      layers.push({ id: `box${i}`, type: i % 3 === 0 ? "oval" : "rectangle", name: `Box ${i}`, props: { position: [(i % 20) * 19, Math.floor(i / 20) * 20], size: [16, 16], color: "#0A84FFFF", ...(i === 0 ? { rotation: { link: "clock.frame" } } : {}) } });
+      layers.push({ id: `box${i}`, type: i % 3 === 0 ? "oval" : "rectangle", name: `Box ${i}`, props: { position: [(i % 20) * 19, Math.floor(i / 20) * 20], size: [16, 16], color, ...(i === 0 ? { rotation: { link: "clock.frame" } } : {}) } });
     }
     for (let i = 0; i < 200; i++) {
       const position = [(i % 4) * 96, 310 + Math.floor(i / 4) * 10];
@@ -204,11 +219,11 @@ describe("render performance (engine frames, 500 layers)", { retry: 2 }, () => {
         id: `text${i}`,
         type: "text",
         name: `Text ${i}`,
-        props: wrapped ? { position, text: `${i}. ${PARAGRAPH}`, fontSize: 11, widthMode: "fixed", size: [180, 60] } : { position, text: `Event ${i}`, fontSize: 13, textColor: "#8E8E93FF" },
+        props: wrapped ? { position, text: `${i}. ${PARAGRAPH}`, fontSize: 11, widthMode: "fixed", size: [180, 60] } : { position, text: `Event ${i}`, fontSize: 13, textColor: tinted ? color : "#8E8E93FF" },
       });
     }
     const measurer = testMeasurer();
-    const runtime = createTestRuntime(buildDoc({ layers: layers as never, patches: { clock: { type: "time" } } }), undefined, { textMeasurer: measurer });
+    const runtime = createTestRuntime(buildDoc({ layers: layers as never, patches: { clock: { type: "time" }, tint: { type: "tint" } } }, reg), reg, { textMeasurer: measurer });
     const renderer = createDomRenderer(container, { resolveAssetUrl: () => undefined, captureInput: false, textMeasurer: measurer });
     open.push(runtime, renderer);
     for (let i = 0; i < 20; i++) renderer.render(runtime.step());
@@ -232,6 +247,14 @@ describe("render performance (engine frames, 500 layers)", { retry: 2 }, () => {
     const { step, draw, writesPerFrame } = measureLive(runtime, renderer, 60);
     report("300 boxes + 200 texts, one box turning: draw", draw);
     report("300 boxes + 200 texts, one box turning: engine step", step, "not budgeted here");
+    expect(writesPerFrame.every((w) => w === 1)).toBe(true);
+    expect(draw).toBeLessThan(BUDGET_MS);
+  });
+
+  it("draws layers whose colors a patch makes anew on every frame, the same each time, as cheaply", () => {
+    const { runtime, renderer } = screen(false, true);
+    const { draw, writesPerFrame } = measureLive(runtime, renderer, 60);
+    report("300 boxes + 200 texts, every color from a patch, one box turning: draw", draw);
     expect(writesPerFrame.every((w) => w === 1)).toBe(true);
     expect(draw).toBeLessThan(BUDGET_MS);
   });

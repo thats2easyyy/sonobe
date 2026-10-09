@@ -330,6 +330,26 @@ describe("a text layer that didn't change", () => {
     expect(draws(() => renderer.render(blue({ width: 140, opacity: 0.5 })))).toBe(0);
   });
 
+  it("takes a small value remade with the same contents as the same, and a big or nested one as changed", () => {
+    const at = (props: Record<string, unknown>) => draws(() => renderer.render(frame([label(props)])));
+    // A patch output is a new object on every frame, even while it holds still.
+    at({ textColor: { r: 1, g: 0, b: 0, a: 1 }, shadowOffset: [2, 4] });
+    expect(at({ textColor: { r: 1, g: 0, b: 0, a: 1 }, shadowOffset: [2, 4] })).toBe(0);
+    expect(at({ textColor: { r: 1, g: 0, b: 0, a: 0.5 }, shadowOffset: [2, 4] })).toBe(1);
+    expect(writtenStyle(textEl(), "color")).toBe("rgba(255, 0, 0, 0.5)");
+    expect(at({ textColor: { r: 1, g: 0, b: 0, a: 0.5 }, shadowOffset: [2, 5] })).toBe(1);
+    expect(at({ textColor: { r: 1, g: 0, b: 0, a: 0.5 }, shadowOffset: [2, 5, 0] })).toBe(1);
+    expect(at({ textColor: { r: 1, g: 0, b: 0 }, shadowOffset: [2, 5, 0] })).toBe(1);
+    expect(at({ textColor: { r: 1, g: 0, b: 0 }, shadowOffset: [2, 5, 0] })).toBe(0);
+    // Nine entries, or anything inside anything, is drawn again without a closer look.
+    const nine = () => ({ cornerRadii: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+    at(nine());
+    expect(at(nine())).toBe(1);
+    const nested = () => ({ effects: [{ kind: "blur", params: { radius: 2 } }] });
+    at(nested());
+    expect(at(nested())).toBe(1);
+  });
+
   it("is truncated again in the middle when its width changes", () => {
     const name = { text: "abcdefghijklmnop", fontSize: 17, maxLines: 1, truncation: "middle" };
     renderer.render(frame([label(name, { width: 70 })]));

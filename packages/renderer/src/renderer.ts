@@ -108,7 +108,7 @@ const NO_PROPS: Readonly<Record<string, unknown>> = Object.freeze({});
 
 /**
  * What a static host was last drawn from. The host is skipped while all of it is the same: its
- * props by identity (the ones the transform and size don't already cover), its size, opacity,
+ * props by value (sameValue; the ones the transform and size don't already cover), its size, opacity,
  * visibility and clip, the renderer's modes, scale and pixel ratio, and `fonts`, which counts the
  * times a font finished loading, because a text's line height and middle truncation are measured.
  */
@@ -129,7 +129,28 @@ interface StyleMemo {
   cursor: boolean;
 }
 
-/** Same values by identity, ignoring props the transform and size already cover (own and inherited keys). */
+/**
+ * The same value to draw from: the same thing, or two small flat arrays or plain objects (a color, a
+ * point, four radii: at most 8 entries) holding the same things. A patch output is a new object on
+ * every frame even while it holds still, and equal values draw the same styles. Anything bigger or
+ * nested counts as changed, which only costs a redraw.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length || a.length > 8) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length > 8 || keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if ((a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key] || !Object.hasOwn(b, key)) return false;
+  return true;
+}
+
+/** Same values (sameValue), ignoring props the transform and size already cover (own and inherited keys). */
 function sameStyleProps(a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean {
   const proto = Object.getPrototypeOf(a) as object | null;
   if (proto !== null && proto !== Object.prototype && proto === Object.getPrototypeOf(b)) {
@@ -140,18 +161,18 @@ function sameStyleProps(a: Readonly<Record<string, unknown>>, b: Readonly<Record
     if (keys.length !== others.length) return false;
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i]!;
-      if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+      if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key) && !sameValue(a[key], b[key])) return false;
     }
     for (let i = 0; i < others.length; i++) {
       const key = others[i]!;
-      if (key !== keys[i] && !Object.hasOwn(a, key) && a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+      if (key !== keys[i] && !Object.hasOwn(a, key) && a[key] !== b[key] && !GEOMETRY_KEYS.has(key) && !sameValue(a[key], b[key])) return false;
     }
     return true;
   }
   let n = 0;
   for (const key in a) {
     n++;
-    if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+    if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key) && !sameValue(a[key], b[key])) return false;
   }
   for (const _key in b) n--;
   return n === 0;
