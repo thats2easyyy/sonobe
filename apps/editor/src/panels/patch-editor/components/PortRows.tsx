@@ -259,21 +259,22 @@ function PulseRing({ address }: { address: string }) {
 const isOn = (value: unknown, copy: number | null) => (copy === null ? isTruthyState(value) : pickCopy(value, copy).value === true);
 
 const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeId: string; port: PortModel; showsLive: boolean }) {
-  const { liveEnabled, ui, session, componentId } = usePatchEditor();
+  const { liveEnabled, ui, session, componentId, live: liveValues } = usePatchEditor();
   const hover = useHoverCard(nodeId, port);
   const onContextMenu = usePortMenu(nodeId, port);
   const copy = useWatchedCopy(session);
   // Zoomed far out, the value's text isn't painted (patch-editor.css, data-lod). The row then follows
   // only what still shows, whether the value is on and how wide its slot is, so it renders when one of
-  // those changes and not with every value. Zooming back in reads the value as it is by then.
+  // those changes (or its first value arrives) and not with every value. Its text is the value as it
+  // was at that render, and zooming back in reads the value as it is by then.
   const far = useUi((s) => s.farZoom);
   const address = liveEnabled && showsLive ? port.address : null;
-  const live = useLiveValue(far ? null : address);
-  const farOn = useLiveSelect(far ? address : null, (value) => far && isOn(value, copy));
-  const farReserve = useLiveSelect(far ? address : null, (value) => (far ? liveReserve(port, value) : 0));
+  const followed = useLiveValue(far ? null : address);
+  useLiveSelect(far ? address : null, (value) => (far ? `${value === undefined}|${isOn(value, copy)}|${liveReserve(port, value)}` : ""));
+  const live = far && address ? liveValues.get(address) : followed;
   const armed = useUi((s) => s.armed?.address === port.address);
   const armable = useUi((s) => (s.draggingType && s.draggingSide === "in" && s.draggingFrom !== nodeId ? dropFit(port.type, s.draggingType) : null));
-  const truthy = far ? farOn : isOn(live, copy);
+  const truthy = isOn(live, copy);
   const toggleArmed = () => {
     const label = `${session.document.getState().doc.components[componentId]?.patches[nodeId]?.name ?? nodeId} · ${port.name}`;
     ui.getState().set({ armed: armed ? null : { nodeId, handleId: port.handleId, address: port.address, type: port.type, label } });
@@ -283,12 +284,12 @@ const OutputPort = memo(function OutputPort({ nodeId, port, showsLive }: { nodeI
     event.stopPropagation();
     toggleArmed();
   };
-  const text = far ? "" : liveText(port, live, copy);
+  const text = liveText(port, live, copy);
   // The slot is as wide as the longest value its type prints, whichever loop copy is watched, and is
   // there before the first value, so the node mounts at the width it keeps and holds still while the
   // value changes (a longer one ends in "…"). It's no wider than a long row has room for, so its
   // labels stay whole.
-  const reserve = !showsLive ? 0 : far ? farReserve : liveReserve(port, live);
+  const reserve = showsLive ? liveReserve(port, live) : 0;
   const slot = reserve ? ({ "--sb-pe-live-reserve": `${reserve}ch`, ...(port.liveRoom !== undefined ? { "--sb-pe-live-room": `${port.liveRoom}px` } : {}) } as CSSProperties) : undefined;
   return (
     <div
