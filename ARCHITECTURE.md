@@ -325,12 +325,22 @@ input events (pointer/keyboard/device) ─┐
   4. layout                (flex-lite rows/columns/grid, auto/percent/grow sizing, text measure)
   5. SceneFrame emit       (nested nodes in document order, with world transforms)
   6. layer-derived outputs (Layer Info, content sizes) become readable on the NEXT frame
+  7. rest                  (two frames in a row changed nothing: the runtime is `resting`)
 ```
+
+A simulation steps every frame. A live host asks for the next frame only while the runtime isn't resting (§5.2).
 
 ### 5.2 Evaluation rules
 
 - Values flow left → right. An input has ≤1 driver, and an output fans out to many.
-- v1 evaluates every patch every frame, in topological order. This is correct and simple; add dirty tracking only when profiling demands it. Patches may declare `alwaysEvaluate` for documentation.
+- v1 evaluates every patch on every frame that runs, in topological order. This is correct and simple; add dirty tracking only when profiling demands it. Patches may declare `alwaysEvaluate` for documentation.
+- **Rest.** A prototype where nothing moves needs no frames. `rt.resting` turns true after two steps in a row that changed nothing, and live hosts (the Viewer, the web player) stop asking for frames until the runtime calls `onWake`.
+  - A step changed nothing when all of these hold: no patch called `requestNextFrame()` and no feedback loop is moving; no input arrived and no pointer is down (a held pointer's velocity decays frame by frame); nothing reached the runtime since the step before; no patch output was written with a new value, no pulse fired or ended, and no patch state was created or dropped; the scene equals the previous one (nodes, geometry, props, Text Field state, content sizes, copy counts); and no layer in it moves without the engine.
+  - Two steps, not one, and checked, not counted: what reads the previous frame (Layer Info, Convert Position, Velocity, a pulse ending, a Text's size) changes one frame after its source with no frame request, hop by hop.
+  - Layers that move without the engine keep the prototype awake while they are active: a shader that is drawn (it and the layers it's inside enabled, opacity above 0, or any shader while the scene has a Clone, which draws hidden sources), a Lottie with an animation while Play is on and Scrub is off (its playhead advances hidden or not), and a shown video with Play on and Scrub off (its Current Time is read every frame). The table is `LIVE_LAYERS` in `runtime/scene.ts`; a renderer that animates another layer type on its own adds a rule there.
+  - `onWake` fires from everything that reaches the runtime between steps: `dispatch` (input of every kind), `updateDocument` (edits, hot swaps, knob tunes and presets, device settings), `setDevice`, `setLayerOutputs` with a new value, `restart`, and `refreshScene`.
+  - Once at rest the runtime stays there, without checking again, until one of the above happens. So a patch that reads something outside the runtime must ask for the next frame on every frame where that can change: timers, animations and pending requests do, Game Controller and Soft Keyboard do wherever the host has the service they poll, Location does while its watch is open, and a `javascript` patch with `alwaysEvaluate` does in a live prototype. An output changed in place and written again reads as unchanged; write a new value.
+  - Prototypes with one of those patches, a drawn shader, or a playing Lottie or video never rest. A Lottie that has finished a one-shot play still counts as playing.
 - **Cycles.** Back-edges are allowed and read the previous frame's value (one frame of latency). Direct self-edges are rejected. `delay1` is the documented feedback primitive.
 - **Frame 0.** Evaluate with the authored values. "Previous-frame" patches (velocity, delay1, pulseOnChange, smoothValue) seed their history with the first value, so there are no startup spikes or false pulses. A back-edge has no previous frame yet, so it reads the input's default: on a back-edge `delay1` outputs one value on frame 0, even when the cycle carries a loop.
 - **Empty loops across frames.** Last frame's empty loop never erases this frame's copies, so a cycle that goes empty for a frame refills instead of staying empty for good:
@@ -343,7 +353,7 @@ input events (pointer/keyboard/device) ─┐
 - **Same-frame precedence.**
   - Switch: turnOff > turnOn > flip.
   - Counter: jump > (increase − decrease).
-- **Time.** In the real-time viewer, `dt` comes from requestAnimationFrame, capped at 64 ms. In simulation, `dt` is fixed at 1/60 s (or 1/120 s). Physics integrates at 1 ms RK4 substeps regardless.
+- **Time.** In a live host, `dt` is the time since the host's last frame, capped at 64 ms. Time keeps running while a prototype rests, hidden or not: on the step after one that ended at rest, `time` moves over the whole gap and patches see one frame of `dt` at most (1/fps), so a spring that starts on a tap doesn't jump and a script timing two taps reads the real interval. Nothing waits on time at rest, since whatever does asks for frames. `frame` counts the steps that ran. A paused prototype's time stands still. In simulation, `dt` is fixed at 1/60 s (or 1/120 s) and every frame is stepped, so results never depend on rest. Physics integrates at 1 ms RK4 substeps regardless.
 
 ### 5.3 Physics
 
@@ -388,7 +398,11 @@ rt.trace(targets, durationMs, events?)       // columnar samples + summaries
 rt.updateDocument(nextDoc)                   // hot-swap graph, keep compatible state
 rt.setDevice({ darkMode: true })             // replace the host's device overrides, from the next frame
 rt.issues()                                  // RuntimeIssue[]: code, severity, message, ids, hint?, suggestions?
+rt.needsNextFrame                            // a patch asked for the next frame, or a feedback loop is moving (simulations: `settled`)
+rt.resting                                   // nothing will change until something reaches the runtime (§5.2): a live host can stop
 ```
+
+- `RuntimeOptions.onWake` is how a resting host learns to start again: the runtime calls it whenever something outside a step may change the next frame. Hosts pass the real time since their last frame to `step(dt)`, and the runtime decides what is rest (§5.2). `trace` replays record the rested time with each step, so a copy of a live runtime that rested reaches the same state.
 
 - `RuntimeOptions.device` and `setDevice` are what the host knows about the device on top of the project's `device` settings. They outlive restarts, and traces replay with the current ones. The editor's viewer passes where it runs (`platform` "desktop", or "web" in a browser) and follows the system's appearance for Dark Mode; the web player passes the phone's (§9.2).
 

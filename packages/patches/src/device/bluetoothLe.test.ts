@@ -105,6 +105,8 @@ describe("bluetoothLe", () => {
     const h = createPatchHarness(bluetoothLePatch, { services: { platform: { bluetooth: ble.bluetooth } as never } });
     const start = h.step({ pulses: ["connect"] });
     expect(start.outputs).toMatchObject({ loading: true, connected: false, available: true });
+    // Connecting, and then notifications, arrive between frames: it asks for frames throughout.
+    expect(start.requestedNextFrame).toBe(true);
     expect(ble.pendingConnects[0]!.options).toEqual({ service: "battery_service", characteristic: "battery_level" });
     h.step({ pulses: ["connect"] });
     expect(ble.pendingConnects).toHaveLength(1);
@@ -122,7 +124,9 @@ describe("bluetoothLe", () => {
     const note = h.step();
     expect(note.outputs.value).toBe(91);
     expect(note.pulses.has("received")).toBe(true);
-    expect(h.step().pulses.has("received")).toBe(false);
+    const quiet = h.step();
+    expect(quiet.pulses.has("received")).toBe(false);
+    expect(quiet.requestedNextFrame).toBe(true);
   });
 
   it("queues Write before Read in the same frame and reports writes before connecting", async () => {

@@ -2,6 +2,7 @@
  * Soft Keyboard: the on-screen keyboard's height and slide progress. The host reports visibility
  * and measured heights; hidden keyboards use a per-device estimate, and the slide eases over
  * 0.35 s with a cubic ease out. The slide is shared by the instance, because there's one keyboard.
+ * The host's keyboard is polled, so it asks for every frame where the host has one.
  */
 
 import { EASINGS } from "@sonobe/engine";
@@ -51,8 +52,9 @@ export const softKeyboardPatch = definePatch<KeyboardState>("softKeyboard", {
     ctx.state.index = ctx.loopIndex;
     const slide = instanceStore<Slide>(ctx, () => ({ from: 0, to: 0, elapsed: KEYBOARD_SLIDE_DURATION, progress: 0, frame: -1, measured: {} }));
     let kb: SoftKeyboardSnapshot | undefined;
+    const keyboard = ctx.services.platform.softKeyboard;
     try {
-      kb = ctx.services.platform.softKeyboard?.();
+      kb = keyboard?.();
     } catch {
       kb = undefined;
     }
@@ -75,7 +77,7 @@ export const softKeyboardPatch = definePatch<KeyboardState>("softKeyboard", {
       const t = slide.elapsed / KEYBOARD_SLIDE_DURATION;
       slide.progress = slide.from + (slide.to - slide.from) * EASINGS.cubicOut(t);
     }
-    if (slide.elapsed < KEYBOARD_SLIDE_DURATION) ctx.requestNextFrame();
+    if (slide.elapsed < KEYBOARD_SLIDE_DURATION || typeof keyboard === "function") ctx.requestNextFrame();
     ctx.output("visibleHeight", height * slide.progress);
     ctx.output("height", height);
     ctx.output("progress", slide.progress);

@@ -40,7 +40,9 @@ describe("estimateKeyboardHeight", () => {
 describe("softKeyboard", () => {
   it("starts hidden with the estimated height (no keyboard service in simulation)", () => {
     const h = createPatchHarness(softKeyboardPatch);
-    expect(h.step().outputs).toEqual({ visibleHeight: 0, height: 336, progress: 0, visible: false });
+    const f = h.step();
+    expect(f.outputs).toEqual({ visibleHeight: 0, height: 336, progress: 0, visible: false });
+    expect(f.requestedNextFrame).toBe(false);
   });
 
   it("slides up over 0.35 s with a cubic ease out and uses the measured height", () => {
@@ -57,7 +59,8 @@ describe("softKeyboard", () => {
     f = h.run(10, { dt });
     expect(f.outputs.progress).toBe(1);
     expect(f.outputs.visibleHeight).toBe(300);
-    expect(f.requestedNextFrame).toBe(false);
+    // The host's keyboard is polled, so it keeps asking for frames after the slide: nothing announces a keyboard.
+    expect(f.requestedNextFrame).toBe(true);
   });
 
   it("eases back to 0 from the current progress over the full duration when hidden mid-slide", () => {

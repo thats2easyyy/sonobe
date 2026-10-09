@@ -51,7 +51,10 @@ describe("location", () => {
     h.step();
     expect(watches).toHaveLength(1);
     watches[0]!.onFix({ latitude: 51.5, longitude: -0.12, accuracy: 25 });
-    expect(h.step().outputs).toEqual({ latitude: 51.5, longitude: -0.12, name: "51.5000° N, 0.1200° W", available: true, accuracy: 25, loading: false, errorMessage: "" });
+    const fixed = h.step();
+    expect(fixed.outputs).toEqual({ latitude: 51.5, longitude: -0.12, name: "51.5000° N, 0.1200° W", available: true, accuracy: 25, loading: false, errorMessage: "" });
+    // Later readings arrive between frames, so it asks for frames for as long as the watch is open.
+    expect(fixed.requestedNextFrame).toBe(true);
     watches[0]!.onFix({ latitude: Number.NaN, longitude: 3, accuracy: 1 });
     expect(h.step().outputs.latitude).toBe(51.5);
     watches[0]!.onError("Location permission was denied.");
@@ -62,7 +65,9 @@ describe("location", () => {
     const { watches, geolocation } = fakeGeo();
     const h = createPatchHarness(locationPatch, { services: { platform: { geolocation } as never } });
     h.step();
-    expect(h.step({ inputs: { override: "paris" } }).outputs.name).toBe("Paris");
+    const paris = h.step({ inputs: { override: "paris" } });
+    expect(paris.outputs.name).toBe("Paris");
+    expect(paris.requestedNextFrame).toBe(false);
     expect(watches[0]!.stopped).toBe(true);
     watches[0]!.onFix({ latitude: 1, longitude: 1, accuracy: 1 });
     const back = h.step({ inputs: { override: "current" } });

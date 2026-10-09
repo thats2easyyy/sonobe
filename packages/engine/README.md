@@ -35,7 +35,7 @@ rt.refreshScene();                          // re-layout the edited document wit
 |---|---|
 | `frame`, `time` | The last produced frame and its time in seconds. Before the first step (and after a restart) `frame` is `-1` and `time` is `0`. |
 | `dispatch(events)` | Queues input for the next step. |
-| `step(dt?)` | Advances one frame and returns the scene. Frame 0 always has `dt = 0`. Deterministic runtimes ignore `dt` and use `1 / fps`; live runtimes cap it at 64 ms. |
+| `step(dt?)` | Advances one frame and returns the scene. Frame 0 always has `dt = 0`. Deterministic runtimes ignore `dt` and use `1 / fps`; live runtimes cap it at 64 ms. After a step that ended at rest, a live runtime moves `time` over the whole `dt` and gives patches one frame of it at most, so time keeps running while a host rests. |
 | `scene()` | The last produced frame, stepping once if there is none. |
 | `getValue(address)` | Reads a value; see [Addressing values](#addressing-values). Loops give item 0 unless the address ends in `#n`; plain values broadcast to any `#n`. |
 | `getRawValue(address)` | Like `getValue`, but returns whole Loops. |
@@ -51,11 +51,12 @@ rt.refreshScene();                          // re-layout the edited document wit
 | `patchTimings()` | Average evaluate time per patch (all instances and loop indices) over the last ~1 s of frames, slowest first: `{ patchId, componentPath, ms }`. Empty while profiling is off. |
 | `setProfiling(on)` | Turns timing on or off (off discards collected timings). `options.profile` turns it on at creation. When off, evaluation does no timing work. |
 | `needsNextFrame` | Something is still moving: a patch called `requestNextFrame()` last frame, or a feedback loop's back-edge would read a different value next frame. |
+| `resting` | Nothing will change until something reaches the runtime, so a live host can stop asking for frames. True after two steps in a row that changed nothing: no frame request, no input and no pointer down, nothing from outside (see `onWake`), no output written with a new value, the same scene, and no layer in it that moves without the engine (a drawn shader, a Lottie or video that plays). False before the first step and after a restart. Simulations don't read it. |
 | `services` | The `RuntimeServices` handed to patches. |
 | `document`, `deterministic`, `fps` | The current document and mode. |
 | `dispose()` | Calls every `dispose` and stops the runtime. |
 
-Options (`RuntimeOptions`): `registry` (an `EngineRegistry`; build one with `createEngineRegistry(definitions)`), `textMeasurer` (default: approximate metrics), `seed` (default 1), `fps` (default `project.fps` or 60), `deterministic`, `platform` (network, audio, speech... passed through to patches), `resolveAssetUrl`, `mediaInfo` (host media knowledge, consulted first by `services.mediaInfo`), `onLog(level, args, source?)`, `device` overrides, and `profile`.
+Options (`RuntimeOptions`): `registry` (an `EngineRegistry`; build one with `createEngineRegistry(definitions)`), `textMeasurer` (default: approximate metrics), `seed` (default 1), `fps` (default `project.fps` or 60), `deterministic`, `platform` (network, audio, speech... passed through to patches), `resolveAssetUrl`, `mediaInfo` (host media knowledge, consulted first by `services.mediaInfo`), `onLog(level, args, source?)`, `device` overrides, `profile`, and `onWake()`: called when something outside a step may change the next frame (`dispatch`, `updateDocument`, `setDevice`, `setLayerOutputs` with a new value, `restart`, `refreshScene`), so a host that stopped asking for frames while the runtime was `resting` starts again.
 
 `onLog`'s `source` is `{ patchId, componentPath }` for lines logged while a patch evaluates (`componentPath` is the instance path, e.g. `"main/card#2"`), and undefined otherwise (async callbacks, dispose).
 
@@ -251,7 +252,7 @@ Using `PatchContext`:
 - `ctx.dt` and `ctx.time` are seconds (`dt` is 0 on frame 0). `ctx.frame` counts from 0 after each restart. `ctx.loopIndex` and `ctx.loopCount` describe per-index evaluation; `ctx.componentPath` identifies the instance.
 - `ctx.typeParam`, `ctx.inputCount`, `ctx.muted`, and `ctx.node` (settings, name) come from the document.
 - `ctx.warnOnce(key, message)` logs a warning at most once per patch instance and key until the prototype restarts (a warning that only fires on frame 0 repeats after each restart). Use `ctx.services.issue(code, severity, message)` for coded problems.
-- Call `ctx.requestNextFrame()` while animating or waiting.
+- Call `ctx.requestNextFrame()` on every frame where the patch is animating, waiting, or polling something no input event announces. A live prototype rests while nothing changes, and a patch that waits without asking freezes with it.
 - Use `ctx.services` for randomness, clocks, pointers, layer info, device, text measurement, scripts, logging, issues, restart, assets, and platform APIs. Never use `Math.random`, `Date.now`, or DOM APIs.
 - Never call `ctx.output` from a callback: store async results in `state` and output them on a later `evaluate`.
 - Exceptions are caught and reported as `patch_threw`; outputs keep their last values.
@@ -317,4 +318,4 @@ expect(rt.getValue("@card.scale")).toBe(1.2);
 - `gestures/`: `PointerTracker` (taps, drags, velocity from event timeStamps, hover while held, pressure, buttons, cancelled presses, `pointers(target)`), `KeyboardTracker`, `WheelTracker`, `TextInputTracker`, and `InputTracker` (all together).
 - `runtime/`: `createRuntime`, `compileDocument`, `createEngineRegistry`, loop helpers (`makeLoop`, `isLoop`, `loopItemAt`...), `valuesEqual`, `zeroValue`, `portDefault`, `coerceValue`, `mulberry32`, `summarizeSeries`.
 
-`SonobeRuntime` adds `document`, `deterministic`, `fps`, `needsNextFrame`, `services`, `setProfiling`, and a non-optional `patchTimings` to the contract `Runtime`. `PointerTracker.snapshot(target, worldInverse, exact)` and `pointers(target, exact)` match exact scene keys, so a root layer `button` never matches a component's inner `button`.
+`SonobeRuntime` adds `document`, `deterministic`, `fps`, `needsNextFrame`, `resting`, `services`, `setProfiling`, `setDevice`, and a non-optional `patchTimings` to the contract `Runtime`. `PointerTracker.snapshot(target, worldInverse, exact)` and `pointers(target, exact)` match exact scene keys, so a root layer `button` never matches a component's inner `button`.

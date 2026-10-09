@@ -61,7 +61,7 @@ import { beginInputs, createRecord, disposeRecord, evaluateRecord, type EvalEnv,
 import type { Binding, CLayer, CNode, CProp, InstancePath, Scope } from "./graph.ts";
 import { isLoop, makeLoop, MAX_LOOP_LENGTH } from "./loop.ts";
 import { mulberry32 } from "./random.ts";
-import { buildScene, repeatCount, type SceneBuild } from "./scene.ts";
+import { buildScene, repeatCount, sameBuild, sameCounts, type SceneBuild } from "./scene.ts";
 import { summarizeSeries } from "./trace.ts";
 import { coerceValue, truthy, valuesEqual } from "./values.ts";
 
@@ -69,6 +69,8 @@ import { coerceValue, truthy, valuesEqual } from "./values.ts";
 export const DETERMINISTIC_EPOCH_MS = 1_767_225_600_000;
 /** Live frames are capped at this many seconds. */
 export const MAX_LIVE_DT = 0.064;
+/** Steps in a row that changed nothing before a runtime is at rest (SonobeRuntime.resting). */
+export const REST_AFTER_STILL_STEPS = 2;
 /** Frames of input history kept since the last restart so trace() can clone the live state. */
 export const MAX_REPLAY_FRAMES = 7_200;
 /** Runtime issues kept (oldest dropped first). */
@@ -103,6 +105,22 @@ export interface SonobeRuntime extends Runtime {
   readonly fps: number;
   /** Something is still moving: a patch called requestNextFrame() during the last step, or a feedback loop's back-edge would read a different value next step. */
   readonly needsNextFrame: boolean;
+  /**
+   * Nothing will change until something reaches the runtime from outside, so a live host can stop
+   * asking for frames (ARCHITECTURE.md §5.2). True after REST_AFTER_STILL_STEPS steps in a row that
+   * changed nothing. A step changed nothing when no patch asked for the next frame and no feedback
+   * loop is moving, no input arrived and no pointer is down, nothing touched the runtime since the
+   * step before (see `onWake`), no patch output was written with a new value, the scene equals the
+   * previous one, and no layer in it moves without the engine (a drawn shader, a Lottie or video
+   * that plays). It stays true, without checking again, until one of those happens;
+   * RuntimeOptions.onWake tells the host when it does between steps. False before the first step and
+   * after a restart.
+   *
+   * A patch that reads something outside the runtime (a platform service, the clock) must call
+   * requestNextFrame() while that can change, and write outputs it changed as new values: an array
+   * changed in place and written again reads as the same value.
+   */
+  readonly resting: boolean;
   readonly services: RuntimeServices;
   /** Turn per-patch evaluate timing on or off (off discards what was collected). */
   setProfiling(on: boolean): void;
@@ -130,7 +148,8 @@ export function createRuntime(doc: SonobeDocument, options: RuntimeOptions): Son
 }
 
 type ReplayEntry =
-  | { kind: "step"; dt: number; events: InputEvent[] }
+  /** `rested`: seconds the runtime was at rest before this step, which its `time` skips over. */
+  | { kind: "step"; dt: number; rested?: number; events: InputEvent[] }
   | { kind: "update"; doc: SonobeDocument }
   | { kind: "refresh" }
   | { kind: "layerOutputs"; key: string; values: Record<string, Value> };
@@ -196,12 +215,6 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-function sameCounts(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [key, n] of a) if (b.get(key) !== n) return false;
-  return true;
-}
-
 function mediaName(url: string): string {
   const path = url.split(/[?#]/)[0] ?? "";
   const last = path.slice(path.lastIndexOf("/") + 1);
@@ -218,6 +231,7 @@ class RuntimeImpl implements SonobeRuntime {
   document: SonobeDocument;
   readonly deterministic: boolean;
   needsNextFrame = false;
+  resting = false;
   readonly services: RuntimeServices;
 
   private readonly options: RuntimeOptions;
@@ -248,6 +262,12 @@ class RuntimeImpl implements SonobeRuntime {
   private motion: DeviceMotionSample | undefined;
   private timeZone: string | undefined;
   private requested = false;
+  /** Steps in a row that changed nothing (see `resting`). */
+  private still = 0;
+  /** Something reached the runtime since the last step (see `touch`); a new or restarted runtime starts touched. */
+  private touched = true;
+  /** The last step ended at rest, so the time before the next one is time rested, not a slow frame. */
+  private rested = false;
   private tick = 0;
   private log: ReplayEntry[] = [];
   private logSteps = 0;
@@ -331,15 +351,23 @@ class RuntimeImpl implements SonobeRuntime {
   // ---- Runtime API ------------------------------------------------------------
 
   dispatch(events: InputEvent[]): void {
-    if (this.disposed) return;
+    if (this.disposed || events.length === 0) return;
     for (const event of events) this.queue.push(event);
+    this.touch();
   }
 
   step(dt?: number): SceneFrame {
     if (this.disposed) return this.produced?.scene ?? this.emptyScene();
     if (this.restartRequested) this.performRestart();
-    const h = this.frame < 0 ? 0 : this.deterministic ? 1 / this.fps : sanitizeDt(dt, this.fps);
-    return this.advance(h);
+    let h = this.frame < 0 ? 0 : this.deterministic ? 1 / this.fps : sanitizeDt(dt, this.fps);
+    // Time keeps running while a live prototype rests: the step after one that ended at rest moves
+    // `time` over the whole gap and advances one frame at most, so nothing that starts on it jumps.
+    let gap = 0;
+    if (this.rested && !this.deterministic && this.frame >= 0 && typeof dt === "number" && Number.isFinite(dt) && dt > 1 / this.fps) {
+      h = 1 / this.fps;
+      gap = dt - h;
+    }
+    return this.advance(h, gap);
   }
 
   scene(): SceneFrame {
@@ -369,6 +397,7 @@ class RuntimeImpl implements SonobeRuntime {
     this.clearEmptyWarnings();
     this.clearMismatches();
     // A scrub, a canvas drag or a small literal write only changes constant values: patch them in place.
+    this.touch();
     if (updateLiterals(this.graph, doc)) {
       this.record({ kind: "update", doc });
       return;
@@ -401,10 +430,13 @@ class RuntimeImpl implements SonobeRuntime {
     if (this.produced) this.produced = build;
     // The next step hit-tests against this layout, so trace replays must refresh at the same point.
     this.record({ kind: "refresh" });
+    this.touch();
   }
 
   restart(): void {
-    if (!this.disposed) this.performRestart();
+    if (this.disposed) return;
+    this.performRestart();
+    this.touch();
   }
 
   hitTest(x: number, y: number): { key: string; layerId: Id }[] {
@@ -415,8 +447,12 @@ class RuntimeImpl implements SonobeRuntime {
 
   setLayerOutputs(key: string, values: Record<string, Value>): void {
     if (this.disposed) return;
-    this.layerOutputs.set(key, { ...this.layerOutputs.get(key), ...values });
+    const known = this.layerOutputs.get(key);
+    let changed = false;
+    for (const k in values) if (!known || !valuesEqual(known[k], values[k])) changed = true;
+    this.layerOutputs.set(key, { ...known, ...values });
     this.record({ kind: "layerOutputs", key, values: { ...values } });
+    if (changed) this.touch();
   }
 
   issues(): RuntimeIssue[] {
@@ -424,7 +460,10 @@ class RuntimeImpl implements SonobeRuntime {
   }
 
   setDevice(device: Partial<DeviceInfo>): void {
+    if (this.disposed) return;
+    const changed = !valuesEqual(this.device, device);
     this.device = { ...device };
+    if (changed) this.touch();
   }
 
   setProfiling(on: boolean): void {
@@ -455,14 +494,14 @@ class RuntimeImpl implements SonobeRuntime {
   trace(targets: readonly string[], durationMs: number, events: readonly TraceInput[] = []): TraceResult {
     // Past the replay log there's no way to rebuild the current state; a fresh copy would trace a restarted prototype.
     if (this.logTruncated) throw new TraceUnavailableError(this.frame);
-    const options: RuntimeOptions = { ...this.options, device: this.device, deterministic: true, platform: {}, onLog: undefined, profile: false };
+    const options: RuntimeOptions = { ...this.options, device: this.device, deterministic: true, platform: {}, onLog: undefined, onWake: undefined, profile: false };
     const clone = new RuntimeImpl(this.logBase, options);
     for (const [key, values] of this.logBaseOutputs) clone.layerOutputs.set(key, { ...values });
     for (const entry of this.log) {
       if (entry.kind === "step") {
         if (clone.restartRequested) clone.performRestart();
         clone.queue = [...entry.events];
-        clone.advance(entry.dt);
+        clone.advance(entry.dt, entry.rested ?? 0);
       } else if (entry.kind === "update") clone.updateDocument(entry.doc);
       else if (entry.kind === "refresh") clone.refreshScene();
       else clone.setLayerOutputs(entry.key, entry.values);
@@ -497,14 +536,30 @@ class RuntimeImpl implements SonobeRuntime {
 
   // ---- frame loop -----------------------------------------------------------------
 
-  private advance(h: number): SceneFrame {
+  /**
+   * Something outside a step may change the next frame: the prototype isn't at rest, and a host
+   * that stopped asking for frames starts again (RuntimeOptions.onWake). Called by everything that
+   * reaches the runtime between steps: `dispatch` (input of every kind), `updateDocument` (edits,
+   * hot swaps, knob tunes and presets, device settings), `setDevice`, `setLayerOutputs` with a new
+   * value, `restart`, and `refreshScene`.
+   */
+  private touch(): void {
+    this.touched = true;
+    this.still = 0;
+    this.resting = false;
+    this.options.onWake?.();
+  }
+
+  private advance(h: number, rested = 0): SceneFrame {
     const events = this.queue;
     this.queue = [];
-    this.record({ kind: "step", dt: h, events });
+    this.record(rested > 0 ? { kind: "step", dt: h, rested, events } : { kind: "step", dt: h, events });
     const snapshot = this.ensureSnapshot();
     this.tick++;
     this.frame += 1;
-    this.time += h;
+    this.time += rested + h;
+    // Pointer times (press starts, long presses) are on the same clock.
+    this.input.pointer.time += rested;
     for (const event of events) {
       if (event.kind === "orientation") {
         this.orientation = event.orientation;
@@ -522,6 +577,7 @@ class RuntimeImpl implements SonobeRuntime {
     }
     this.input.update(events, (x, y) => hitTestScene(snapshot.scene.roots, x, y), h);
     this.requested = false;
+    this.env.changed = false;
     this.env.frame = this.frame;
     this.env.time = this.time;
     this.env.dt = h;
@@ -539,8 +595,30 @@ class RuntimeImpl implements SonobeRuntime {
     this.snapshot = build;
     this.input.endFrame();
     this.needsNextFrame = this.requested;
+    this.settle(snapshot, build, events.length > 0);
     if (this.profiling) this.endTimingFrame();
     return build.scene;
+  }
+
+  /**
+   * Count the step that just ran toward rest (see `resting`). The cheap signs of movement come
+   * first; outputs and the scene are compared only on a step that had none, and never again once
+   * the runtime is at rest.
+   */
+  private settle(before: SceneBuild, build: SceneBuild, hadInput: boolean): void {
+    // A held pointer's velocity decays frame by frame with no event, and a release reports it.
+    const quiet = !this.requested && !hadInput && !this.touched && !this.restartRequested && !build.live && this.input.pointer.pressedCount === 0;
+    this.touched = false;
+    if (!quiet) {
+      this.still = 0;
+      this.resting = false;
+    } else if (!this.resting) {
+      this.still = this.env.watch && !this.env.changed && sameBuild(before, build) ? this.still + 1 : 0;
+      this.resting = this.still >= REST_AFTER_STILL_STEPS;
+    }
+    this.rested = this.resting;
+    // The next step can count only when its writes are watched; after a request it won't count anyway.
+    this.env.watch = !this.requested && !this.resting;
   }
 
   private ensureSnapshot(): SceneBuild {
@@ -553,7 +631,7 @@ class RuntimeImpl implements SonobeRuntime {
     const root = this.graph.root;
     const rootPath = this.rootPath;
     if (!root || !rootPath) {
-      return { scene: { frame: this.frame, time: this.time, size, background: this.background(), roots: [] }, nodes: new Map(), info: new Map(), counts: new Map() };
+      return { scene: { frame: this.frame, time: this.time, size, background: this.background(), roots: [] }, nodes: new Map(), info: new Map(), counts: new Map(), live: false };
     }
     this.currentPath = null;
     return buildScene({
@@ -687,6 +765,7 @@ class RuntimeImpl implements SonobeRuntime {
     if (!record) {
       record = createRecord(node, path.stateKey);
       node.records.set(path.stateKey, record);
+      this.env.changed = true;
     }
     const cur = beginInputs(record);
     for (let i = 0; i < node.bindings.length; i++) cur[i] = this.readInput(node, i, path);
@@ -781,6 +860,7 @@ class RuntimeImpl implements SonobeRuntime {
         if (record.frame === this.frame) continue;
         disposeRecord(node, record, this.env);
         node.records.delete(key);
+        this.env.changed = true;
       }
     }
   }
@@ -811,6 +891,11 @@ class RuntimeImpl implements SonobeRuntime {
     this.restartRequested = false;
     this.restarts++;
     this.needsNextFrame = false;
+    this.still = 0;
+    this.resting = false;
+    this.rested = false;
+    this.touched = true;
+    this.env.watch = false;
     this.tick++;
     this.log = [];
     this.logSteps = 0;

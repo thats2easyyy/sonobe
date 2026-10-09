@@ -103,6 +103,25 @@ export function evaluate(patch) { n++; patch.output("frames", n); if (n < 3) pat
     expect(r.frames.map((f) => f.requestedNextFrame)).toEqual([true, true, false, false, false]);
   });
 
+  it("an Always Evaluate script asks for every frame while it runs live, and a simulation's settled keeps its meaning", () => {
+    const source = `export const outputs = [{ key: "n", type: "number" }];
+export const alwaysEvaluate = true;
+let n = 0;
+export function evaluate(patch) { patch.output("n", n < 2 ? ++n : n); }`;
+    const registry = createMockRegistry([javascript]);
+    const live = createTestRuntime(runtimeDoc(source), registry, { deterministic: false, platform: {} });
+    runFrames(live, 8);
+    expect(live.needsNextFrame).toBe(true);
+    expect(live.resting).toBe(false);
+    const sim = createTestRuntime(runtimeDoc(source), registry);
+    runFrames(sim, 8);
+    expect(sim.needsNextFrame).toBe(false);
+    // Without Always Evaluate, the script runs when an input changes, and the prototype rests in between.
+    const quiet = createTestRuntime(runtimeDoc(source.replace("export const alwaysEvaluate = true;\n", "")), registry, { deterministic: false, platform: {} });
+    runFrames(quiet, 8);
+    expect(quiet.resting).toBe(true);
+  });
+
   it("gives each loop index its own module scope", () => {
     const r = run(
       `export const inputs = [{ key: "step", type: "number" }];
