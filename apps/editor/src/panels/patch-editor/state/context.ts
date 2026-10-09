@@ -59,6 +59,17 @@ export function useLiveValue(address: string | null | undefined): unknown {
   return useSyncExternalStore(subscribe, get, get);
 }
 
+/**
+ * What a view shows of the live value at an address, as a string, number or boolean that `select`
+ * works out. The view renders again when that changes, not with every value.
+ */
+export function useLiveSelect<T extends string | number | boolean | undefined>(address: string | null | undefined, select: (value: unknown) => T): T {
+  const { live } = usePatchEditor();
+  const subscribe = useCallback((cb: () => void) => (address ? live.subscribe(address, cb) : noop()), [live, address]);
+  const get = () => select(address ? live.get(address) : undefined);
+  return useSyncExternalStore(subscribe, get, get);
+}
+
 /** How many times a pulse output has fired (changes pop the output's pulse ring). */
 export function usePulseCount(address: string | null | undefined): number {
   const { live } = usePatchEditor();

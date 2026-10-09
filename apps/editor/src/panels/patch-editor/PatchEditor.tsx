@@ -578,6 +578,10 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   // reach React Flow before the row's handle is measured (error #008). Hold it back and re-measure the node.
   const heldKey = useFlowStore(useCallback((s: ReactFlowState) => missingHandlesKey(model.edges, s.nodeLookup), [model.edges]));
   const farZoom = useFlowStore(useCallback((s: ReactFlowState) => isFarZoom(s.transform[2]), []));
+  // Output rows read it from the ui store: they follow less of their live value while its text isn't painted.
+  useLayoutEffect(() => {
+    if (ui.getState().farZoom !== farZoom) ui.getState().set({ farZoom });
+  }, [ui, farZoom]);
   const held = useMemo(() => parseMissingHandlesKey(heldKey), [heldKey]);
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => {
