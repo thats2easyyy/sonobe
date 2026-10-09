@@ -501,11 +501,14 @@ function main(): void {
     }));
   };
 
-  /** electron-updater, loaded the first time it's needed: never at launch, and never in a build that's off. */
+  /**
+   * electron-updater, loaded the first time it's needed: never at launch, and never in a build that's off. It lives in its own
+   * bundle, dist/updater.cjs (scripts/build.mjs), so main.cjs doesn't carry its 600 KB through every launch.
+   */
   const loadUpdateDriver = (): Promise<UpdateDriver> => {
     if (testUpdateDriver) return Promise.resolve(testUpdateDriver);
-    return (updateDriver ??= import("./updater-driver.ts")
-      .then(({ loadUpdaterDriver }) => loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) }))
+    return (updateDriver ??= Promise.resolve()
+      .then(() => (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) }))
       .catch((err: unknown) => {
         updateDriver = null;
         throw err;

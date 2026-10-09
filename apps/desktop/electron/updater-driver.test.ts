@@ -169,14 +169,16 @@ describe("electron-updater driver", () => {
     expect(seen).toHaveLength(1);
   });
 
-  it("is the only file that loads electron-updater, and loads it on demand", () => {
+  it("is the only file that loads electron-updater, in a bundle of its own that main requires on demand", () => {
     const source = readFileSync(new URL("./updater-driver.ts", import.meta.url), "utf8");
     expect(source).toContain('import("electron-updater")');
     expect(source).not.toMatch(/^import .* from "electron(-updater)?";$/m);
-    // main only takes a type from this file; the code arrives with import("./updater-driver.ts").
+    // main only takes types from this file, so main.cjs carries none of it: the code is dist/updater.cjs.
     const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
     expect(main).not.toContain('"electron-updater"');
     expect(main.match(/^import (type )?.* from "\.\/updater-driver\.ts";$/gm)).toEqual(['import type { NativeUpdaterLike } from "./updater-driver.ts";']);
-    expect(main).toContain('import("./updater-driver.ts")');
+    expect(main.replaceAll('typeof import("./updater-driver.ts")', "")).not.toContain('import("./updater-driver.ts")');
+    expect(main).toContain('require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")');
+    expect(readFileSync(new URL("../scripts/build.mjs", import.meta.url), "utf8")).toContain('entryPoints: ["electron/updater-driver.ts"], outfile: "dist/updater.cjs"');
   });
 });

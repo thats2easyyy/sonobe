@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Bundles the Electron main process, the preload, the phone/pop-out web player, the scene renderer
- * for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides and the
+ * Bundles the Electron main process, the preload, the updater, the phone/pop-out web player, the scene
+ * renderer for simulation screenshots, and the `sonobe` CLI with esbuild, copies the MCP agent guides and the
  * examples' READMEs and tests next to main.cjs, and on macOS compiles the SF Symbols helper into
  * dist/bin (scripts/sfsymbol.ts).
  *
@@ -91,6 +91,9 @@ const targets = [
     define: { ...common.define, "import.meta.url": "__sonobe_import_meta_url" },
   },
   { ...common, entryPoints: ["electron/preload.ts"], outfile: "dist/preload.cjs" },
+  // electron-updater and its driver, in a file of their own: main requires it when the first update check starts,
+  // so launch never reads or compiles it (inside main.cjs it cost 8 ms of every launch).
+  { ...common, entryPoints: ["electron/updater-driver.ts"], outfile: "dist/updater.cjs" },
   // The phone player: no patch docs, and lottie-web in its own file that loads on first use.
   { ...browserPage, entryPoints: ["player/player.ts"], outfile: "dist/player/player.js", plugins: [leanCatalogPlugin(), externalLottiePlugin()] },
   { ...browserPage, entryPoints: ["player/lottie.ts"], outfile: "dist/player/lottie.js" },

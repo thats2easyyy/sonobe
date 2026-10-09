@@ -129,7 +129,7 @@ try {
   if (mac) for (const file of ["icon.icns", "licenses/LICENSE.electron.txt", "licenses/LICENSES.chromium.html"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   const { listPackage, extractFile } = await import("@electron/asar");
   const asarFiles = listPackage(path.join(resources, "app.asar")).map((f) => f.replaceAll("\\", "/"));
-  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
+  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   const under = (dir) => readdirSync(path.join(resources, dir), { recursive: true }).map((f) => String(f).replaceAll("\\", "/"));
   const editorMaps = under("editor").filter((f) => f.endsWith(".map"));
@@ -140,7 +140,7 @@ try {
   assert(cliExtras.length === 0, "no node_modules or native modules under Resources/cli", cliExtras.slice(0, 5));
   const notices = readFileSync(path.join(resources, "licenses", "THIRD-PARTY-NOTICES.txt"), "utf8");
   // ajv is in none of Sonobe's package.json files: the MCP SDK carries it inside its own published files.
-  // electron-updater is bundled into main.cjs, so its notice is also the proof that the packaged app carries the updater.
+  // electron-updater is bundled into dist/updater.cjs, and its notice comes from that bundle's own file list.
   for (const name of ["react", "elkjs", "zod", "ws", "ajv", "electron-updater"]) assert(new RegExp(`^${name} \\d.*\\nLicense: \\S`, "m").test(notices), `licenses/THIRD-PARTY-NOTICES.txt lists ${name} with its license`);
   const unlicensed = [...notices.matchAll(/^(\S+).*\nLicense: UNKNOWN$/gm)].map((match) => match[1]);
   assert(unlicensed.length === 0, "every package in licenses/THIRD-PARTY-NOTICES.txt has a license (scripts/build.mjs warns about one it couldn't read)", unlicensed);

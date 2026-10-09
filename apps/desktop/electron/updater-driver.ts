@@ -1,9 +1,9 @@
 /**
  * The updater behind updates.ts: electron-updater, and on macOS Electron's own autoUpdater (Squirrel),
- * which does the installing. loadUpdaterDriver is the only place that loads electron-updater, and main
- * reaches this file with a dynamic import when the first check starts, so launch never evaluates it.
- * createElectronUpdaterDriver takes both updaters as arguments, so its rules are unit tested with fakes.
- * Nothing here imports Electron.
+ * which does the installing. loadUpdaterDriver is the only place that loads electron-updater. This
+ * file is its own bundle, dist/updater.cjs (scripts/build.mjs), which main requires when the first
+ * check starts, so launch never reads it. createElectronUpdaterDriver takes both updaters as
+ * arguments, so its rules are unit tested with fakes. Nothing here imports Electron.
  */
 
 import type { UpdateDriver, UpdateMode } from "./updates.ts";
