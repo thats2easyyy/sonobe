@@ -23,7 +23,6 @@ export const CREDITS: readonly Credit[] = [
   { name: "Zod", role: "Validating project files", license: "MIT", url: "https://zod.dev" },
   { name: "Zustand", role: "Editor state", license: "MIT", url: "https://github.com/pmndrs/zustand" },
   { name: "Lucide", role: "Icons", license: "ISC", url: "https://lucide.dev" },
-  { name: "Motion", role: "Interface animation", license: "MIT", url: "https://motion.dev" },
   { name: "node-qrcode", role: "Preview on Phone QR codes", license: "MIT", url: "https://github.com/soldair/node-qrcode" },
   { name: "Electron", role: "The desktop app", license: "MIT", url: "https://www.electronjs.org" },
   { name: "Model Context Protocol SDK", role: "Connecting Claude over MCP", license: "MIT", url: "https://modelcontextprotocol.io" },

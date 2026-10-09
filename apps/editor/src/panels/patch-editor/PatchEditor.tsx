@@ -29,12 +29,15 @@ import {
   type NodeTypes,
   type OnConnectStartParams,
   type OnError,
+  type OnMove,
+  type OnNodeDrag,
   type ReactFlowInstance,
   type ReactFlowState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LARGE_GRAPH_NODES, useGestureDocument } from "./state/gestureDocument.ts";
+import { graphDocumentSelector, sameGraph } from "./state/graphDocument.ts";
 import { useStore } from "zustand";
 import { rectOfElement } from "../../state/bounds.ts";
 import type { GraphGeometryNode } from "../../state/graphGeometry.ts";
@@ -296,7 +299,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, []);
 
   // -- Document → graph ------------------------------------------------------
-  const liveDoc = useStore(session.document, (s) => s.doc);
+  // The document as the graph reads it: for an edit the graph can't show (a layer moved, a color changed)
+  // this is the document it already had, so this component doesn't render (state/graphDocument.ts).
+  const liveDoc = useStore(session.document, useMemo(() => graphDocumentSelector(componentId, registry), [componentId, registry]));
   // While a gesture is open (an inspector scrub, a canvas drag), the graph follows at low priority, or
   // for a large graph a few times a second, so the pointer, the inspector and the viewer never wait for it.
   const gestureOpen = useStore(session.document, (s) => s.gesture !== null);
@@ -576,6 +581,10 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   // reach React Flow before the row's handle is measured (error #008). Hold it back and re-measure the node.
   const heldKey = useFlowStore(useCallback((s: ReactFlowState) => missingHandlesKey(model.edges, s.nodeLookup), [model.edges]));
   const farZoom = useFlowStore(useCallback((s: ReactFlowState) => isFarZoom(s.transform[2]), []));
+  // Output rows read it from the ui store: they follow less of their live value while its text isn't painted.
+  useLayoutEffect(() => {
+    if (ui.getState().farZoom !== farZoom) ui.getState().set({ farZoom });
+  }, [ui, farZoom]);
   const held = useMemo(() => parseMissingHandlesKey(heldKey), [heldKey]);
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => {
@@ -583,11 +592,20 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, [held, updateNodeInternals]);
 
   // Cables at either end of a selected patch or layer light up (data.related). An edge keeps its object
-  // while its flags hold, so a selection change re-renders only the cables it touches.
+  // while its flags hold, so a selection change re-renders only the cables it touches, and the list
+  // keeps its identity while no cable changed, so React Flow doesn't rebuild its lookups for a
+  // selection no cable touches.
   const focusNodes = useMemo(() => new Set<string>([...selectedPatches, ...selectedLayers.map(layerNodeId)]), [selectedPatches, selectedLayers]);
   const flaggedEdges = useRef(new Map<string, FlaggedEdge>());
   const labelledEdges = useRef(new Map<string, LabelledEdge>());
+  const shownEdges = useRef<CableFlowEdge[]>([]);
   const edges = useMemo(() => {
+    const keep = (next: CableFlowEdge[]) => {
+      const shown = shownEdges.current;
+      if (next.length === shown.length && next.every((e, i) => e === shown[i])) return shown;
+      shownEdges.current = next;
+      return next;
+    };
     const hidden = held.missing.length ? new Set(held.missing) : null;
     const titles = nodeTitles(model);
     const kept = new Map<string, LabelledEdge>();
@@ -604,7 +622,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     const picked = selectedEdges.length ? new Set(selectedEdges) : null;
     if (!picked && focusNodes.size === 0) {
       flaggedEdges.current.clear();
-      return ready;
+      return keep(ready);
     }
     const flagged = new Map<string, FlaggedEdge>();
     const next = ready.map((e) => {
@@ -621,7 +639,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       return edge;
     });
     flaggedEdges.current = flagged;
-    return next;
+    return keep(next);
   }, [model, selectedEdges, focusNodes, held]);
 
   const onFlowError = useCallback<OnError>((code, message) => {
@@ -660,9 +678,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           nodes.push([node.id, r.x, r.y, r.width, r.height, node.measured?.width && node.measured.height ? 1 : 0]);
         }
         // Mid-gesture the graph can lag the document; -1 tells the caller these boxes are from an older revision.
-        return { component: componentId, shownComponent: componentId, revision: drawnDocRef.current === s.doc ? s.revision : -1, nodes };
+        return { component: componentId, shownComponent: componentId, revision: sameGraph(drawnDocRef.current, s.doc, componentId, registry) ? s.revision : -1, nodes };
       }),
-    [session, componentId],
+    [session, componentId, registry],
   );
 
   const syncSelection = useCallback(
@@ -919,6 +937,27 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
 
   // -- Connecting -----------------------------------------------------------
   const originRef = useRef<(HandleRef & { side: PortSide }) | null>(null);
+
+  // React Flow keeps its handlers in its store and writes each one that's a new function, and every
+  // write runs every node's and cable's selectors. So what it's handed keeps its identity between renders.
+  const onNodeDragStart = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDragStart(event, dragged), [onDragStart]);
+  const onNodeDrag = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDrag(event, dragged), [onDrag]);
+  const onNodeDragStop = useCallback<OnNodeDrag<FlowNode>>((event, _node, dragged) => onDragStop(event, dragged), [onDragStop]);
+  const onPaneClick = useCallback(() => ui.getState().set({ armed: null }), [ui]);
+  const onMove = useCallback<OnMove>(
+    (_event, viewport) => {
+      if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
+      updateCrop(viewport);
+    },
+    [ui, updateCrop],
+  );
+  const onMoveEnd = useCallback<OnMove>(
+    (event, viewport) => {
+      session.selection.getState().setPatchViewport(componentId, viewport);
+      if (event) fitModeRef.current = false;
+    },
+    [session, componentId],
+  );
 
   const onConnectStart = useCallback(
     (_event: MouseEvent | TouchEvent, params: OnConnectStartParams) => {
@@ -1463,27 +1502,21 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           connectionMode={ConnectionMode.Loose}
           connectionLineComponent={ConnectionLineView}
           connectionRadius={22}
-          onNodeDragStart={(e, _n, dragged) => onDragStart(e, dragged)}
-          onNodeDrag={(e, _n, dragged) => onDrag(e, dragged)}
-          onNodeDragStop={(e, _n, dragged) => onDragStop(e, dragged)}
-          onSelectionDragStart={(e, dragged) => onDragStart(e, dragged)}
-          onSelectionDrag={(e, dragged) => onDrag(e, dragged)}
-          onSelectionDragStop={(e, dragged) => onDragStop(e, dragged)}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onSelectionDragStart={onDragStart}
+          onSelectionDrag={onDrag}
+          onSelectionDragStop={onDragStop}
           onNodeContextMenu={onNodeContextMenu}
           onEdgeContextMenu={onEdgeContextMenu}
           onPaneContextMenu={onPaneContextMenu}
           onSelectionContextMenu={onSelectionContextMenu}
           onNodeClick={onNodeClick}
-          onPaneClick={() => ui.getState().set({ armed: null })}
+          onPaneClick={onPaneClick}
           onInit={onInit}
-          onMove={(_event, viewport) => {
-            if (ui.getState().hoverPort) ui.getState().set({ hoverPort: null });
-            updateCrop(viewport);
-          }}
-          onMoveEnd={(event, viewport) => {
-            session.selection.getState().setPatchViewport(componentId, viewport);
-            if (event) fitModeRef.current = false;
-          }}
+          onMove={onMove}
+          onMoveEnd={onMoveEnd}
           {...(savedViewport ? { defaultViewport: savedViewport } : {})}
           minZoom={MIN_ZOOM}
           maxZoom={2.5}

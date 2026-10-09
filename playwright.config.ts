@@ -4,6 +4,10 @@ import { defineConfig, devices } from "@playwright/test";
  * End-to-end tests drive the editor in Chromium. The Electron app is covered separately by
  * apps/desktop/tests/smoke.mjs (`npm run smoke -w @sonobe/desktop`), which isn't part of `npm run e2e` or CI.
  * SONOBE_E2E_PORT picks the dev server port (default 5199), so parallel checkouts don't share a server.
+ *
+ * Two more projects cover what the dev server can't: "build" makes the editor's production build in a
+ * scratch folder (e2e/production.setup.ts), and "production" boots it from file://, as the desktop app
+ * does (e2e/production.spec.ts).
  */
 
 const port = Number(process.env.SONOBE_E2E_PORT) || 5199;
@@ -19,7 +23,18 @@ export default defineConfig({
     trace: "retain-on-failure",
     launchOptions: { args: ["--mute-audio"] },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
+  // The first line stays as written: apps/desktop/electron/architecture.test.ts looks for it.
+  // prettier-ignore
+  projects: [{ name: "chromium", testIgnore: /production\./, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    { name: "build", testMatch: /production\.setup\.ts/ },
+    {
+      name: "production",
+      testMatch: /production\.spec\.ts/,
+      dependencies: ["build"],
+      // Chromium only reads a page's own scripts and styles from file:// with this switch.
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, launchOptions: { args: ["--mute-audio", "--allow-file-access-from-files"] } },
+    },
+  ],
   webServer: {
     command: `npm run dev -w @sonobe/editor -- --port ${port} --strictPort`,
     url: `http://localhost:${port}`,

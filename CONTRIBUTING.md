@@ -99,6 +99,16 @@ The subscription path is experimental and off by default. Only the app run from 
 
 [evals/README.md](evals/README.md) has the case format and the options.
 
+## Measuring editor speed
+
+`npm run bench -w @sonobe/editor` builds the editor into a temp folder, serves it, and drives it in headless Chromium (`apps/editor/scripts/bench`). It times boot and first opens, then eleven interactions on `examples/02-like-toggle` and on a generated 302-patch, 302-layer document, and prints main-thread time per second, frame times and long tasks. It asserts nothing and isn't part of `npm test` or CI.
+
+1. Compare two builds in one run, never against numbers from another day or another machine. Serve the build to compare against (`npx vite preview --outDir <its dist> --port 5260` from `apps/editor`) and pass `--baseline http://localhost:5260`: the builds take turns, and the table shows both with the difference. Run a build against itself once to see how much the numbers move on their own.
+2. Narrow a run while you work: `--only stress --filter scrub,dragLayer --reps 3`. `--throttle 4` stands in for a slower machine, `--profile <folder>` writes a CPU profile per interaction for DevTools, and `--trace` prints the timeline's busiest events (Layerize, Layout, Paint).
+3. Frame times rarely move on a fast machine, so read main-thread ms per second first. Put the before and after numbers in the commit message, and leave out a change that doesn't show.
+
+The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. `run.ts` lists the options.
+
 ## Releasing
 
 A release is built by `.github/workflows/release.yml` from a version tag: the macOS app for Apple silicon and Intel, signed with a Developer ID certificate and notarized. The workflow stops at a draft GitHub release. Publishing the draft is yours to do.
@@ -248,6 +258,7 @@ Text people read in the UI uses one word for one thing. Prompts and text written
 - TypeScript, strict ESM. Relative imports use explicit `.ts`/`.tsx` extensions.
 - Import types with `import type`. Don't use enums, namespaces, or parameter properties, because the code runs under Node type stripping.
 - Keep doc comments short on public APIs and skip filler comments.
+- A panel or dialog whose code loads on demand is a `loadable` (`apps/editor/src/ui/loadable.tsx`), not `React.lazy` under Suspense, which holds content back 300 ms after its fallback shows. `e2e/boot.spec.ts` checks that with the page's clock stopped.
 - Format with Prettier (`npm run format`).
 
 ## Clean-room policy
