@@ -32,7 +32,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 | `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save (build the editor and shell first) |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
 | `npm run package` | A local build: editor, bundles, icons, then electron-builder into `release/`, ad-hoc signed on macOS. `--identity` and `--release` build signed ones (see Packaging) |
-| `npm run package:verify` | Launches the packaged app muted and checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG) |
+| `npm run package:verify` | Checks the packaged app: its files, signature and entitlements, then a muted launch that checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG; see Checking a package) |
 
 ## Host API additions
 
@@ -63,6 +63,32 @@ Every build is signed with the hardened runtime and the entitlements in `build/e
 A release or rehearsal builds, for each architecture, a DMG and the zip an update downloads, with the zips' blockmaps and one `latest-mac.yml` that lists them all (arm64 and x64 by default, in one run, because a second run would overwrite the feed). It also writes `Sonobe-<version>-sourcemaps.tar.gz`: the editor's and the app's source maps, which no build carries inside the app. Nothing is published from here; `electron-builder.yml`'s `publish` block only names where releases live.
 
 The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace.
+
+### Checking a package
+
+`npm run package:verify -w @sonobe/desktop` checks the app in `release/` for this machine's architecture. It never touches your settings, your keychain or a running Sonobe: the launch is muted, has its own user data and `SONOBE_HOME`, and runs with `SONOBE_TEST=1`, and afterwards the build is unregistered from LaunchServices so it doesn't become the app that opens `.sonobe` files.
+
+It reads the bundle first, then runs it:
+
+- **Files.** No source maps in `Resources/editor` or app.asar, no `default_app.asar`, nothing native beside the CLI, and the license files with the notices.
+- **Info.plist.** The camera and microphone wording is Sonobe's, and only Chromium's English locale ships.
+- **Signature.** `codesign --verify --deep --strict`, the hardened runtime flag, and exactly the entitlements of `build/` on the app, its four helpers and `sfsymbol` (an ad-hoc build also has `disable-library-validation`; no other build may).
+- **Update capability.** The packaged `package.json`'s `sonobe` field matches the real signature.
+- **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature.
+- **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and the app launches, shows the editor, answers `/health` and quits cleanly.
+
+| Flag | Does |
+| --- | --- |
+| `--dmg` | Mounts the DMG read-only and checks the app inside |
+| `--app <path>` | Checks any `Sonobe.app` |
+| `--arch x64` | Checks the other architecture's app or DMG in `release/` (`arm64`, `x64` or `universal`) |
+| `--release` | Fails unless the build is Developer ID signed and notarized |
+| `--static` | Reads the bundle and runs nothing from it, for an Intel build on a Mac without Rosetta |
+| `--lang de` | Launches as if the system language were German and prints the locales the app ends up with |
+| `--mcp-port <n>` | A fixed MCP port for the launch; otherwise the app picks a free one |
+| `--screenshot <path>` | Where the window's screenshot goes. Without it nothing is kept, so `screenshots/packaged.png` changes only when you pass its path |
+
+### What's inside
 
 The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
 

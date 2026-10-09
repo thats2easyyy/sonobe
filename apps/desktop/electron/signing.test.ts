@@ -10,11 +10,13 @@ import { describe, expect, it } from "vitest";
 import {
   DISABLE_LIBRARY_VALIDATION,
   SigningError,
+  buildInfoFor,
   checkSignature,
   entitlementKeys,
   helperArch,
   macSigningOptions,
   planSigning,
+  readAssessment,
   readSignature,
   withLibraryValidationDisabled,
   type SigningInput,
@@ -371,6 +373,46 @@ describe("reading a signature back", () => {
     expect(checkSignature(local, readSignature(DEVELOPER_ID_SIGNED))?.message).toContain(
       "a local build is ad-hoc signed",
     );
+  });
+});
+
+describe("what verify-package.mjs holds a build to", () => {
+  it("expects the update capability each plan records, from the signature alone", () => {
+    const env = API_KEY;
+    const built = [
+      [plan(), ADHOC],
+      [plan({ identity: "Tyler" }), APPLE_DEVELOPMENT],
+      [plan({ identity: "Example Co", identities: [DEVELOPER_ID] }), DEVELOPER_ID_SIGNED],
+      [plan({ release: true, env, identities: [DEVELOPER_ID] }), DEVELOPER_ID_SIGNED],
+    ] as const;
+    for (const [planned, codesign] of built) {
+      expect(buildInfoFor(readSignature(codesign)), planned.mode).toEqual(planned.build);
+    }
+    expect(buildInfoFor(readSignature(ADHOC))).toEqual({ signing: "adhoc", updates: "notify" });
+  });
+
+  it("reads Gatekeeper's verdict, and knows when Gatekeeper is off and says nothing", () => {
+    // spctl --assess --type execute -vv, as captured from a notarized app and from a local build.
+    expect(
+      readAssessment(
+        "/Applications/Sonobe.app: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Example Co (ABCDE12345)\n",
+      ),
+    ).toEqual({ accepted: true, source: "Notarized Developer ID", gatekeeperOff: false });
+    expect(readAssessment("/tmp/release/mac-arm64/Sonobe.app: rejected\n")).toEqual({
+      accepted: false,
+      source: undefined,
+      gatekeeperOff: false,
+    });
+    // Not captured here (no Developer ID build exists yet): a signed build that was never notarized,
+    // and any app after `spctl --master-disable`, which accepts everything whatever its signature.
+    expect(
+      readAssessment(
+        "/tmp/release/mac-arm64/Sonobe.app: rejected\nsource=Unnotarized Developer ID\n",
+      ),
+    ).toMatchObject({ accepted: false, source: "Unnotarized Developer ID" });
+    expect(
+      readAssessment("/tmp/release/mac-arm64/Sonobe.app: accepted\noverride=security disabled\n"),
+    ).toEqual({ accepted: true, source: undefined, gatekeeperOff: true });
   });
 });
 

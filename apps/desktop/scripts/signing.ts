@@ -377,6 +377,35 @@ export function readSignature(codesignText: string): Signature {
   };
 }
 
+/**
+ * What a build with this signature must have recorded under `sonobe` in its package.json.
+ * verify-package.mjs holds the flag to the real signature, since the app trusts it without looking.
+ */
+export function buildInfoFor(signature: Signature): BuildInfo {
+  if (signature.kind === "adhoc") return { signing: "adhoc", updates: "notify" };
+  return {
+    signing: signature.kind === "developer-id" ? "developer-id" : "identity",
+    updates: "install",
+  };
+}
+
+export interface Assessment {
+  accepted: boolean;
+  /** Gatekeeper's reason, for example "Notarized Developer ID". */
+  source: string | undefined;
+  /** Gatekeeper is switched off on this Mac, so "accepted" says nothing about the app. */
+  gatekeeperOff: boolean;
+}
+
+/** Reads what `spctl --assess --type execute -vv <app>` prints (on stderr). */
+export function readAssessment(spctlText: string): Assessment {
+  return {
+    accepted: /: accepted$/m.test(spctlText),
+    source: /^source=(.*)$/m.exec(spctlText)?.[1]?.trim(),
+    gatekeeperOff: /^override=security disabled$/m.test(spctlText),
+  };
+}
+
 /** The entitlements set to true in what `codesign -d --entitlements - --xml <path>` prints. */
 export function entitlementKeys(xml: string): string[] {
   return [...xml.matchAll(/<key>([^<]+)<\/key>\s*<true\s*\/>/g)].map((match) => match[1]!);

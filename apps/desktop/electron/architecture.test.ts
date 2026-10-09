@@ -56,6 +56,26 @@ describe("§12 quality gates", () => {
     expect(read("../tests/smoke.mjs")).toContain("SONOBE_SMOKE_SKIP_EDITOR_BUILD");
   });
 
+  it("documents package verification with every flag it takes, and keeps it off the keychain and the tracked screenshot", () => {
+    const pkg = JSON.parse(read("../package.json")) as { name: string; scripts: Record<string, string> };
+    expect(pkg.scripts["package:verify"]).toBe("node scripts/verify-package.mjs");
+    const bullet = gates.split("\n").find((line) => line.startsWith(`- \`npm run package:verify -w ${pkg.name}\``))!;
+    expect(bullet).toBeDefined();
+    const verify = read("../scripts/verify-package.mjs");
+    const flags = [...verify.matchAll(/^    "?([a-z-]+)"?: \{ type: "(?:boolean|string)"/gm)].map((m) => `--${m[1]}`);
+    expect(flags).toEqual(expect.arrayContaining(["--dmg", "--release", "--static"]));
+    const readme = read("../README.md");
+    for (const flag of flags) {
+      expect(bullet, flag).toContain(`\`${flag}`);
+      expect(readme, flag).toContain(`\`${flag}`);
+    }
+    // The launch uses the test cipher (the real one is the login keychain), and writes no file in the repository unless asked.
+    expect(verify).toContain('SONOBE_TEST: "1"');
+    expect(bullet).toContain("`SONOBE_TEST=1`");
+    expect(verify).not.toMatch(/root, "screenshots"/);
+    expect(verify).toContain("lsregister");
+  });
+
   it("runs in CI what the CI bullet says, and nothing that needs a person, Xcode or a Claude account", () => {
     const ci = read("../../../.github/workflows/ci.yml");
     const root = JSON.parse(read("../../../package.json")) as { scripts: Record<string, string> };
