@@ -60,8 +60,8 @@ jobs:
       - name: Remove the notarization key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
-      # Each architecture's app: Developer ID, hardened runtime, entitlements, Gatekeeper, the stapled ticket,
-      # then a launch. The Intel build runs under Rosetta.
+      # Each architecture's app, and the app inside each DMG: Developer ID, hardened runtime, entitlements,
+      # Gatekeeper, the stapled ticket, then a launch. The Intel build runs under Rosetta.
       - name: Verify the arm64 app
         run: node apps/desktop/scripts/verify-package.mjs --release --arch arm64
       - name: Verify the app inside the arm64 DMG
@@ -70,6 +70,8 @@ jobs:
         run: softwareupdate --install-rosetta --agree-to-license
       - name: Verify the x64 app
         run: node apps/desktop/scripts/verify-package.mjs --release --arch x64
+      - name: Verify the app inside the x64 DMG
+        run: node apps/desktop/scripts/verify-package.mjs --release --arch x64 --dmg
       - uses: actions/upload-artifact@v4
         with:
           name: sonobe-release

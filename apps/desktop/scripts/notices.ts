@@ -2,8 +2,9 @@
  * The third-party notices the packaged app ships in Resources/licenses: every npm package whose code
  * ends up in a bundle, with its license text. The package list comes from what the bundlers report
  * (esbuild's metafiles, and the `sources` of the editor's source maps), never from a hand-kept list,
- * so a new dependency is covered by the build that first bundles it. scripts/build.mjs --licenses
- * writes the file.
+ * so a new dependency is covered by the build that first bundles it. A package that publishes other
+ * packages inside its own files (@modelcontextprotocol/server carries ajv) names them in the source
+ * maps it ships, and they are listed too. scripts/build.mjs --licenses writes the file.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -62,6 +63,56 @@ export function sourceMapInputs(dir: string): string[] {
   return [...files];
 }
 
+export interface CarriedPackage {
+  name: string;
+  /** From a pnpm store path (`.pnpm/ajv@8.18.0/node_modules/ajv`); undefined when the path has none. */
+  version: string | undefined;
+  /** The folder of the package whose files carry it. */
+  within: string;
+}
+
+/** pnpm's store folder for a package: `.pnpm/ajv@8.18.0/node_modules/ajv`, scoped `.pnpm/@scope+name@1.0.0_peer@2/…`. */
+const PNPM_STORE = /\/\.pnpm\/([^/]+)\/node_modules\/(?:@[^/]+\/)?[^/]+$/;
+
+/**
+ * The packages that bundled files carry inside them. A dependency can publish files that already
+ * hold other packages, and a bundler reports only the file it read. The source map shipped beside
+ * such a file names what it was made from: a source under a `node_modules/` is another package's.
+ * The publisher's own sources aren't listed, wherever they sat, since its license covers them.
+ */
+export function carriedPackages(files: Iterable<string>): CarriedPackage[] {
+  const carried = new Map<string, CarriedPackage>();
+  for (const file of files) {
+    const [within] = npmPackageDirs([file]);
+    if (!within || !existsSync(`${file}.map`)) continue;
+    const { sources = [] } = JSON.parse(readFileSync(`${file}.map`, "utf8")) as {
+      sources?: string[];
+    };
+    // As written, not resolved: `../../shared/src` is the publisher's own folder, not a package.
+    for (const dir of npmPackageDirs(sources.map((source) => `/${source}`))) {
+      const name = dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length);
+      // `.pnpm` and `.vite` are folders in node_modules, not packages.
+      if (name.startsWith(".") || within.endsWith(`/node_modules/${name}`)) continue;
+      const stored = PNPM_STORE.exec(dir)?.[1];
+      const prefix = `${name.replace("/", "+")}@`;
+      const version = stored?.startsWith(prefix)
+        ? stored.slice(prefix.length).split("_")[0]
+        : undefined;
+      carried.set(`${name} ${version ?? ""} in ${within}`, { name, version, within });
+    }
+  }
+  return [...carried.values()];
+}
+
+/** The folder a package is installed in, looking where Node would from `from`; undefined when it isn't. */
+export function installedPackageDir(name: string, from: string): string | undefined {
+  for (let dir = from; ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, "node_modules", name);
+    if (existsSync(path.join(candidate, "package.json"))) return candidate;
+    if (path.dirname(dir) === dir) return undefined;
+  }
+}
+
 export interface NoticePackage {
   name: string;
   version: string;
@@ -70,6 +121,8 @@ export interface NoticePackage {
   repository: string | undefined;
   /** The package's own license file, word for word; undefined when it ships none. */
   text: string | undefined;
+  /** For a carried package that isn't installed, so nothing of it could be read: the package that carries it. */
+  carriedBy?: string;
 }
 
 const LICENSE_FILE = /^(licen[sc]e|copying|notice)([.-].*)?$/i;
@@ -101,6 +154,37 @@ export function readNoticePackage(dir: string): NoticePackage {
   };
 }
 
+/**
+ * Every package to give notice of for a set of bundled files: the packages the files belong to, and
+ * the packages those carry inside them. A carried package's license is read from the copy installed
+ * here, which may be another version than the carried one; the notice names the carried version.
+ */
+export function noticePackages(files: Iterable<string>): NoticePackage[] {
+  const all = [...files];
+  const packages = new Map<string, NoticePackage>();
+  const add = (pkg: NoticePackage) => {
+    if (!packages.has(`${pkg.name} ${pkg.version}`))
+      packages.set(`${pkg.name} ${pkg.version}`, pkg);
+  };
+  for (const dir of npmPackageDirs(all)) add(readNoticePackage(dir));
+  for (const { name, version, within } of carriedPackages(all)) {
+    const dir = installedPackageDir(name, within);
+    if (dir) add({ ...readNoticePackage(dir), ...(version ? { version } : {}) });
+    else {
+      const carriedBy = readNoticePackage(within).name;
+      add({
+        name,
+        version: version ?? "",
+        license: "UNKNOWN",
+        repository: undefined,
+        text: undefined,
+        carriedBy,
+      });
+    }
+  }
+  return [...packages.values()];
+}
+
 const RULE = "-".repeat(78);
 
 /**
@@ -124,7 +208,9 @@ export function renderNotices(packages: readonly NoticePackage[]): {
       RULE,
       "",
       pkg.text ??
-        `This package ships no license file. It is licensed under ${pkg.license}; see its source for the full text.`,
+        (pkg.carriedBy
+          ? `This package's code is inside ${pkg.carriedBy}'s published files, without its license, and it isn't installed on its own to read one from. See ${pkg.carriedBy}'s source.`
+          : `This package ships no license file. It is licensed under ${pkg.license}; see its source for the full text.`),
       "",
     ].join("\n"),
   );

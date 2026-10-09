@@ -134,6 +134,7 @@ describe("§12 packaging in CI and the release workflow", () => {
       "node apps/desktop/scripts/verify-package.mjs --release --arch arm64",
       "node apps/desktop/scripts/verify-package.mjs --release --arch arm64 --dmg",
       "node apps/desktop/scripts/verify-package.mjs --release --arch x64",
+      "node apps/desktop/scripts/verify-package.mjs --release --arch x64 --dmg",
       "actions/upload-artifact",
     ];
     const at = steps.map((step) => build!.indexOf(step));

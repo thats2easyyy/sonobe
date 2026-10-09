@@ -70,12 +70,12 @@ The packaged `package.json` (inside app.asar) records what the build can do with
 
 It reads the bundle first, then runs it:
 
-- **Files.** No source maps in `Resources/editor` or app.asar, no `default_app.asar`, nothing native beside the CLI, and the license files with the notices.
+- **Files.** No source maps in `Resources/editor` or app.asar, no `default_app.asar`, nothing native beside the CLI, and the license files with the notices, where every package has a license.
 - **Info.plist.** The camera and microphone wording is Sonobe's, and only Chromium's English locale ships.
 - **Signature.** `codesign --verify --deep --strict`, the hardened runtime flag, and exactly the entitlements of `build/` on the app, its four helpers and `sfsymbol` (an ad-hoc build also has `disable-library-validation`; no other build may).
 - **Update capability.** The packaged `package.json`'s `sonobe` field matches the real signature.
-- **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature.
-- **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and the app launches, shows the editor, answers `/health` and quits cleanly.
+- **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature or without Apple's secure timestamp.
+- **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and again from a copy outside the checkout (under `release/` it could load a package from the repository's `node_modules` that the bundle left out), and the app launches, shows the editor, answers `/health` and quits cleanly.
 
 | Flag | Does |
 | --- | --- |
@@ -94,6 +94,6 @@ The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mj
 
 On macOS the app also ships `Resources/bin/sfsymbol`, outside app.asar so it can run. Design imports use it to draw `<svg data-sf-symbol>` placeholders as real SF Symbols (macOS 13 or later), and the bundled CLI points headless servers at it through `SONOBE_SFSYMBOL`. It is built for the architecture being packaged, and as one file with both slices when a run builds more than one. Try it by hand: `sfsymbol heart.fill --size 17 --weight semibold --color '#FF3B30'` prints the SVG, and `sfsymbol --list` prints every name.
 
-`Resources/licenses` holds Sonobe's license (`LICENSE.txt`), `THIRD-PARTY-NOTICES.txt` with the license of every npm package bundled into the app, the editor and the CLI, and on macOS Electron's `LICENSE.electron.txt` and `LICENSES.chromium.html`. `build.mjs --licenses` writes them, and `scripts/notices.ts` takes the package list from esbuild's metafiles and the editor build's source maps.
+`Resources/licenses` holds Sonobe's license (`LICENSE.txt`), `THIRD-PARTY-NOTICES.txt` with the license of every npm package bundled into the app, the editor and the CLI, and on macOS Electron's `LICENSE.electron.txt` and `LICENSES.chromium.html`. `build.mjs --licenses` writes them, and `scripts/notices.ts` takes the package list from esbuild's metafiles and the editor build's source maps. Some packages carry others inside their own published files (the MCP SDK carries ajv); the source maps they ship name those, and each is listed with the license text of the copy installed in the checkout. The build warns when one isn't installed, and package verification fails on a notice without a license.
 
 On macOS the app ships Chromium's English locale only, asks for the camera and the microphone in Sonobe's own words (`mac.extendInfo`), and needs macOS 13 or later, which is Electron's own floor.

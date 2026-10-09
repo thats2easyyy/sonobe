@@ -6,11 +6,13 @@
  * - the files inside app.asar and Resources: no source maps, no default_app.asar, no node_modules, the licenses
  * - on macOS, Info.plist's camera and microphone wording, the signature with its hardened runtime flag and
  *   entitlements, and that package.json's `sonobe` field says what that signature can do with an update
- * - a Developer ID build is also held to Gatekeeper and its stapled notarization ticket
+ * - a Developer ID build is also held to Gatekeeper and its stapled notarization ticket, and with --release to
+ *   Apple's secure timestamp
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
  * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
- * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version)
+ * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), and runs from a copy outside
+ *   the checkout, where it has nothing but its own bundle to load
  * - on macOS, the SF Symbols helper (Resources/bin/sfsymbol) has the app's architectures and draws a symbol
  *
  *   node scripts/verify-package.mjs                release/mac-<arch>/Sonobe.app, for this machine's architecture
@@ -29,7 +31,7 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -136,7 +138,10 @@ try {
   const cliExtras = under("cli").filter((f) => f.split("/").includes("node_modules") || f.endsWith(".node"));
   assert(cliExtras.length === 0, "no node_modules or native modules under Resources/cli", cliExtras.slice(0, 5));
   const notices = readFileSync(path.join(resources, "licenses", "THIRD-PARTY-NOTICES.txt"), "utf8");
-  for (const name of ["react", "elkjs", "zod", "ws"]) assert(new RegExp(`^${name} \\d.*\\nLicense: \\S`, "m").test(notices), `licenses/THIRD-PARTY-NOTICES.txt lists ${name} with its license`);
+  // ajv is in none of Sonobe's package.json files: the MCP SDK carries it inside its own published files.
+  for (const name of ["react", "elkjs", "zod", "ws", "ajv"]) assert(new RegExp(`^${name} \\d.*\\nLicense: \\S`, "m").test(notices), `licenses/THIRD-PARTY-NOTICES.txt lists ${name} with its license`);
+  const unlicensed = [...notices.matchAll(/^(\S+).*\nLicense: UNKNOWN$/gm)].map((match) => match[1]);
+  assert(unlicensed.length === 0, "every package in licenses/THIRD-PARTY-NOTICES.txt has a license (scripts/build.mjs warns about one it couldn't read)", unlicensed);
   log(`app.asar holds ${asarFiles.length} entries; editor (no source maps), CLI, guides and licenses are in Resources`);
 
   // What this build can do with an update, as the app reads it (scripts/signing.ts).
@@ -179,6 +184,8 @@ try {
     // A Developer ID build is what other people get: Gatekeeper must accept it, with its ticket stapled.
     if (signature.kind === "developer-id") {
       assert(signature.teamId, "a Developer ID signature names its team (TeamIdentifier)");
+      // Notarization requires it, and without it the signature stops being valid when the certificate expires.
+      if (values.release) assert(signature.timestamped, "a release's signature carries Apple's secure timestamp (codesign -dv prints Timestamp=)");
       const assessed = run("spctl", ["--assess", "--type", "execute", "-vv", appPath]);
       const gatekeeper = readAssessment(assessed.text);
       const stapled = run("xcrun", ["stapler", "validate", appPath]).status === 0;
@@ -214,12 +221,17 @@ try {
       log("Resources/bin/sfsymbol draws SF Symbols");
     }
 
-    // The bundled CLI with the app's own runtime.
-    const cliVersion = execFileSync(path.join(resources, "cli", process.platform === "win32" ? "sonobe.cmd" : "sonobe"), ["--version"], { encoding: "utf8", env: { ...process.env, SONOBE_NODE: "" } }).trim();
+    // The bundled CLI with the app's own runtime, which its launcher finds from where it sits in the app.
+    const launcher = process.platform === "win32" ? "sonobe.cmd" : "sonobe";
+    const cliVersion = execFileSync(path.join(resources, "cli", launcher), ["--version"], { encoding: "utf8", env: { ...process.env, SONOBE_NODE: "" } }).trim();
     assert(cliVersion.includes(pkg.version), "bundled CLI --version", cliVersion);
-    const described = execFileSync(path.join(resources, "cli", process.platform === "win32" ? "sonobe.cmd" : "sonobe"), ["describe", "switch"], { encoding: "utf8", env: { ...process.env, SONOBE_NODE: "" } });
-    assert(/switch/i.test(described), "bundled CLI describe", described.slice(0, 200));
-    log(`bundled CLI runs with the app runtime (${cliVersion})`);
+    // Then from a copy outside the checkout. Under release/, Node looks for packages in the repository's
+    // node_modules above Resources/cli, so a package the bundle left out would load here and on no one else's Mac.
+    const cliCopy = path.join(temp, "cli");
+    cpSync(path.join(resources, "cli"), cliCopy, { recursive: true });
+    const described = execFileSync(path.join(cliCopy, launcher), ["describe", "switch"], { encoding: "utf8", cwd: temp, env: { ...process.env, SONOBE_NODE: executable, ELECTRON_RUN_AS_NODE: "1" } });
+    assert(/switch/i.test(described), "bundled CLI describe, from a copy outside the checkout", described.slice(0, 200));
+    log(`bundled CLI runs with the app runtime (${cliVersion}), and from a copy with only its own bundle`);
 
     // Launch muted with isolated state. SONOBE_TEST=1 keeps secrets on the test cipher: the real one is the login
     // keychain, where a freshly built app raises a permission dialog on the person's screen.

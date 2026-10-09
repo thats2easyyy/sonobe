@@ -118,7 +118,7 @@ The first signed release freezes three things. Every installed copy carries them
 1. **Set the version.** `node scripts/set-version.ts 0.2.0` writes it everywhere it lives and rebuilds the examples. It takes three plain numbers and nothing else: the update feed is stable-only, so there are no `-beta` versions.
 2. **Run the checks**: `npm run typecheck`, `npm test` and `npm run e2e`. The e2e run rewrites the screenshots; keep `apps/editor/screenshots/app-13-about.png`, which shows the version, and restore the rest.
 3. **Merge that change**, then tag the merge commit and push the tag: `git tag v0.2.0`, `git push origin v0.2.0`. The tag must be `v` plus the version, and the workflow refuses any other.
-4. **Watch the Release workflow.** It checks the tag against the version, runs typecheck and the tests, builds with `package.mjs --release`, verifies both apps and the DMG with `verify-package.mjs --release` (the Intel one under Rosetta), and drafts the release.
+4. **Watch the Release workflow.** It checks the tag against the version, runs typecheck and the tests, builds with `package.mjs --release`, verifies both apps and the app inside each DMG with `verify-package.mjs --release` (the Intel ones under Rosetta), and drafts the release.
 5. **Read the draft.** It must hold eight files: a DMG, a zip and the zip's `.blockmap` for `arm64` and for `x64`, one `latest-mac.yml` that lists both zips, and `Sonobe-<version>-sourcemaps.tar.gz`. Edit the generated notes.
 6. **Try it on a clean Mac** (below).
 7. **Publish the draft.** That makes the download public.

@@ -11,8 +11,9 @@
  *                                        universal; scripts/package.mjs passes the app's)
  *   node scripts/build.mjs --licenses    also write dist/licenses, which a packaged app ships: Sonobe's
  *                                        license, the notices of every npm package in the bundles and the
- *                                        editor build (scripts/notices.ts), and on macOS Electron's and
- *                                        Chromium's licenses
+ *                                        editor build, and of the packages those carry inside their own
+ *                                        files (scripts/notices.ts), and on macOS Electron's and Chromium's
+ *                                        licenses
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
@@ -29,7 +30,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
-import { metafileInputs, npmPackageDirs, readNoticePackage, renderNotices, sourceMapInputs } from "./notices.ts";
+import { metafileInputs, noticePackages, renderNotices, sourceMapInputs } from "./notices.ts";
 import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
 import { buildSymbolHelper } from "./sfsymbol.ts";
 
@@ -40,7 +41,7 @@ const watch = process.argv.includes("--watch");
 const licenses = process.argv.includes("--licenses");
 const archFlag = process.argv.indexOf("--arch");
 const helperArch = archFlag < 0 ? undefined : process.argv[archFlag + 1];
-if (helperArch !== undefined && !["arm64", "x64", "universal"].includes(helperArch)) {
+if (archFlag >= 0 && !["arm64", "x64", "universal"].includes(helperArch)) {
   console.error(`[sonobe] --arch must be arm64, x64 or universal (got ${helperArch ?? "nothing"})`);
   process.exit(1);
 }
@@ -166,9 +167,10 @@ async function buildCli() {
 
 /**
  * dist/licenses, which electron-builder ships as Resources/licenses: Sonobe's own license, the notices of
- * the npm packages bundled into main, the preload, the player and scene pages, the CLI and the editor build
- * (read from what the bundlers report, scripts/notices.ts), and on macOS Electron's and Chromium's licenses,
- * which the Windows and Linux packages already carry beside the executable.
+ * the npm packages bundled into main, the preload, the player and scene pages, the CLI and the editor build,
+ * and of the packages those carry inside their own files (read from what the bundlers report,
+ * scripts/notices.ts), and on macOS Electron's and Chromium's licenses, which the Windows and Linux packages
+ * already carry beside the executable.
  */
 function writeLicenses(bundled) {
   const out = path.join(dist, "licenses");
@@ -176,8 +178,17 @@ function writeLicenses(bundled) {
   const editor = path.join(repo, "apps", "editor", "dist");
   const editorFiles = sourceMapInputs(editor);
   if (!editorFiles.length) console.warn("[sonobe] no source maps in apps/editor/dist, so the third-party notices leave out the editor's packages. Build the editor first (npm run build -w @sonobe/editor).");
-  const notices = renderNotices(npmPackageDirs([...bundled, ...editorFiles]).map(readNoticePackage));
-  if (notices.missing.length) console.warn(`[sonobe] no license file in ${notices.missing.join(", ")}: the notices give the license's name and the package's source instead.`);
+  const packages = noticePackages([...bundled, ...editorFiles]);
+  const notices = renderNotices(packages);
+  // A package another one carries inside its published files, read from the copy installed here. Without one there is nothing to read.
+  const unread = packages.filter((pkg) => pkg.carriedBy);
+  if (unread.length) {
+    const names = unread.map((pkg) => `${pkg.name} (inside ${pkg.carriedBy})`).join(", ");
+    console.warn(`[sonobe] no license for ${names}: it isn't installed, so the notices can only name it.`);
+    console.warn("[sonobe] Add it to apps/desktop's devDependencies, and its license text is read from there.");
+  }
+  const noFile = notices.missing.filter((name) => !unread.some((pkg) => pkg.name === name));
+  if (noFile.length) console.warn(`[sonobe] no license file in ${noFile.join(", ")}: the notices give the license's name and the package's source instead.`);
   writeFileSync(path.join(out, "THIRD-PARTY-NOTICES.txt"), notices.text);
   cpSync(path.join(repo, "LICENSE"), path.join(out, "LICENSE.txt"));
   if (process.platform === "darwin") {

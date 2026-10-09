@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  carriedPackages,
+  installedPackageDir,
   metafileInputs,
+  noticePackages,
   npmPackageDirs,
   readNoticePackage,
   renderNotices,
@@ -80,6 +83,125 @@ describe("npmPackageDirs", () => {
     ]);
     expect(sourceMapInputs(path.join(temp, "missing"))).toEqual([]);
   });
+});
+
+describe("packages carried inside another package's published files", () => {
+  // A package whose dist already holds two others, as its own bundler left them: one from a pnpm
+  // store, one from a plain node_modules. Its map also names its own sources, in and out of its folder.
+  const modules = path.join(temp, "carried", "node_modules");
+  const carrier = path.join(modules, "@acme", "carrier");
+  const bundle = path.join(carrier, "dist", "index.mjs");
+  const write = (file: string, text: string) => {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  };
+  write(
+    path.join(carrier, "package.json"),
+    JSON.stringify({ name: "@acme/carrier", version: "2.0.0", license: "MIT" }),
+  );
+  write(path.join(carrier, "LICENSE"), "MIT License\n\nCopyright (c) Acme");
+  write(bundle, "");
+  const sources = [
+    "../src/index.ts",
+    "../../shared/src/util.ts",
+    "../../../node_modules/.pnpm/inner@1.2.3/node_modules/inner/index.js",
+    "../../../node_modules/.pnpm/inner@1.2.3/node_modules/inner/lib/more.js",
+    "../../../node_modules/.pnpm/@scope+peered@4.0.0_inner@1.2.3/node_modules/@scope/peered/index.js",
+    "../node_modules/ghost/index.js",
+  ];
+  write(`${bundle}.map`, JSON.stringify({ version: 3, sources }));
+  // Installed here in another version than the carried one, as ajv is.
+  write(
+    path.join(modules, "inner", "package.json"),
+    JSON.stringify({ name: "inner", version: "1.3.0", license: "BSD-3-Clause" }),
+  );
+  write(
+    path.join(modules, "inner", "LICENSE"),
+    "Redistribution and use in source and binary forms…",
+  );
+  write(
+    path.join(modules, "@scope", "peered", "package.json"),
+    JSON.stringify({ name: "@scope/peered", version: "4.0.0", license: "ISC" }),
+  );
+  write(path.join(modules, "@scope", "peered", "LICENSE.md"), "ISC License");
+  const within = carrier.replaceAll("\\", "/");
+
+  it("are named by the source map beside a bundled file, with the version a pnpm store path gives", () => {
+    expect(carriedPackages([bundle, path.join(temp, "src", "own.ts")])).toEqual([
+      { name: "@scope/peered", version: "4.0.0", within },
+      { name: "inner", version: "1.2.3", within },
+      { name: "ghost", version: undefined, within },
+    ]);
+    // A file without a map beside it carries nothing that can be known.
+    expect(carriedPackages([path.join(carrier, "package.json")])).toEqual([]);
+    expect(installedPackageDir("inner", carrier)).toBe(path.join(modules, "inner"));
+    expect(installedPackageDir("ghost", carrier)).toBeUndefined();
+  });
+
+  it("get a notice with the carried version and the installed copy's license text", () => {
+    const packages = noticePackages([bundle]);
+    expect(packages.map((pkg) => `${pkg.name} ${pkg.version} ${pkg.license}`)).toEqual([
+      "@acme/carrier 2.0.0 MIT",
+      "@scope/peered 4.0.0 ISC",
+      "inner 1.2.3 BSD-3-Clause",
+      "ghost  UNKNOWN",
+    ]);
+    expect(packages[2]!.text).toBe("Redistribution and use in source and binary forms…");
+    // Not installed, so there is nothing to read: the notice says where its code is, and the build warns.
+    expect(packages[3]).toMatchObject({ text: undefined, carriedBy: "@acme/carrier" });
+    const { text, missing } = renderNotices(packages);
+    expect(missing).toEqual(["ghost"]);
+    expect(text).toContain(
+      "This package's code is inside @acme/carrier's published files, without its license",
+    );
+    expect(text).not.toContain("shared");
+    // Bundled directly as well, in the carried version: one notice.
+    write(
+      path.join(modules, "inner", "package.json"),
+      JSON.stringify({ name: "inner", version: "1.2.3", license: "BSD-3-Clause" }),
+    );
+    const names = noticePackages([bundle, path.join(modules, "inner", "index.js")]).map(
+      (pkg) => pkg.name,
+    );
+    expect(names.filter((name) => name === "inner")).toHaveLength(1);
+  });
+
+  it("finds ajv and the rest inside the MCP SDK, which the app and the CLI bundle", async () => {
+    const result = await build({
+      absWorkingDir: root,
+      stdin: {
+        contents: 'export * from "@modelcontextprotocol/server";',
+        resolveDir: path.join(root, "../../packages/mcp"),
+      },
+      bundle: true,
+      write: false,
+      metafile: true,
+      platform: "node",
+      logLevel: "silent",
+    });
+    const files = metafileInputs(result.metafile, root);
+    // esbuild sees only the SDK's own files.
+    expect(npmPackageDirs(files).map((dir) => path.basename(dir))).not.toContain("ajv");
+    const packages = noticePackages(files);
+    for (const [name, license] of [
+      ["ajv", "MIT"],
+      ["ajv-formats", "MIT"],
+      ["fast-deep-equal", "MIT"],
+      ["fast-uri", "BSD-3-Clause"],
+      ["json-schema-traverse", "MIT"],
+    ]) {
+      const pkg = packages.find((candidate) => candidate.name === name);
+      expect(pkg, name).toMatchObject({
+        license,
+        version: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      });
+      expect(pkg!.text?.length ?? 0, name).toBeGreaterThan(200);
+    }
+    // The SDK's own workspace folders, outside the published package, aren't packages.
+    expect(packages.every((pkg) => !pkg.carriedBy && !pkg.name.includes("core-internal"))).toBe(
+      true,
+    );
+  }, 30_000);
 });
 
 describe("the notices file", () => {
