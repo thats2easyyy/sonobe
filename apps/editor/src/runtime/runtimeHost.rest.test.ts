@@ -319,6 +319,34 @@ describe("what wakes a resting loop", () => {
     expect(scheduler.pending).toBe(0);
   });
 
+  it("a timing window is a count of frames: a restart or a new document doesn't stretch it", () => {
+    const { scheduler, store, host } = setup({ doc: movingDoc() });
+    scheduler.frames(3000);
+    expect(host.runtime.frame).toBe(2999);
+    host.profilePatches();
+    scheduler.frames(10);
+    // The frame counter goes back to 0 here, far below where the window was opened.
+    store.getState().replaceDocument(stillDoc());
+    let frames = 0;
+    for (; frames < 200 && !host.isResting(); frames++) scheduler.frame();
+    expect(host.isResting()).toBe(true);
+    expect(frames).toBeLessThan(60);
+
+    host.restart();
+    for (frames = 0; frames < 200 && !host.isResting(); frames++) scheduler.frame();
+    expect(frames).toBeLessThan(5);
+  });
+
+  it("profiling turned off ends its timing window", () => {
+    const { scheduler, host } = rested();
+    const stop = host.profilePatches();
+    scheduler.frames(5);
+    stop();
+    expect(host.isResting()).toBe(false);
+    for (let i = 0; i < 3 && !host.isResting(); i++) scheduler.frame();
+    expect(host.isResting()).toBe(true);
+  });
+
   it("a host created with profiling on rests after its first window", () => {
     const { scheduler, host } = setup({ profile: true });
     scheduler.frames(40);

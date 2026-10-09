@@ -37,7 +37,21 @@ const latch = defineMock<{ tripped: boolean }>({
   },
 });
 
-const registry = createMockRegistry([pick, latch]);
+/** Keeps the prototype running for ten seconds of frames, and restarts it once Go is on past that. */
+const LONG_RUN = 600;
+const again = defineMock({
+  type: "again",
+  name: "Again",
+  inputs: [port("go", "boolean", { default: false })],
+  outputs: [],
+  evaluate(ctx) {
+    if (ctx.input<boolean>("go")) {
+      if (ctx.frame > LONG_RUN) ctx.services.restart();
+    } else if (ctx.frame < LONG_RUN) ctx.requestNextFrame();
+  },
+});
+
+const registry = createMockRegistry([pick, latch, again]);
 
 /** Dots at three positions whose opacity Pick picks; its index comes from Latch, or is fixed. */
 const dots = (index: unknown = { link: "latch.index" }) =>
@@ -157,6 +171,23 @@ describe("the viewer's restart offer", () => {
     scheduler.frames(30);
     expect(host.scene()!.roots).toHaveLength(3);
     expect(host.state.getState().staleState).toBeNull();
+  });
+
+  it("counts the check's frames from the edit: a prototype that restarts itself right after it still rests", () => {
+    const { scheduler, store, host } = setup(edit(dots(), [{ op: "addPatch", patch: { id: "again", type: "again" } }]));
+    for (let i = 0; i < LONG_RUN + 10 && !host.isResting(); i++) scheduler.frame();
+    expect(host.runtime.frame).toBeGreaterThan(LONG_RUN);
+    expect(host.state.getState().diagnostics).toEqual([expect.objectContaining({ code: "empty_loop" })]);
+
+    // The edit arms the check, and the prototype starts over on the frame after it: frame 0 again.
+    store.getState().apply([{ op: "setInput", target: "again.go", value: true }], { label: "Go" });
+    scheduler.frames(3);
+    expect(host.runtime.frame).toBeLessThan(3);
+    let frames = 0;
+    for (; frames < LONG_RUN && !host.isResting(); frames++) scheduler.frame();
+    expect(host.isResting()).toBe(true);
+    // Three frames and 300 ms, not the six hundred frames it had run before.
+    expect(frames).toBeLessThan(30);
   });
 
   it("uses the edited document for the fresh copy", () => {

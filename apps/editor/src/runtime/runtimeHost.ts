@@ -427,8 +427,11 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   let asleep = false;
   /** The scheduled frame is the first after a rest. */
   let woke = false;
-  /** Frames run at least until this one, at rest or not (a timing window for the Performance view). */
-  let awakeUntilFrame = -1;
+  /**
+   * Frames still to run, at rest or not (a timing window for the Performance view). Counted down,
+   * never a frame number to reach: a restart sets the runtime's frame back to 0.
+   */
+  let awakeFrames = 0;
   let disposed = false;
   let lastNow: number | null = null;
   let pendingDoc: SonobeDocument | null = null;
@@ -440,8 +443,8 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   let pulseAddresses: { component: Id; addresses: string[] } | null = null;
   /** The restart offer: an edit arrived while an empty_loop warning (or the offer) was up. */
   let staleArmed = false;
-  /** Check once the swapped-in document has run a few frames: warnings come back after two. */
-  let staleCheck: { afterFrame: number; notBefore: number } | null = null;
+  /** Check once the swapped-in document has run a few frames (counted down): warnings come back after two. */
+  let staleCheck: { framesLeft: number; notBefore: number } | null = null;
 
   const schedule = () => {
     if (handle !== null || disposed) return;
@@ -487,7 +490,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   };
 
   /** The loop may stop asking for frames: the runtime is at rest and the host has nothing pending. */
-  const canRest = () => runtime.resting && pendingDoc === null && !pendingRestart && staleCheck === null && runtime.frame >= awakeUntilFrame;
+  const canRest = () => runtime.resting && pendingDoc === null && !pendingRestart && staleCheck === null && awakeFrames === 0;
 
   let explicitProfiling = options.profile === true;
   let profileRefs = 0;
@@ -496,9 +499,10 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     const was = state.getState().profiling;
     runtime.setProfiling(on);
     if (was !== on) state.setState({ profiling: on });
+    if (!on) awakeFrames = 0;
     if (!on || was) return;
     // Timings are averaged over about a second of frames: run that many, then rest again.
-    awakeUntilFrame = Math.max(0, runtime.frame) + Math.ceil(runtime.fps) + 1;
+    awakeFrames = Math.ceil(runtime.fps) + 1;
     if (playing) schedule();
   };
   if (explicitProfiling) applyProfiling();
@@ -528,7 +532,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
   };
 
   const checkStale = (now: number) => {
-    if (!staleCheck || runtime.frame < staleCheck.afterFrame || now < staleCheck.notBefore) return;
+    if (!staleCheck || staleCheck.framesLeft > 0 || now < staleCheck.notBefore) return;
     staleCheck = null;
     const found = freshStartDraws(currentDoc, runtime.issues(), { registry, ...(measurer ? { textMeasurer: measurer } : {}), resolveAssetUrl, mediaInfo: (ref) => mediaInfo.info(ref) });
     const shown = state.getState().staleState;
@@ -591,7 +595,7 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
       pulseAddresses = null;
       if (staleArmed) {
         staleArmed = false;
-        staleCheck = { afterFrame: runtime.frame + 3, notBefore: now + STALE_CHECK_DELAY_MS };
+        staleCheck = { framesLeft: 3, notBefore: now + STALE_CHECK_DELAY_MS };
       }
     }
     if (pendingRestart) {
@@ -615,6 +619,8 @@ export function createRuntimeHost(options: RuntimeHostOptions): RuntimeHost {
     }
     frameMs = scheduler.now() - t0;
     lastScene = scene;
+    if (awakeFrames > 0) awakeFrames--;
+    if (staleCheck && staleCheck.framesLeft > 0) staleCheck.framesLeft--;
     for (const viewer of viewers) {
       viewer.renderer.render(scene);
       syncLiveMediaSafely(viewer, scene);
