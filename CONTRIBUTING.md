@@ -31,7 +31,7 @@ Node 22.18+ is required. Node 24 is what CI uses.
    - The `behavior` field is the implementation spec.
    - The `docs` field is what users read.
 2. Implement it in `packages/patches/src/<category>/<type>.ts` with `definePatch(type, { state, evaluate })`, then add it to that category's `index.ts`.
-   - A prototype rests while nothing changes (ARCHITECTURE.md §5.2). A patch that waits on something no input event announces (a timer, a request, a service it polls) calls `ctx.requestNextFrame()` on every frame while it waits, or it freezes at rest. Assert it in the test (`requestedNextFrame`).
+   - A prototype rests while nothing changes (ARCHITECTURE.md §5.2). A patch that waits on something no input event announces (a timer, a request, a service it polls) calls `ctx.requestNextFrame()` on every frame while it waits, or it freezes at rest. Assert it in the test (`requestedNextFrame`), and when the patch keeps state across a wait, check a whole document over a rest with `runRested` from `@sonobe/engine/testing`.
 3. Test it in `<type>.test.ts` with the harness in `@sonobe/engine/testing`. Cover pulses, loops (per-index state), and edge cases.
 4. Regenerate the reference docs with `node packages/patches/scripts/generate-docs.ts`.
 
