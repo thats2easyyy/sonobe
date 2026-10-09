@@ -122,15 +122,44 @@ Two smaller things to decide before the first tag:
 
 1. **Set the version.** `node scripts/set-version.ts 0.2.0` writes it everywhere it lives and rebuilds the examples. It takes three plain numbers and nothing else: the update feed is stable-only, so there are no `-beta` versions.
 2. **Run the checks**: `npm run typecheck`, `npm test` and `npm run e2e`. The e2e run rewrites the screenshots; keep `apps/editor/screenshots/app-13-about.png`, which shows the version, and restore the rest.
-3. **Merge that change**, then tag the merge commit and push the tag: `git tag v0.2.0`, `git push origin v0.2.0`. The tag must be `v` plus the version, and the workflow refuses any other.
-4. **Watch the Release workflow.** It checks the tag against the version, runs typecheck and the tests, builds with `package.mjs --release`, verifies both apps and the app inside each DMG with `verify-package.mjs --release` (the Intel ones under Rosetta), and drafts the release.
-5. **Read the draft.** It must hold eight files: a DMG, a zip and the zip's `.blockmap` for `arm64` and for `x64`, one `latest-mac.yml` that lists both zips, and `Sonobe-<version>-sourcemaps.tar.gz`. Edit the generated notes.
-6. **Try it on a clean Mac** (below).
-7. **Publish the draft.** That makes the download public.
+3. **Rehearse an update** on that commit (below). It must pass before the tag.
+4. **Merge that change**, then tag the merge commit and push the tag: `git tag v0.2.0`, `git push origin v0.2.0`. The tag must be `v` plus the version, and the workflow refuses any other.
+5. **Watch the Release workflow.** It checks the tag against the version, runs typecheck and the tests, builds with `package.mjs --release`, verifies both apps and the app inside each DMG with `verify-package.mjs --release` (the Intel ones under Rosetta), and drafts the release.
+6. **Read the draft.** It must hold eight files: a DMG, a zip and the zip's `.blockmap` for `arm64` and for `x64`, one `latest-mac.yml` that lists both zips, and `Sonobe-<version>-sourcemaps.tar.gz`. Edit the generated notes.
+7. **Try it on a clean Mac** (below).
+8. **Publish the draft.** That makes the download public.
 
 A release that's wrong is fixed by the next version, never by swapping its files. And never publish a release as the latest one without `latest-mac.yml` in it, for example one that carries only the Claude Desktop extension: the newest release's `latest-mac.yml` is the feed an installed app reads to find an update. Every installed app reads it a few seconds after launch and every few hours (`apps/desktop/electron/updates.ts`), so a latest release without it makes every check fail.
 
 Keep `Sonobe-<version>-sourcemaps.tar.gz` on every release. The app ships without source maps, and a stack trace from that version can only be read with that archive.
+
+### Rehearse an update
+
+The updater in the first release is the one every person keeps. A release whose updater can't install the next one is fixed only by asking everyone to download Sonobe again, so the update is tried for real before the tag, on the commit you mean to tag. It needs a Mac with a signing certificate in its keychain; an Apple Development certificate is enough.
+
+```bash
+node apps/desktop/tests/update-rehearsal.mjs --identity "Apple Development: Your Name"
+```
+
+It takes about four minutes and prints one PASS or FAIL line per step. A step that fails ends its scenario, and the lines say which step was the last to pass.
+
+- **What it builds.** This version and the next patch version as rehearsal builds signed with that certificate (`package.mjs --identity`, with `--version` and `--launch-env`), and one local ad-hoc build, all into a temp folder. No tracked file changes, and `apps/desktop/dist` is rebuilt as a normal build afterwards.
+- **How it runs them.** The first build is unpacked into `<temp>/Applications`, which macOS counts as an Applications folder, and the second is served from `127.0.0.1:5250` (`SONOBE_UPDATE_FEED`). Every app is muted, has its own data folder and `SONOBE_HOME`, and uses the test cipher (`SONOBE_TEST=1`), so nothing asks for your keychain. macOS opens the updated app itself, without the first one's environment, so both signed builds carry those folders in Info.plist and refuse to start without them.
+- **What it asserts.**
+  - **A, install.** The installed build finds the new version by itself, no sooner than 5 s after its window shows, having loaded no updater before. It downloads with rising progress, and says ready only once macOS has staged the download. The feed is asked for `latest-mac.yml` and the zip, with no per-install id. Then, with a Claude session connected through the app's own `sonobe mcp` and an unsaved change: Restart to Update names the session and offers Save, Keep Draft or Cancel; Cancel keeps the app, the window and the ready update; Keep Draft quits, macOS installs the new version and opens it, the prototype is open again with the unsaved change, a tool call sent while the app was down was refused and not applied, your own `~/.sonobe` and data folder are untouched, and the same relay answers again.
+  - **B, a normal quit.** A downloaded update goes in when the app quits and the app stays closed. The next launch says "Sonobe was updated" with its release notes, and the one after doesn't.
+  - **C, notify.** The ad-hoc build says a version is available and why it can't install it, Download opens the release page, and only `latest-mac.yml` was asked for.
+  - **D and F.** A signed build outside an Applications folder, and one this user can't replace, only notify and say why. The first offers the move, which is never made.
+  - **E, a refused download.** The new version re-signed ad hoc downloads whole, macOS refuses it, and the state ends in failed with the release page as the way out, never in ready.
+- **What it touches outside the temp folder.** `~/Library/Caches/sonobe-updater` (the download), `~/Library/Caches/dev.sonobe.app.ShipIt` and the launchd job `dev.sonobe.app.ShipIt` (macOS's installer), and `dev.sonobe.app` under `~/Library/Caches` and `~/Library/HTTPStorages` (what macOS keeps of the installer's request). The bundle id decides those names, so they are the ones an installed Sonobe uses. It refuses to start while a download or an install is waiting there, and removes what wasn't there before. Quit an installed Sonobe first. Every build is unregistered from LaunchServices afterwards, and nothing goes into `/Applications`.
+- **What it doesn't show.** A Developer ID build with notarization and Gatekeeper (a rehearsal is never notarized), the real feed on GitHub, Move to Applications, an Intel Mac, Windows or Linux. The updated app is opened by macOS, not by the script, so its window is read through MCP and not looked at.
+
+`--only A,C` runs some scenarios, `--keep` leaves the temp folder with its builds and logs, and `--reuse <folder>` runs again on what `--keep` left. `npm run rehearse:update -w @sonobe/desktop -- --identity "…"` is the same command.
+
+Before the first Windows release, two things about updates there need deciding. Neither has run.
+
+- **Silent update or installer pages.** The app asks for a silent install that opens Sonobe again (`quitAndInstall(true, true)`), on top of the assisted installer (`nsis.oneClick: false`). A one-click installer is the other choice.
+- **Claude sessions.** The installer stops every process running from the install folder, which includes `sonobe mcp`, so a connected session has to be reconnected after an update. The restart's question says so on Windows.
 
 ### Secrets
 

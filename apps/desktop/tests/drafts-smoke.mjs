@@ -21,8 +21,8 @@
  * 5. Restart to Update, with a stand-in updater (the test hook's fake driver; nothing is downloaded or
  *    installed): with an unsaved change, Cancel in the prompt keeps the app and the window, and the
  *    update stays ready. Keep Draft closes the window, writes down what was open and asks the updater
- *    to install. The next launch opens the project again with the unsaved change, and an MCP call that
- *    arrives first waits for it instead of landing on the launch document.
+ *    to install. The next launch opens the project again with the unsaved change and no welcome screen,
+ *    and an MCP call that arrives first waits for it instead of landing on the launch document.
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -371,6 +371,10 @@ try {
   assert(!existsSync(recordFile), "the record is used once");
   page = await app.firstWindow();
   assert((await page.evaluate(() => window.sonobeHost.reopening)) === true, "the editor is told this launch reopens work (sonobeHost.reopening)");
+  // The work is on screen with no welcome screen over it. (That the editor never shows one in this window, not even for a moment, is welcomeStore's unit test.)
+  await page.locator(".sb-shell").waitFor({ timeout: 10_000 });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert((await page.getByRole("dialog", { name: "Welcome to Sonobe" }).count()) === 0, "no welcome screen is over the reopened work");
   await mcp.close();
   log("the next launch opened the project again with its unsaved change, and the first MCP call waited for it");
 
