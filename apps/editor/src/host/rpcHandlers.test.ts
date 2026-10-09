@@ -212,7 +212,7 @@ describe("rpc handlers: drafts", () => {
     // A first window edits and goes away without saving.
     const first = setup("Agent Proto", { drafts });
     first.session.document.getState().apply([{ op: "addLayer", layer: { id: "hero", type: "oval", name: "Hero" } }], { label: "Add Hero" });
-    expect(await first.call("drafts.flush")).toMatchObject({ flushed: true, draft: { id: expect.any(String) } });
+    expect(await first.call("drafts.flush")).toMatchObject({ flushed: true, draft: { id: expect.any(String) }, pending: false });
     const id = (await first.call<{ draft: { id: string } }>("document.info")).draft.id;
     first.session.dispose();
     session = null;

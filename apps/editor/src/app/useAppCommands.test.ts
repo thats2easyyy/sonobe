@@ -6,6 +6,8 @@ import { createEditorSession, type EditorSession } from "../state/session.ts";
 import { CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import { appPanels } from "./appPanels.ts";
 import { learnNav } from "./learnStore.ts";
+import { fakeUpdatesHost } from "./updates/testing.ts";
+import { createUpdateStore, followUpdates } from "./updates/updateStore.ts";
 import { appCommands, runInPatchEditor, runWhenRegistered, zoomTarget } from "./useAppCommands.tsx";
 import { welcomeStore } from "./welcome/welcomeStore.ts";
 
@@ -48,6 +50,28 @@ describe("appCommands", () => {
     // Once the patch editor registers its own commands (with shortcuts), each align command is listed once.
     for (const id of ["insertPatch", "tidyUp", "commentSelection", "alignLeft", "alignRight", "alignTop", "alignBottom"]) registry.register({ id: `patchEditor.${id}`, title: id, run: () => undefined });
     expect(visible().filter((id) => id.startsWith("patch."))).toEqual([]);
+  });
+
+  it("lists Check for Updates… only in a copy that checks, and asks the app", async () => {
+    // The shared registry has no updates host (the browser, a checkout): the command stays out of the palette.
+    expect(registry.available().map((c) => c.id)).not.toContain("help.checkForUpdates");
+
+    const host = fakeUpdatesHost({ mode: "notify" });
+    const updates = createUpdateStore(() => host);
+    const desktop = new CommandRegistry();
+    desktop.register(appCommands(session, desktop, { updates }));
+    // Until the app has said what this copy does about updates, it isn't listed either.
+    expect(desktop.available().map((c) => c.id)).not.toContain("help.checkForUpdates");
+    const unfollow = followUpdates(updates, host);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(desktop.available().find((c) => c.id === "help.checkForUpdates")).toMatchObject({ title: "Check for Updates…", category: "Help" });
+    await desktop.run("help.checkForUpdates");
+    expect(host.calls).toEqual(["check"]);
+
+    host.push({ mode: "off" });
+    expect(desktop.available().map((c) => c.id)).not.toContain("help.checkForUpdates");
+    unfollow();
   });
 
   it("shows the Knobs tab, and flips between the running preset and the one before it as one undo step", () => {

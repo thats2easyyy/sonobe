@@ -5,9 +5,9 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
-import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, ViewerWindowStatus } from "./host-api.d.ts";
+import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
-import { IPC, MUTED_ARG } from "./ipc.ts";
+import { IPC, MUTED_ARG, REOPENING_ARG } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
 
 const platform = toHostPlatform(process.platform);
@@ -43,6 +43,11 @@ ipcRenderer.on(IPC.openProject, (_event, dir: unknown) => {
   for (const listener of [...openListeners]) listener(dir);
 });
 
+const updateListeners = new Set<(status: UpdateStatus) => void>();
+ipcRenderer.on(IPC.updatesChanged, (_event, status: UpdateStatus) => {
+  for (const listener of [...updateListeners]) listener(status);
+});
+
 let watchCounter = 0;
 
 /** invoke() whose errors carry the main process's message without Electron's "Error invoking remote method" prefix. */
@@ -57,6 +62,7 @@ const host: SonobeHost = {
   platform,
   version: __SONOBE_VERSION__,
   muted: process.argv.includes(MUTED_ARG),
+  reopening: process.argv.includes(REOPENING_ARG),
 
   openProjectDialog: () => ipcRenderer.invoke(IPC.dialogOpenProject) as Promise<string | null>,
   saveProjectDialog: (defaultName) => ipcRenderer.invoke(IPC.dialogSaveProject, String(defaultName ?? "Untitled")) as Promise<string | null>,
@@ -203,6 +209,22 @@ const host: SonobeHost = {
     return () => {
       ipcRenderer.removeListener(IPC.viewerWindowChanged, listener);
     };
+  },
+
+  updates: {
+    status: () => invoke<UpdateStatus>(IPC.updatesStatus),
+    check: () => invoke<UpdateStatus>(IPC.updatesCheck),
+    restart: () => invoke<boolean>(IPC.updatesRestart),
+    setAutoCheck: (enabled) => invoke<UpdateStatus>(IPC.updatesSetAutoCheck, enabled === true),
+    moveToApplications: () => invoke<boolean>(IPC.updatesMoveToApplications),
+    onStatus(cb) {
+      const listener = (status: UpdateStatus) => cb(status);
+      updateListeners.add(listener);
+      ipcRenderer.send(IPC.updatesListeners, updateListeners.size);
+      return () => {
+        if (updateListeners.delete(listener)) ipcRenderer.send(IPC.updatesListeners, updateListeners.size);
+      };
+    },
   },
 
   drafts: {

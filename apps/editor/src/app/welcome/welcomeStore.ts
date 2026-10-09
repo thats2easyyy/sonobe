@@ -28,9 +28,13 @@ export function hasSeenWelcome(key: string | null = WELCOME_SEEN_KEY): boolean {
   return key ? readString(key) !== null : false;
 }
 
-/** Launch behavior: always the first time, then only when the setting asks for it. */
-export function shouldShowWelcomeOnLaunch(seen: boolean, showOnLaunch: boolean): boolean {
-  return !seen || showOnLaunch;
+/**
+ * Launch behavior: always the first time, then only when the setting asks for it. Never in a window
+ * that is opening again what was open before a restart for an update (`reopening`): the person is
+ * coming back to their work.
+ */
+export function shouldShowWelcomeOnLaunch(seen: boolean, showOnLaunch: boolean, reopening = false): boolean {
+  return !reopening && (!seen || showOnLaunch);
 }
 
 export function createWelcomeStore(options: WelcomeStoreOptions = {}): StoreApi<WelcomeState> {
