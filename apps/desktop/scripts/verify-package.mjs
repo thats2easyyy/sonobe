@@ -14,6 +14,7 @@
  * - the entry is dist/boot.cjs, and the launch leaves Node's compile cache for main.cjs in the data folder, under this
  *   version's name, with the signature inside the bundle untouched; a second launch that has nowhere to keep one
  *   starts all the same
+ * - launched with a prototype's path, the editor is told before its first render and starts on it, not on the demo
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
  * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), keeps Node's compile cache in
  *   its own version's folder under SONOBE_HOME, and runs from a copy outside the checkout, where it has nothing but
@@ -385,6 +386,21 @@ try {
     await app.close();
     app = null;
     log("a launch with no folder for the compile cache starts and renders the editor");
+
+    // Launched with a prototype's path, the window is opened for it: its page asks what before the editor's first render
+    // (electron/launch.ts), and the document is the prototype, read by the preload on the way.
+    const project = path.join(temp, "Like Toggle.sonobe");
+    cpSync(path.resolve(root, "../../examples/02-like-toggle"), project, { recursive: true });
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", project], env: { ...env, SONOBE_USER_DATA: path.join(temp, "userData-project"), SONOBE_HOME: path.join(temp, "home-project") }, timeout: 60_000 });
+    const third = await app.firstWindow();
+    await poll(() => app.evaluate(() => globalThis.__sonobeTest?.hasRendererMethod("document.info") === true), { timeout: 15_000, message: "the editor of a launch with a prototype" });
+    const opened = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.info"));
+    const told = await third.evaluate(async () => ({ launching: window.sonobeHost.launching, info: await window.sonobeHost.launch(), toolbar: document.querySelector(".sb-toolbar__doc-title")?.textContent ?? null, url: location.href }));
+    assert(told.launching === true && told.info?.open?.kind === "project" && told.info.open.path === project && told.info.reopening === false, "a window opened for a prototype is told which (sonobeHost.launch())", told);
+    assert(opened.projectPath === project && opened.name === "Like Toggle" && opened.dirty === false && told.toolbar === "Like Toggle", "the editor starts on the prototype it was launched with", { name: opened.name, projectPath: opened.projectPath, toolbar: told.toolbar });
+    await app.close();
+    app = null;
+    log("launched with a prototype's path, the editor starts on it");
     log(`PASS (${verdict})`);
   }
 } catch (err) {

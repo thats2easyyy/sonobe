@@ -86,6 +86,7 @@ It reads the bundle first, then runs it:
 - **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and again from a copy outside the checkout (under `release/` it could load a package from the repository's `node_modules` that the bundle left out), and the app launches, shows the editor, answers `/health` and quits cleanly.
 - **The relay.** `Resources/cli/relay.mjs` is under 64 KB. `sonobe mcp` says how to start the app and exits 1 when none is running, and against the launched app it answers `initialize` and exits 0 when stdin closes. The CLI's own compile cache lands in `compile-cache/cli-<version>` under the launch's `SONOBE_HOME`.
 - **Compile cache.** The entry is `dist/boot.cjs`, the launch leaves `main.cjs`'s compiled code in `compile-cache/app-<version>` under the data folder, and `codesign --verify` still passes afterwards: nothing is written inside the app. A second launch with nowhere to keep a cache starts all the same.
+- **A prototype at launch.** Launched with the path of a copy of `examples/02-like-toggle`, the app tells the editor what the window was opened for and the editor shows that prototype.
 
 | Flag | Does |
 | --- | --- |
