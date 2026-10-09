@@ -1,0 +1,135 @@
+# Builds the Sonobe people download, on a version tag (ARCHITECTURE.md §12, CONTRIBUTING.md "Releasing"):
+# the Developer ID signed, notarized macOS app for arm64 and x64, with the zips and the feed an update
+# downloads. It ends at a DRAFT GitHub release. Publishing the draft is a person's step: it makes the
+# download public, and its latest-mac.yml becomes the feed installed apps read.
+#
+# Run it by hand from a branch (Actions → Release → Run workflow) to try the signing secrets: that builds,
+# signs, notarizes and verifies, keeps the files on the run, and makes no release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs for one tag would upload over each other. A release is never cancelled halfway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Holds the signing secrets, and a token that can only read the repository.
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      # Before anything is installed or signed: v0.2.0 must be the 0.2.0 that scripts/set-version.ts wrote.
+      - name: The tag is the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/set-version.ts --check "${GITHUB_REF_NAME#v}"
+      - name: The version is the same everywhere
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: node scripts/set-version.ts --check
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # notarytool takes the App Store Connect key as a file, so APPLE_API_KEY is a path, never the key's text.
+      - name: Write the notarization key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+      # Refuses to build without the Developer ID certificate and the notarization key, checks every app's
+      # signature and stapled ticket before it makes a DMG or zip, and never publishes (scripts/signing.ts).
+      - name: Package the release
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8" node apps/desktop/scripts/package.mjs --release
+      - name: Remove the notarization key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+      # Each architecture's app: Developer ID, hardened runtime, entitlements, Gatekeeper, the stapled ticket,
+      # then a launch. The Intel build runs under Rosetta.
+      - name: Verify the arm64 app
+        run: node apps/desktop/scripts/verify-package.mjs --release --arch arm64
+      - name: Verify the app inside the arm64 DMG
+        run: node apps/desktop/scripts/verify-package.mjs --release --arch arm64 --dmg
+      - name: Install Rosetta
+        run: softwareupdate --install-rosetta --agree-to-license
+      - name: Verify the x64 app
+        run: node apps/desktop/scripts/verify-package.mjs --release --arch x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sonobe-release
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/*-sourcemaps.tar.gz
+          if-no-files-found: error
+          # Everything in it is already compressed.
+          compression-level: 0
+          retention-days: 14
+
+  draft:
+    # The only job that can write to the repository, and it holds no signing secret and runs no code from it:
+    # it uploads the files the build job verified.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # No checkout here, so gh is told which repository it works on.
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sonobe-release
+          path: release
+      # Installed apps read latest-mac.yml from the newest published release. One that names a zip the
+      # release doesn't have, or another version, breaks updating for everyone.
+      - name: The update feed is complete
+        working-directory: release
+        run: |
+          ls -l
+          grep -qx "version: ${TAG#v}" latest-mac.yml || { echo "::error::latest-mac.yml isn't for ${TAG#v}"; exit 1; }
+          zips="$(sed -n 's/^  - url: //p' latest-mac.yml)"
+          [ -n "$zips" ] || { echo "::error::latest-mac.yml lists no zip"; exit 1; }
+          for zip in $zips; do
+            [ -f "$zip" ] && [ -f "$zip.blockmap" ] || { echo "::error::latest-mac.yml lists $zip, and the build didn't upload it with its blockmap"; exit 1; }
+          done
+      - name: Draft the GitHub release
+        working-directory: release
+        run: |
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo none)"
+          case "$state" in
+            false)
+              echo "::error::$TAG is already published, and a published release is never replaced. Cut a new version."
+              exit 1
+              ;;
+            true)
+              # A second run for the same tag refreshes the draft's files.
+              gh release upload "$TAG" --clobber ./*
+              ;;
+            *)
+              gh release create "$TAG" --draft --verify-tag --title "Sonobe ${TAG#v}" --generate-notes ./*
+              ;;
+          esac
+          echo "Drafted $TAG. Review it, try the DMG on a clean Mac, then publish it by hand (CONTRIBUTING.md, Releasing)." >> "$GITHUB_STEP_SUMMARY"
