@@ -618,16 +618,25 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
 
-  // A move, resize or rotate still held when the canvas goes away (a view switch) is kept as one undo
-  // step, as letting go would. That also closes its gesture, which drafts and the patch editor wait for.
+  // A move, resize or rotate whose pointer-up can't arrive is kept as one undo step, as letting go
+  // would: the canvas goes away (a view switch), the pointer's capture is lost, or another pointer
+  // presses. That also closes its gesture, which drafts and the patch editor wait for.
   const finishDrag = useEventCallback(() => {
     const g = gestureRef.current;
-    if (!g || (g.kind !== "move" && g.kind !== "resize" && g.kind !== "rotate")) return;
+    if (!g || (g.kind !== "move" && g.kind !== "resize" && g.kind !== "rotate")) return false;
     gestureRef.current = null;
     g.txn.commit();
     if (g.kind === "move" && g.duplicate) finishDuplicate(g.duplicate, g.txn.ops, g.txn.label, latest.current.componentId);
+    return true;
   });
-  useEffect(() => () => finishDrag(), [finishDrag]);
+  useEffect(() => () => void finishDrag(), [finishDrag]);
+
+  /** `finishDrag` on a canvas that stays: the drag's guides and cursor go with it. */
+  const dropDrag = () => {
+    if (!finishDrag()) return;
+    setDraft(EMPTY_DRAFT);
+    setCursor(undefined);
+  };
 
   /** Focus from a click or a drop is not keyboard focus: the ring stays off (canvas.css reads data-kbd). */
   const focusFromPointer = () => {
@@ -647,6 +656,8 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const base: GestureBase = { pointerId: event.pointerId, start: a, startScreen: p };
     focusFromPointer();
     finishNudge();
+    // A drag still in flight ends here: a second pointer (another finger, a pen beside the mouse) takes over, and the first one's pointer-up no longer finds its drag.
+    dropDrag();
     setAltMeasure([]);
 
     if (event.button === 1 || (event.button === 0 && latest.current.spaceHeld)) {
@@ -814,6 +825,11 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
 
   const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (gestureRef.current?.pointerId === event.pointerId) cancelGesture();
+  };
+
+  // The canvas can lose the pointer with no pointer-up to follow (something else captures it, or releases it): the drag ends where it is.
+  const onLostPointerCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && gestureRef.current?.pointerId === event.pointerId) dropDrag();
   };
 
   const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1271,6 +1287,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         onPointerMove={canDraw ? onPointerMove : undefined}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onLostPointerCapture}
         onPointerEnter={() => (pointerInside.current = true)}
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}

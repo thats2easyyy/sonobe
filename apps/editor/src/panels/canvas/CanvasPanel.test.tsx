@@ -236,6 +236,36 @@ describe("CanvasPanel", () => {
     root = createRoot(container);
   });
 
+  it("keeps a drag whose pointer-up can't arrive, and closes its gesture: the capture is lost, or a second pointer presses", () => {
+    mount();
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+
+    // The canvas loses the pointer mid-drag, and no pointer-up follows.
+    pointer("pointerdown", at(200, 520));
+    for (let i = 1; i <= 6; i++) pointer("pointermove", at(200 + i * 5, 520 + i * 5), { metaKey: true });
+    expect(session.document.getState().gesture).not.toBeNull();
+    pointer("lostpointercapture", at(230, 550));
+    expect(session.document.getState().gesture).toBeNull();
+    expect(position("card")).toEqual([46, 176]);
+    // The layer stays where it was dropped when the pointer comes back over the canvas.
+    pointer("pointermove", at(300, 620), { buttons: 0 });
+    expect(position("card")).toEqual([46, 176]);
+
+    // Another pointer presses mid-drag: the drag ends there, and its own pointer-up changes nothing.
+    pointer("pointerdown", at(230, 550));
+    for (let i = 1; i <= 4; i++) pointer("pointermove", at(230 + i * 5, 550), { metaKey: true });
+    expect(session.document.getState().gesture).not.toBeNull();
+    pointer("pointerdown", at(250, 550), { pointerId: 2 });
+    expect(session.document.getState().gesture).toBeNull();
+    pointer("pointermove", at(280, 550), { metaKey: true });
+    pointer("pointerup", at(280, 550));
+    pointer("pointerup", at(250, 550), { pointerId: 2 });
+    expect(position("card")).toEqual([66, 176]);
+    expect(session.document.getState().gesture).toBeNull();
+    expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Move Event Card", "Move Event Card"]);
+  });
+
   it("marks focus as keyboard focus only when it did not come from a pointer", () => {
     mount();
     act(() => body().focus());
