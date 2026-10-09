@@ -215,6 +215,8 @@ function main(): void {
     const template = toMenuTemplate(spec, platform, {
       command: (id: SonobeCommandId) => {
         if (id === "viewer.previewOnDevice") void showPhonePreview().catch((err: unknown) => log("warn", `Phone preview failed: ${errorMessage(err)}`));
+        // With no window open, About is the system's panel: it doesn't open a window to show a dialog in.
+        else if (id === "help.about" && windows.size === 0) app.showAboutPanel();
         else void ensureWindow().then((w) => w.sendCommand(id));
       },
       openRecent: (dir) => void openProjects([dir]),

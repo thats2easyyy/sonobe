@@ -74,7 +74,8 @@ export type SonobeCommandId =
   | "help.explain"
   | "help.connectClaude"
   | "help.shortcuts"
-  | "help.reportIssue";
+  | "help.reportIssue"
+  | "help.about";
 
 /** A command as shown in menus, for the command palette and the editor keymap. */
 export interface SonobeCommandInfo {

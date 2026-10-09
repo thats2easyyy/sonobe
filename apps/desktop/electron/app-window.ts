@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, screen, shell, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, screen, shell, type WebContents } from "electron";
 import { existsSync } from "node:fs";
 import type { SonobeCommandId } from "./host-api.d.ts";
 import { ISSUES_URL } from "./commands.ts";
@@ -79,6 +79,10 @@ function nativeFallback(win: BrowserWindow, id: SonobeCommandId): boolean {
       return true;
     case "edit.delete":
       wc.delete();
+      return true;
+    // The system's panel, with the version: the page in the window has no About of its own.
+    case "help.about":
+      app.showAboutPanel();
       return true;
     default:
       return false;

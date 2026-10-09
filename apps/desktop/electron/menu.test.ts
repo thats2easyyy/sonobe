@@ -133,16 +133,18 @@ describe("the update item", () => {
   const withUpdates = (platform: HostPlatform, updates?: "check" | "restart") => buildMenuSpec({ platform, appName: "Sonobe", recentProjects: [], dev: false, ...(updates ? { updates } : {}) });
   const submenu = (nodes: MenuNode[], label: string) => nodes.find((n): n is Extract<MenuNode, { kind: "submenu" }> => n.kind === "submenu" && n.label === label)!;
   const check: MenuNode = { kind: "action", action: "checkForUpdates", label: "Check for Updates…" };
+  // The editor's About, which shows the update state: a command, not the system's panel.
+  const about: MenuNode = { kind: "command", id: "help.about", label: "About Sonobe" };
 
   it("sits right under About in the app menu on macOS", () => {
     const items = submenu(withUpdates("darwin", "check"), "Sonobe").items;
-    expect(items.slice(0, 3)).toEqual([{ kind: "role", role: "about", label: "About Sonobe" }, check, { kind: "separator" }]);
+    expect(items.slice(0, 3)).toEqual([about, check, { kind: "separator" }]);
     expect(labels(submenu(withUpdates("darwin", "check"), "Help").items)).not.toContain("Check for Updates…");
   });
 
   it.each(["win32", "linux"] as const)("sits above About in Help on %s", (platform) => {
     const items = submenu(withUpdates(platform, "check"), "Help").items;
-    expect(items.slice(-3)).toEqual([{ kind: "separator" }, check, { kind: "role", role: "about", label: "About Sonobe" }]);
+    expect(items.slice(-3)).toEqual([{ kind: "separator" }, check, about]);
   });
 
   it("reads Restart to Update once an update is ready", () => {

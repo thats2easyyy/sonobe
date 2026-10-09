@@ -54,12 +54,15 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
   const updateItems: MenuNode[] =
     ctx.updates === "restart" ? [{ kind: "action", action: "restartToUpdate", label: "Restart to Update" }] : ctx.updates === "check" ? [{ kind: "action", action: "checkForUpdates", label: "Check for Updates…" }] : [];
 
+  // The editor's About, which says where this copy stands with updates. Main shows the system's panel when no editor can (main.ts, app-window.ts).
+  const about: MenuNode = { kind: "command", id: "help.about", label: `About ${ctx.appName}` };
+
   const appMenu: MenuNode = {
     kind: "submenu",
     label: ctx.appName,
     role: "appMenu",
     items: [
-      { kind: "role", role: "about", label: `About ${ctx.appName}` },
+      about,
       ...updateItems,
       sep,
       cmd("app.settings"),
@@ -226,7 +229,7 @@ export function buildMenuSpec(ctx: MenuContext): MenuNode[] {
       cmd("help.connectClaude"),
       sep,
       cmd("help.reportIssue"),
-      ...(mac ? [] : [sep, ...updateItems, { kind: "role", role: "about", label: `About ${ctx.appName}` } satisfies MenuNode]),
+      ...(mac ? [] : [sep, ...updateItems, about]),
     ],
   };
 

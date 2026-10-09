@@ -101,6 +101,7 @@ export const COMMANDS: Readonly<Record<SonobeCommandId, CommandSpec>> = {
   "help.connectClaude": { label: "Connect Claude…" },
   "help.shortcuts": { label: "Keyboard Shortcuts", accelerator: { mac: "Cmd+Alt+/", other: "Ctrl+Shift+/" } },
   "help.reportIssue": { label: "Report an Issue…" },
+  "help.about": { label: "About Sonobe" },
 };
 
 export const COMMAND_IDS = Object.keys(COMMANDS) as SonobeCommandId[];
