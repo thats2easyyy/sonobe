@@ -165,6 +165,27 @@ describe("createDomRenderer", () => {
     expect(writtenStyle(body, "border-radius")).toBe("8px");
   });
 
+  it("compares only the bound values of props that inherit one defaults object", () => {
+    const defaults = { color: "#0000FFFF", cornerRadius: 8, strokeWidth: 0 };
+    const draw = (bound: Record<string, unknown>) => {
+      const before = renderer.getStats().styleWrites;
+      renderer.render(frame([node("r", "rectangle", Object.assign(Object.create(defaults), bound) as Record<string, unknown>)]));
+      const body = renderer.elementForKey("r")!.firstElementChild!;
+      return [renderer.getStats().styleWrites - before, writtenStyle(body, "background-color"), writtenStyle(body, "border-radius")];
+    };
+    draw({ color: "#FF0000FF", position: [0, 0] });
+    // The same bound values in new objects, in either order: nothing to do.
+    expect(draw({ color: "#FF0000FF", position: [0, 0] })).toEqual([0, "rgba(255, 0, 0, 1)", "8px"]);
+    expect(draw({ position: [0, 0], color: "#FF0000FF" })).toEqual([0, "rgba(255, 0, 0, 1)", "8px"]);
+    // A bound value changed.
+    expect(draw({ position: [0, 0], color: "#00FF00FF" })).toEqual([1, "rgba(0, 255, 0, 1)", "8px"]);
+    // One more prop is bound, then it isn't.
+    expect(draw({ position: [0, 0], color: "#00FF00FF", cornerRadius: 20 })).toEqual([1, "rgba(0, 255, 0, 1)", "20px"]);
+    expect(draw({ position: [0, 0], color: "#00FF00FF" })).toEqual([1, "rgba(0, 255, 0, 1)", "8px"]);
+    // As many bound props as before, but another one, set to its default: the color is the default's again.
+    expect(draw({ position: [0, 0], cornerRadius: 8 })).toEqual([1, "rgba(0, 0, 255, 1)", "8px"]);
+  });
+
   it("moves a keyed node to a new parent without recreating it", () => {
     const child = node("child", "rectangle");
     renderer.render(frame([node("g1", "group", {}, [child]), node("g2", "group")]));

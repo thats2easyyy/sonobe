@@ -133,20 +133,20 @@ interface StyleMemo {
 function sameStyleProps(a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean {
   const proto = Object.getPrototypeOf(a) as object | null;
   if (proto !== null && proto !== Object.prototype && proto === Object.getPrototypeOf(b)) {
-    // Engine scenes: both inherit one defaults object, so only own (bound) values can differ. for...in
-    // lists own keys before inherited ones, so each loop stops at the first inherited key.
-    let n = 0;
-    for (const key in a) {
-      if (!Object.hasOwn(a, key)) break;
-      n++;
+    // Engine scenes: both inherit one defaults object, so only own (bound) values can differ.
+    // Object.keys, not for...in, which gathers every inherited key before it yields the first own one.
+    const keys = Object.keys(a);
+    const others = Object.keys(b);
+    if (keys.length !== others.length) return false;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]!;
       if (a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
     }
-    for (const key in b) {
-      if (!Object.hasOwn(b, key)) break;
-      n--;
-      if (!Object.hasOwn(a, key) && a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
+    for (let i = 0; i < others.length; i++) {
+      const key = others[i]!;
+      if (key !== keys[i] && !Object.hasOwn(a, key) && a[key] !== b[key] && !GEOMETRY_KEYS.has(key)) return false;
     }
-    return n === 0;
+    return true;
   }
   let n = 0;
   for (const key in a) {
