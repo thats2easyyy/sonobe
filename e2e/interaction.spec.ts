@@ -88,13 +88,26 @@ test.describe("building an interaction in the UI", () => {
     await expect.poll(() => hook(page, (s) => s.getValue("@photo.scale") as number)).toBeCloseTo(1, 3);
     // The device content layer captures input for the prototype, so tap at the photo's position on screen.
     const photoCenter = await centerOf(page.locator('#sb-viewer [data-layer="photo"]').first());
+    // Sampled on every animation frame in the page, from before the tap: the prototype rests once the spring
+    // settles, and reads made from here, a round trip each, can miss most of it on a busy machine.
+    const recording = hook(
+      page,
+      (s) =>
+        new Promise<{ frame: number; scale: number }[]>((resolve) => {
+          const samples: { frame: number; scale: number }[] = [];
+          const end = performance.now() + 1500;
+          const sample = () => {
+            samples.push({ frame: s.frame(), scale: s.getValue("@photo.scale") as number });
+            if (performance.now() < end) requestAnimationFrame(sample);
+            else resolve(samples);
+          };
+          requestAnimationFrame(sample);
+        }),
+    );
     await page.mouse.click(photoCenter.x, photoCenter.y);
-    const samples: { frame: number; scale: number }[] = [];
-    for (let i = 0; i < 24; i++) {
-      samples.push(await hook(page, (s) => ({ frame: s.frame(), scale: s.getValue("@photo.scale") as number })));
-      if (i === 6) await screenshot(page, "app-04-tap-animating");
-      await page.waitForTimeout(40);
-    }
+    await page.waitForTimeout(240);
+    await screenshot(page, "app-04-tap-animating");
+    const samples = await recording;
     const frames = new Set(samples.map((s) => s.frame));
     const distinct = new Set(samples.map((s) => s.scale.toFixed(4)));
     expect(frames.size).toBeGreaterThan(8);

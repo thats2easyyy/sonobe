@@ -19,7 +19,10 @@ const pick = defineMock({
   },
 });
 
-/** State that goes bad on frame 3 and stays bad: indices 0 and 1, then only 5 (past the end). */
+/**
+ * State that goes bad on frame 3 and stays bad: indices 0 and 1, then only 5 (past the end). It asks
+ * for frames until then, as a patch that waits on something must, or the prototype rests first.
+ */
 const latch = defineMock<{ tripped: boolean }>({
   type: "latch",
   name: "Latch",
@@ -29,11 +32,26 @@ const latch = defineMock<{ tripped: boolean }>({
   state: () => ({ tripped: false }),
   evaluate(ctx) {
     if (ctx.frame >= 3) ctx.state.tripped = true;
+    else ctx.requestNextFrame();
     ctx.output("index", (ctx.state.tripped ? [5] : [0, 1]) as never);
   },
 });
 
-const registry = createMockRegistry([pick, latch]);
+/** Keeps the prototype running for ten seconds of frames, and restarts it once Go is on past that. */
+const LONG_RUN = 600;
+const again = defineMock({
+  type: "again",
+  name: "Again",
+  inputs: [port("go", "boolean", { default: false })],
+  outputs: [],
+  evaluate(ctx) {
+    if (ctx.input<boolean>("go")) {
+      if (ctx.frame > LONG_RUN) ctx.services.restart();
+    } else if (ctx.frame < LONG_RUN) ctx.requestNextFrame();
+  },
+});
+
+const registry = createMockRegistry([pick, latch, again]);
 
 /** Dots at three positions whose opacity Pick picks; its index comes from Latch, or is fixed. */
 const dots = (index: unknown = { link: "latch.index" }) =>
@@ -103,12 +121,19 @@ describe("the viewer's restart offer", () => {
     expect(host.state.getState().diagnostics).toEqual([expect.objectContaining({ code: "empty_loop" })]);
     expect(host.state.getState().staleState).toBeNull();
 
+    // Nothing moves any more, so the loop is at rest when the edit arrives.
+    expect(host.isResting()).toBe(true);
+
     // An edit while the warning is up; the latch stays tripped, so the dots stay gone.
     store.getState().apply([{ op: "rename", id: "fade", name: "Fade" }], { label: "Rename" });
     scheduler.frames(2);
     expect(host.state.getState().staleState).toBeNull();
-    scheduler.frames(20);
+    // The check needs a few frames and 300 ms: the loop stays awake for it, then rests again.
+    scheduler.frames(10);
+    expect(host.isResting()).toBe(false);
+    scheduler.frames(10);
     expect(host.state.getState().staleState).toEqual({ layerId: "dot", copies: 3 });
+    expect(host.isResting()).toBe(true);
 
     const restarts: number[] = [];
     host.subscribeRestart(() => restarts.push(host.runtime.frame));
@@ -146,6 +171,23 @@ describe("the viewer's restart offer", () => {
     scheduler.frames(30);
     expect(host.scene()!.roots).toHaveLength(3);
     expect(host.state.getState().staleState).toBeNull();
+  });
+
+  it("counts the check's frames from the edit: a prototype that restarts itself right after it still rests", () => {
+    const { scheduler, store, host } = setup(edit(dots(), [{ op: "addPatch", patch: { id: "again", type: "again" } }]));
+    for (let i = 0; i < LONG_RUN + 10 && !host.isResting(); i++) scheduler.frame();
+    expect(host.runtime.frame).toBeGreaterThan(LONG_RUN);
+    expect(host.state.getState().diagnostics).toEqual([expect.objectContaining({ code: "empty_loop" })]);
+
+    // The edit arms the check, and the prototype starts over on the frame after it: frame 0 again.
+    store.getState().apply([{ op: "setInput", target: "again.go", value: true }], { label: "Go" });
+    scheduler.frames(3);
+    expect(host.runtime.frame).toBeLessThan(3);
+    let frames = 0;
+    for (; frames < LONG_RUN && !host.isResting(); frames++) scheduler.frame();
+    expect(host.isResting()).toBe(true);
+    // Three frames and 300 ms, not the six hundred frames it had run before.
+    expect(frames).toBeLessThan(30);
   });
 
   it("uses the edited document for the fresh copy", () => {

@@ -230,6 +230,10 @@ const videoDrawer: Drawer = {
       el.setAttribute("muted", "");
       el.setAttribute("playsinline", "");
       el.disablePictureInPicture = true;
+      // The element's state is read when a frame is drawn, and a prototype at rest draws none: what a
+      // video that isn't playing learns between frames (its size and length, a seek that landed) asks
+      // for one. A playing video keeps the prototype awake (the engine's LIVE_LAYERS).
+      for (const type of ["loadedmetadata", "loadeddata", "durationchange", "seeked", "error"]) el.addEventListener(type, () => ctx.invalidate());
       return { el, src: null, scrubTime: null, blockedAtGesture: null, pending: false, reported: "" };
     });
     const video = st.el;
@@ -553,7 +557,7 @@ const shaderDrawer: Drawer = {
       const err = ctx.shaders.draw(code, st.canvas, pw, ph, {
         resolution: [pw, ph, ratio],
         time: ctx.frame.time,
-        timeDelta: Math.max(0, ctx.frame.time - ctx.prevTime),
+        timeDelta: ctx.frameDelta,
         frame: ctx.frame.frame,
         mouse,
         uniform: lookup,
@@ -592,6 +596,12 @@ const cloneDrawer: Drawer = {
   },
 };
 
+/**
+ * A prototype at rest draws no frames (ARCHITECTURE.md §5.2). A drawer that draws from `ctx.frame.time`
+ * or reads an element's state on every frame (shader, lottie, video) needs a rule in the engine's
+ * LIVE_LAYERS (packages/engine/src/runtime/scene.ts), or it freezes at rest. What changes between
+ * frames without playing (media that loaded) calls `ctx.invalidate()`.
+ */
 export const DRAWERS: Readonly<Record<string, Drawer>> = {
   group: boxDrawer("group"),
   componentInstance: boxDrawer("componentInstance"),

@@ -1,10 +1,11 @@
 /**
  * App commands: New (the welcome screen), Import Design, Close, Settings, Rename, Insert Layer, Use as Mask, Align
- * Right and Bottom, full-screen viewer, the knob commands, Connect Claude, lessons, About, and Report
- * an Issue; plus hidden aliases so every native menu item reaches the panel that owns it.
+ * Right and Bottom, full-screen viewer, the knob commands, Connect Claude, lessons, About, Check for
+ * Updates (desktop), and Report an Issue; plus hidden aliases so every native menu item reaches the
+ * panel that owns it.
  */
 
-import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, ScanLine, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
+import { AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, BookMarked, Bug, CircleArrowDown, FilePlus, FileX, GraduationCap, Info, Keyboard, LayoutTemplate, Maximize, MessageSquarePlus, Pencil, ScanLine, Scissors, Settings, SquarePlus, Workflow } from "lucide-react";
 import { connectClaudeCommand } from "../panels/connect/commands.ts";
 import { connectClaudeStore } from "../panels/connect/connectStore.ts";
 import { knobCommands } from "../panels/knobs/commands.ts";
@@ -17,6 +18,7 @@ import { closePrototype, insertLayer, renameSelection, reportIssue, toggleViewer
 import { appPanels } from "./appPanels.ts";
 import { learnNav } from "./learnStore.ts";
 import { dialogsFor } from "./sessionServices.ts";
+import { updateStore } from "./updates/updateStore.ts";
 import { welcomeStore } from "./welcome/welcomeStore.ts";
 
 const nextFrame = (fn: () => void) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => fn()) : setTimeout(fn, 16));
@@ -61,11 +63,14 @@ export function zoomTarget(session: EditorSession, action: "zoomIn" | "zoomOut" 
 
 export interface AppCommandOptions {
   platform?: Platform;
+  /** Where the app stands with updates. Default: the app-wide store. */
+  updates?: Pick<typeof updateStore, "getState">;
 }
 
 /** Commands defined by the app (not a panel), including menu aliases. */
 export function appCommands(session: EditorSession, registry: CommandRegistry, options: AppCommandOptions = {}): Command[] {
   const platform = options.platform ?? "mac";
+  const updates = options.updates ?? updateStore;
   const layout = () => layoutStore.getState();
   const sel = () => session.selection.getState();
   const showConnect = () => connectClaudeStore.getState().show();
@@ -124,6 +129,16 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
     { id: "help.welcome", title: "Welcome Screen", category: "Help", icon: LayoutTemplate, keywords: ["start", "templates", "recent"], run: () => welcomeStore.getState().show("menu") },
     { id: "help.reportIssue", title: "Report an Issue…", category: "Help", icon: Bug, keywords: ["bug", "feedback", "github"], run: () => void reportIssue(session) },
     { id: "help.about", title: "About Sonobe", category: "Help", icon: Info, keywords: ["version", "credits", "licenses", "open source"], run: () => appPanels.getState().show("about") },
+    // The menu's own Check for Updates… is handled by the app, so it works with no window open. This is the palette's, listed only in a copy that checks.
+    {
+      id: "help.checkForUpdates",
+      title: "Check for Updates…",
+      category: "Help",
+      icon: CircleArrowDown,
+      keywords: ["update", "upgrade", "new version", "latest", "download", "release"],
+      hidden: () => (updates.getState().status?.mode ?? "off") === "off",
+      run: () => void updates.getState().check(),
+    },
     // Fallback when the Assistant panel isn't registered (EditorApp registers the real one first): the menu's Assistant item opens Connect Claude.
     { id: "ai.assistant", title: "Assistant", hidden: true, run: showConnect },
     {

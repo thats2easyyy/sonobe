@@ -141,6 +141,7 @@ function EmptyLoopNote({ session }: { session: EditorSession }) {
 /** Docked, the footer is a status word and the chips: playback lives in the toolbar. The floating window has no toolbar, so it keeps play/pause and the fps. */
 function ViewerFooter({ session, phone, phoneOpen, onPhoneOpenChange, floating }: { session: EditorSession; phone: PhonePreviewController; phoneOpen: boolean; onPhoneOpenChange: (open: boolean) => void; floating: boolean }) {
   const playing = useStore(session.runtime.state, (s) => s.playing);
+  const resting = useStore(session.runtime.state, (s) => s.resting);
   const fps = useStore(session.runtime.state, (s) => s.fps);
   const frame = useStore(session.runtime.state, (s) => s.frame);
   const diagnostics = useStore(session.runtime.state, (s) => s.diagnostics);
@@ -153,7 +154,8 @@ function ViewerFooter({ session, phone, phoneOpen, onPhoneOpenChange, floating }
 
   return (
     <div className="sb-vw__footer" data-floating={floating || undefined}>
-      <Tooltip placement="top" content={playing ? formatFps(rounded) : `Frame ${Math.max(0, frame).toLocaleString("en-US")}`}>
+      {/* The word stays Live while nothing moves: the prototype answers the next tap at once. Only the rate has nothing to say. */}
+      <Tooltip placement="top" content={!playing ? `Frame ${Math.max(0, frame).toLocaleString("en-US")}` : resting ? "At rest: nothing is moving" : formatFps(rounded)}>
         <span className="sb-vw__pill" data-static="" tabIndex={0} data-playing={playing || undefined}>
           <span className="sb-vw__dot" aria-hidden />
           {playing ? "Live" : "Paused"}

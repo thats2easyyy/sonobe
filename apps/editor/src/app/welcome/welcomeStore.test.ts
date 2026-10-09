@@ -8,6 +8,12 @@ describe("welcome store", () => {
     expect(shouldShowWelcomeOnLaunch(true, true)).toBe(true);
   });
 
+  it("stays away from the window that reopens what was open before an update", () => {
+    expect(shouldShowWelcomeOnLaunch(false, false, true)).toBe(false);
+    expect(shouldShowWelcomeOnLaunch(true, true, true)).toBe(false);
+    expect(shouldShowWelcomeOnLaunch(true, true, false)).toBe(true);
+  });
+
   it("opens with a reason and closes", () => {
     const store = createWelcomeStore({ storageKey: null });
     expect(store.getState().open).toBe(false);

@@ -45,13 +45,15 @@ describe("microphone", () => {
     const h = createPatchHarness(microphonePatch, { inputs: { enabled: true, recording: true }, services: { platform: m.platform as never } });
     const f0 = h.step();
     expect(f0.outputs.available).toBe(false);
+    // Opening, and later the recording, finish between frames: it asks for frames while they're pending.
+    expect(f0.requestedNextFrame).toBe(true);
     expect(m.log).toEqual([["open", "main/patch_1"]]);
     m.opens[0]!.resolve({ live: "microphone/main/patch_1" });
     await flush();
     const live = h.step();
     expect(live.outputs).toMatchObject({ available: true, metering: { live: "microphone/main/patch_1" } });
     expect(m.log.at(-1)).toEqual(["record", "main/patch_1", { audio: true }]);
-    h.step({ inputs: { recording: false } });
+    expect(h.step({ inputs: { recording: false } }).requestedNextFrame).toBe(true);
     m.recordings[0]!.resolve({ url: "blob:voice" });
     await flush();
     const done = h.step();

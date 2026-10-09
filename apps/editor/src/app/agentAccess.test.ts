@@ -27,6 +27,24 @@ describe("agent access", () => {
     expect(isAgentWrite("design.preview", { status: "writing", html: "<p>Hi</p>" })).toBe(false);
   });
 
+  it("lets the app act for the person while Claude is read only: Save in the close prompt, and reopening a draft", () => {
+    expect(isAgentWrite("document.save", { interactive: true })).toBe(false);
+    expect(isAgentWrite("document.recoverDraft", { id: "draft-0001-abcd", person: true })).toBe(false);
+    // The forms an agent's save_document and open_document send are still writes.
+    expect(isAgentWrite("document.save", { noDialog: true })).toBe(true);
+    expect(isAgentWrite("document.save", { noDialog: true, path: "/Users/me/Deck.sonobe", force: true })).toBe(true);
+    expect(isAgentWrite("document.recoverDraft", { id: "draft-0001-abcd" })).toBe(true);
+    expect(isAgentWrite("document.save", { interactive: "true" })).toBe(true);
+    const { rpc, handlers } = fakeRpc();
+    const guarded = guardRpcRegistrar(rpc, () => "readOnly");
+    guarded.handle("document.save", () => ({ ok: true }));
+    guarded.handle("document.recoverDraft", () => ({ ok: true }));
+    expect(handlers.get("document.save")!({ interactive: true })).toEqual({ ok: true });
+    expect(handlers.get("document.save")!({ noDialog: true })).toMatchObject({ failed: { code: AGENT_READ_ONLY_CODE } });
+    expect(handlers.get("document.recoverDraft")!({ id: "draft-0001-abcd", person: true })).toEqual({ ok: true });
+    expect(handlers.get("document.recoverDraft")!({ id: "draft-0001-abcd" })).toMatchObject({ failed: { code: AGENT_READ_ONLY_CODE } });
+  });
+
   it("refuses writes while read only and passes everything else through", () => {
     const { rpc, handlers } = fakeRpc();
     let permission: AgentPermission = "readOnly";

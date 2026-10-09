@@ -7,7 +7,7 @@ import { Button } from "../../ui/Button.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { usePerfSamples } from "./hooks.ts";
 import { itemDisplayName } from "./itemNames.ts";
-import { documentStats, formatMs, frameBudgetShare, patchTimingsOf, sceneStats, smoothness, summarizeSamples, type PatchTiming, type SceneStats } from "./perfModel.ts";
+import { displayRateOr60, documentStats, formatMs, frameBudgetShare, framesRan, patchTimingsOf, sceneStats, smoothness, summarizeSamples, type PatchTiming, type SceneStats } from "./perfModel.ts";
 import { revealItems } from "./reveal.ts";
 import { SampleChart } from "./SampleChart.tsx";
 
@@ -31,7 +31,13 @@ export interface PerformanceViewProps {
 export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
   const session = useEditorSession();
   const { samples, reset } = usePerfSamples({ capacity: CAPACITY, intervalMs: SAMPLE_MS });
+  // The headline reads the host as it publishes, like the strip above it. The samples are for the
+  // charts: they are half a second apart, and the last one before a wake was taken at rest.
+  const fps = useRuntimeState((s) => s.fps);
   const playing = useRuntimeState((s) => s.playing);
+  const resting = useRuntimeState((s) => s.resting);
+  // The live viewer draws at the display's rate, so that is the rate and the frame budget to judge by.
+  const rate = displayRateOr60(useRuntimeState((s) => s.displayHz));
   const frame = useRuntimeState((s) => s.frame);
   const time = useRuntimeState((s) => s.time);
   const doc = useDocument((s) => s.doc);
@@ -53,13 +59,14 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
     return () => clearInterval(timer);
   }, [session, active]);
 
-  const summary = summarizeSamples(samples);
-  const status = smoothness(summary.fps.latest, playing);
-  const fpsValues = useMemo(() => samples.map((s) => (s.playing && s.fps > 0 ? s.fps : null)), [samples]);
-  const msValues = useMemo(() => samples.map((s) => (s.playing ? s.frameMs : null)), [samples]);
-  const msMax = Math.max(16.7, ...samples.map((s) => s.frameMs));
-  const budgetMs = 1000 / (doc.project.fps ?? 60);
-  const budget = frameBudgetShare(summary.frameMs.avg, doc.project.fps ?? 60);
+  const summary = summarizeSamples(samples, rate);
+  const status = smoothness(fps, playing, { resting, displayHz: rate });
+  // Paused and resting samples are gaps: no frames ran, so there is no rate or frame time to plot.
+  const fpsValues = useMemo(() => samples.map((s) => (framesRan(s) ? s.fps : null)), [samples]);
+  const msValues = useMemo(() => samples.map((s) => (s.playing && !s.resting ? s.frameMs : null)), [samples]);
+  const budgetMs = 1000 / rate;
+  const msMax = Math.max(budgetMs, ...samples.map((s) => s.frameMs));
+  const budget = frameBudgetShare(summary.frameMs.avg, rate);
   const fpsMin = Math.max(0, Math.min(30, Math.floor(Math.min(...fpsValues.map((v) => v ?? Infinity)) - 5)));
 
   if (!active || !stats) return null;
@@ -70,7 +77,7 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
         <div className="sb-perfx">
           <section className="sb-perfx__charts" aria-label="Frame rate">
             <div className="sb-perfx__headline">
-              <span className="sb-perfx__fps sb-tabular">{playing ? Math.round(summary.fps.latest) : "–"}</span>
+              <span className="sb-perfx__fps sb-tabular">{playing && !resting && fps > 0 ? Math.round(fps) : "–"}</span>
               <span className="sb-perfx__unit">fps</span>
               <Badge tone={status.tone} dot>
                 {status.label}
@@ -86,10 +93,10 @@ export function PerformanceView({ active = true }: PerformanceViewProps = {}) {
                 values={fpsValues}
                 capacity={CAPACITY}
                 min={fpsMin}
-                max={Math.max(62, ...fpsValues.map((v) => v ?? 0))}
-                target={{ value: 60, label: "60" }}
+                max={Math.max(rate + 2, ...fpsValues.map((v) => v ?? 0))}
+                target={{ value: rate, label: String(rate) }}
                 format={(v) => `${Math.round(v)} fps`}
-                label={summary.playingSamples ? `Frame rate over the last minute: average ${Math.round(summary.fps.avg)} fps, lowest ${Math.round(summary.fps.min)} fps` : "Frame rate: the prototype is paused"}
+                label={summary.playingSamples ? `Frame rate over the last minute: average ${Math.round(summary.fps.avg)} fps, lowest ${Math.round(summary.fps.min)} fps` : playing ? "Frame rate: the prototype is at rest" : "Frame rate: the prototype is paused"}
                 sampleMs={SAMPLE_MS}
                 height={48}
                 {...(status.tone === "warn" || status.tone === "danger" ? { tone: status.tone } : {})}

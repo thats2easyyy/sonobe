@@ -57,6 +57,18 @@ describe("soundPlayer", () => {
     }
   });
 
+  it("asks for frames while the host is still finding a stopped sound's duration", () => {
+    let info: { status: "loading" | "ready"; width: number; height: number; duration: number; name: string } = { status: "loading", width: 0, height: 0, duration: 0, name: "chime.mp3" };
+    const h = harness({}, { services: { resolveAssetUrl, platform: {}, mediaInfo: () => info } });
+    const loading = h.step();
+    expect(loading.outputs).toMatchObject({ duration: 0, isPlaying: false });
+    expect(loading.requestedNextFrame).toBe(true);
+    info = { ...info, status: "ready", duration: 2.5 };
+    const ready = h.step();
+    expect(ready.outputs.duration).toBe(2.5);
+    expect(ready.requestedNextFrame).toBe(false);
+  });
+
   it("plays while Playing is on: Is Playing on frame 0, the playhead advances by dt × rate from the next frame, and Finished fires at the end", () => {
     const h = harness({ duration: 1, inputs: { playing: true } });
     const f0 = h.step({ dt: 0.25 });

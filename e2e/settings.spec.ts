@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleProblems, openEditor, runCommand, screenshot } from "./helpers.ts";
+import { collectConsoleProblems, openEditor, runCommand, screenshot, waitForPrototype } from "./helpers.ts";
 
 test.describe("settings and about", () => {
   test("changes motion and Claude's permissions, and they persist", async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe("settings and about", () => {
     await expect(settings).toBeHidden();
 
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3);
+    await waitForPrototype(page);
     await expect(page.locator("html")).toHaveAttribute("data-motion", "reduce");
     expect(problems).toEqual([]);
   });

@@ -429,10 +429,11 @@ export function registerRpcHandlers(session: EditorSession, options: RpcHandlerO
       return { ok: true, notes: result.notes ?? [], ...info() };
     },
 
-    // Quitting on a signal: write unsaved edits to the draft before the app exits.
+    // Quitting on a signal, or the unsaved-changes prompt: write unsaved edits to the draft now. `pending`
+    // says the draft still lacks some (the write failed), so a restart never counts on a draft that isn't whole.
     "drafts.flush": async () => {
       await session.drafts?.flush();
-      return { flushed: session.drafts !== null, draft: session.drafts?.current() ?? null };
+      return { flushed: session.drafts !== null, draft: session.drafts?.current() ?? null, pending: session.drafts?.pending() ?? false };
     },
 
     "document.open": async (p) => {

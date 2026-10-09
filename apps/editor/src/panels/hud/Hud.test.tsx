@@ -70,6 +70,30 @@ describe("Hud", () => {
     expect(onToggleCollapse).toHaveBeenCalledOnce();
   });
 
+  it("says At rest, not 0 fps, while the prototype plays with nothing moving", () => {
+    render();
+    const readout = () => container.querySelector<HTMLElement>(".sb-hudx__stat")!;
+    act(() => session.runtime.state.setState({ playing: true, resting: false, fps: 59.6, frameMs: 1.2 }));
+    expect(readout().textContent).toBe("60 fps");
+    expect(readout().getAttribute("aria-label")).toContain("Smooth, 60 fps");
+    act(() => session.runtime.state.setState({ playing: true, resting: true, fps: 0 }));
+    expect(readout().textContent).toBe("At rest");
+    expect(readout().getAttribute("aria-label")).toContain("At rest: nothing in the prototype is moving");
+    expect(readout().getAttribute("aria-label")).not.toMatch(/0 fps|Starting/);
+    expect(readout().querySelector(".sb-hudx__dot")?.getAttribute("data-tone")).toBe("neutral");
+    act(() => session.runtime.state.setState({ playing: false, resting: false, fps: 0 }));
+    expect(readout().textContent).toBe("Paused");
+  });
+
+  it("judges the frame rate against the display's rate", () => {
+    render();
+    const tone = () => container.querySelector(".sb-hudx__dot")?.getAttribute("data-tone");
+    act(() => session.runtime.state.setState({ playing: true, resting: false, fps: 60, displayHz: 60 }));
+    expect(tone()).toBe("success");
+    act(() => session.runtime.state.setState({ displayHz: 120 }));
+    expect(tone()).toBe("warn");
+  });
+
   it("profiles patches only while the Performance tab is showing", () => {
     const stop = vi.fn();
     const profile = vi.spyOn(session.runtime, "profilePatches").mockReturnValue(stop);

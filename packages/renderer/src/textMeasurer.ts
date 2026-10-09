@@ -18,16 +18,20 @@ export interface TextStyle {
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
 }
 
+/** Read it, don't change it: a wrapped layout is shared with every later call for the same text. */
 export interface TextLayout {
   /** Visual lines (explicit newlines and wraps), trailing spaces kept. */
-  lines: string[];
+  readonly lines: readonly string[];
   /** Width of each line excluding trailing (hanging) spaces. */
-  lineWidths: number[];
+  readonly lineWidths: readonly number[];
   /** Widest line, rounded up to a whole point so the DOM box never re-wraps it. */
-  width: number;
-  height: number;
-  lineHeight: number;
+  readonly width: number;
+  readonly height: number;
+  readonly lineHeight: number;
 }
+
+/** Wrapped layouts a measurer keeps (DomTextMeasurer.layout); past it, the oldest goes. */
+const LAYOUT_CACHE_SIZE = 2000;
 
 export interface DomTextMeasurerOptions {
   /** Override width measurement (tests, custom shaping). `font` is a CSS font shorthand. */
@@ -36,7 +40,7 @@ export interface DomTextMeasurerOptions {
   measureLineHeight?: (font: string, fontSize: number) => number;
   /** Document used for the fallback canvas and font-load invalidation. */
   document?: Document;
-  /** Max cached width entries before the cache resets. Default 20000. */
+  /** Max cached width entries (and grapheme counts) before the cache resets. Default 20000. */
   cacheSize?: number;
 }
 
@@ -171,7 +175,9 @@ type Canvas2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 export class DomTextMeasurer implements TextMeasurer {
   private readonly options: DomTextMeasurerOptions;
   private readonly widthCache = new Map<string, number>();
+  private readonly graphemeCounts = new Map<string, number>();
   private readonly lineHeightCache = new Map<string, number>();
+  private readonly layoutCache = new Map<string, TextLayout>();
   private readonly listeners = new Set<() => void>();
   private ctx: Canvas2D | null | undefined;
   private currentFont = "";
@@ -194,8 +200,32 @@ export class DomTextMeasurer implements TextMeasurer {
     return { width: l.width, height: l.height };
   }
 
+  /**
+   * The lines of `text`: split at its newlines and, with a `maxWidth`, wrapped to it.
+   *
+   * Wrapped layouts are kept, because the engine lays out every fixed-width text again on each
+   * frame and wrapping is the slow part. A layout depends on nothing but its key (every style field
+   * read here, the width and the text) and the fonts that have loaded, and clearCache() runs when
+   * one loads, so a kept layout can't go stale. Kept layouts are frozen and shared.
+   */
   layout(text: string, style: TextStyle, maxWidth: number | null): TextLayout {
     const font = cssFont(style);
+    if (maxWidth === null) return this.lines(text, style, font, null);
+    const key = `${font}\u0001${style.letterSpacing}\u0001${style.lineHeight}\u0001${style.textTransform ?? "none"}\u0001${maxWidth}\u0001${text}`;
+    let layout = this.layoutCache.get(key);
+    if (!layout) {
+      layout = this.lines(text, style, font, maxWidth);
+      Object.freeze(layout.lines);
+      Object.freeze(layout.lineWidths);
+      Object.freeze(layout);
+      // A Map lists its keys oldest first.
+      if (this.layoutCache.size >= LAYOUT_CACHE_SIZE) this.layoutCache.delete(this.layoutCache.keys().next().value!);
+      this.layoutCache.set(key, layout);
+    }
+    return layout;
+  }
+
+  private lines(text: string, style: TextStyle, font: string, maxWidth: number | null): TextLayout {
     const ls = Number.isFinite(style.letterSpacing) ? style.letterSpacing : 0;
     const lineHeight = this.lineHeightFor(style);
     const w = (s: string) => this.width(s, font, style.fontSize, ls);
@@ -282,7 +312,9 @@ export class DomTextMeasurer implements TextMeasurer {
 
   clearCache(): void {
     this.widthCache.clear();
+    this.graphemeCounts.clear();
     this.lineHeightCache.clear();
+    this.layoutCache.clear();
   }
 
   dispose(): void {
@@ -300,7 +332,18 @@ export class DomTextMeasurer implements TextMeasurer {
       if (this.widthCache.size >= (this.options.cacheSize ?? 20000)) this.widthCache.clear();
       this.widthCache.set(key, raw);
     }
-    return letterSpacing ? raw + letterSpacing * graphemes(text).length : raw;
+    return letterSpacing ? raw + letterSpacing * this.graphemeCount(text) : raw;
+  }
+
+  /** How many graphemes letter spacing is added to. Segmenting is slow and the count depends on nothing but the text, so it's kept. */
+  private graphemeCount(text: string): number {
+    let count = this.graphemeCounts.get(text);
+    if (count === undefined) {
+      count = graphemes(text).length;
+      if (this.graphemeCounts.size >= (this.options.cacheSize ?? 20000)) this.graphemeCounts.clear();
+      this.graphemeCounts.set(text, count);
+    }
+    return count;
   }
 
   private rawWidth(text: string, font: string, fontSize: number): number {

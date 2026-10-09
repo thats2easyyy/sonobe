@@ -24,12 +24,13 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 | Command | Does |
 | --- | --- |
-| `npm run build` | Bundles main, preload, player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
+| `npm run build` | Bundles main, preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
 | `npm run start` | Builds and launches against `apps/editor/dist` (or `SONOBE_DEV_URL`) |
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
 | `npm run smoke:import` | Muted design import run against a local dev server: `import_design` by URL and HTML, the Import dialog bridge, and pasting a capture (build the editor and shell first) |
-| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save (build the editor and shell first) |
+| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save; then Restart to Update with a stand-in updater: Cancel, Keep Draft, and the launch that reopens the work; then Quit with an unsaved change: Cancel, and Don't Save, which ends the app (build the editor and shell first) |
+| `npm run rehearse:update -- --identity "<name>"` | An update between two real builds of this version and the next, signed with that keychain certificate, from a local feed: the check, the download, Restart to Update with unsaved work and a connected Claude session, install on quit, notify, and a download macOS refuses. By hand, before a release (CONTRIBUTING.md, "Rehearse an update") |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
 | `npm run package` | A local build: editor, bundles, icons, then electron-builder into `release/`, ad-hoc signed on macOS. `--identity` and `--release` build signed ones (see Packaging) |
 | `npm run package:verify` | Checks the packaged app: its files, signature and entitlements, then a muted launch that checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG; see Checking a package) |
@@ -45,10 +46,12 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - Phone preview: `getPreviewStatus`, `startPreview`, `stopPreview`, `onPreviewStatus`.
 - `drafts.write/remove/list/read/release/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads, and `release` gives back one it read but couldn't use; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
 - `readProjectIfExists(dir)`: `readProject`, but null for a folder that doesn't exist yet (a Save As target).
+- `updates.status/check/restart/setAutoCheck/moveToApplications/onStatus`: whether a newer version exists and what this copy can do about it (`UpdateStatus`: the mode, the state, the version, progress, an error with a hint). `status`, `check` and `setAutoCheck` wait until updates have started, a second after the first window is shown. `restart()` answers at once (false while nothing is ready): it closes every window through its unsaved-changes prompt before the updater quits the app, and resolves false when the person cancelled. While a window subscribes with `onStatus`, its notices answer Check for Updates…; otherwise the host shows a native dialog. In a checkout `status()` is `mode: "off"`.
+- `reopening`: true in the window that opens again what was open before a restart for an update.
 
 ## Packaging
 
-`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--arch arm64,x64` builds both in one run, `--dir` skips the installer, and `--skip-editor-build` reuses `apps/editor/dist`.
+`npm run package -w @sonobe/desktop` builds for this machine's platform and architecture with the locally installed Electron. On an Apple silicon Mac that's `release/Sonobe-<version>-mac-arm64.dmg` plus `release/mac-arm64/Sonobe.app`. `--arch x64` downloads that Electron, `--arch arm64,x64` builds both in one run, `--dir` skips the installer, `--skip-editor-build` reuses `apps/editor/dist`, and `--out <dir>` builds somewhere other than `release/` (never with `--release`).
 
 `scripts/package.mjs` decides how the app is signed (`scripts/signing.ts`), and `electron-builder.yml` sets none of it:
 
@@ -62,11 +65,13 @@ Every build is signed with the hardened runtime and the entitlements in `build/e
 
 A release or rehearsal builds, for each architecture, a DMG and the zip an update downloads, with the zips' blockmaps and one `latest-mac.yml` that lists them all. A release builds arm64 and x64 by default; a rehearsal builds this Mac's architecture unless you pass `--arch arm64,x64`. Both architectures come from one run, because a second run would overwrite the feed. It also writes `Sonobe-<version>-sourcemaps.tar.gz`: the editor's and the app's source maps, which no build carries inside the app. Nothing is published from here; `electron-builder.yml`'s `publish` block only names where releases live. `.github/workflows/release.yml` runs the release build on a version tag, verifies it, and drafts the GitHub release ([CONTRIBUTING.md](../../CONTRIBUTING.md#releasing)).
 
-The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace.
+The packaged `package.json` (inside app.asar) records what the build can do with an update, as `sonobe: { signing, updates }`: `"updates": "install"` for a build signed with a certificate, and `"notify"` for an ad-hoc one, which macOS won't let an update replace. Its name is `sonobe`, so a downloaded update waits in `sonobe-updater` under the user's caches.
+
+A rehearsal takes two more flags, for the two versions an update is tried between. `--version 0.1.1` is the version the build claims to be instead of the tree's. `--launch-env SONOBE_NAME=value` (once per variable) sets it in the app's Info.plist, because macOS opens an updated app without the environment of the one it replaced; a build made with it refuses to start without those variables, so it never runs on your own Sonobe data.
 
 ### Checking a package
 
-`npm run package:verify -w @sonobe/desktop` checks the app in `release/` for this machine's architecture. It never touches your settings, your keychain or a running Sonobe: the launch is muted, has its own user data and `SONOBE_HOME`, and runs with `SONOBE_TEST=1`, and afterwards the build is unregistered from LaunchServices so it doesn't become the app that opens `.sonobe` files.
+`npm run package:verify -w @sonobe/desktop` checks the app in `release/` for this machine's architecture. It never touches your settings, your keychain or a running Sonobe: the launch is muted, has its own user data and `SONOBE_HOME`, and runs with `SONOBE_TEST=1` and `SONOBE_UPDATES=off` (it asks no update feed), and afterwards the build is unregistered from LaunchServices so it doesn't become the app that opens `.sonobe` files.
 
 It reads the bundle first, then runs it:
 

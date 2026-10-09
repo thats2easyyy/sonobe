@@ -48,6 +48,10 @@ export interface DesktopHostApi {
   openExternal?(url: string): boolean | void | Promise<boolean | void>;
   /** True when the app runs with SONOBE_MUTE (the preload reads it from process.argv). */
   readonly muted?: boolean;
+  /** True in the window that opens again what was open before a restart for an update. Optional: older preloads lack it. */
+  readonly reopening?: boolean;
+  /** Updates; app/updates/updatesHost.ts describes it (UpdatesHost). Optional: older preloads lack it. */
+  updates?: unknown;
   getPreviewStatus?(): Promise<unknown>;
   startPreview?(): Promise<unknown>;
   stopPreview?(): Promise<unknown>;

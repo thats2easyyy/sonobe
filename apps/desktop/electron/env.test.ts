@@ -1,13 +1,13 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import { placeholderHtml, toDataUrl } from "./placeholder.ts";
 import { isAppUrl, isExternalUrl } from "./security.ts";
 
 describe("readDesktopEnv", () => {
   it("defaults to production behavior", () => {
-    expect(readDesktopEnv({})).toEqual({ devUrl: null, mute: false, mcpPort: null, mcpEnabled: true, home: null, userData: null, editorDist: null, testHooks: false, lan: false, lanPort: null });
+    expect(readDesktopEnv({})).toEqual({ devUrl: null, mute: false, mcpPort: null, mcpEnabled: true, home: null, userData: null, editorDist: null, testHooks: false, lan: false, lanPort: null, updates: true, updateFeed: null });
   });
 
   it("parses switches", () => {
@@ -23,6 +23,32 @@ describe("readDesktopEnv", () => {
     expect(env.mcpPort).toBeNull();
     expect(env.lanPort).toBeNull();
     expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("switches updates off with SONOBE_UPDATES, and takes a rehearsal feed from SONOBE_UPDATE_FEED", () => {
+    for (const value of ["off", "0", "false", " OFF "]) expect(readDesktopEnv({ SONOBE_UPDATES: value }).updates, value).toBe(false);
+    for (const value of ["on", "1", ""]) expect(readDesktopEnv({ SONOBE_UPDATES: value }).updates, value).toBe(true);
+    expect(readDesktopEnv({ SONOBE_UPDATE_FEED: "http://127.0.0.1:5250/" }).updateFeed?.href).toBe("http://127.0.0.1:5250/");
+    const warn = vi.fn();
+    expect(readDesktopEnv({ SONOBE_UPDATE_FEED: "file:///tmp/feed" }, warn).updateFeed).toBeNull();
+    expect(readDesktopEnv({ SONOBE_UPDATE_FEED: "not a url" }, warn).updateFeed).toBeNull();
+    expect(warn.mock.calls.map((call) => call[0])).toEqual(["SONOBE_UPDATE_FEED must be http(s); ignoring file:///tmp/feed", "SONOBE_UPDATE_FEED is not a valid URL; ignoring not a url"]);
+  });
+});
+
+describe("launchEnvProblem", () => {
+  const required = ["SONOBE_USER_DATA", "SONOBE_HOME"];
+
+  it("lets a build with nothing baked in, or with everything set, run", () => {
+    expect(launchEnvProblem([], {})).toBeNull();
+    expect(launchEnvProblem(required, { SONOBE_USER_DATA: "/tmp/u", SONOBE_HOME: "/tmp/h" })).toBeNull();
+  });
+
+  it("stops a rehearsal build that would use the person's own data, and says how to run it", () => {
+    const problem = launchEnvProblem(required, { SONOBE_USER_DATA: "/tmp/u", SONOBE_HOME: " " });
+    expect(problem).toContain("SONOBE_HOME isn't");
+    expect(problem).toContain("node apps/desktop/tests/update-rehearsal.mjs");
+    expect(launchEnvProblem(required, {})).toContain("SONOBE_USER_DATA and SONOBE_HOME aren't");
   });
 });
 

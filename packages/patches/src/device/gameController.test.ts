@@ -32,6 +32,14 @@ describe("gameController", () => {
     expect(empty.step().outputs.connected).toBe(false);
   });
 
+  it("asks for every frame where the host has controllers, since no event announces a button", () => {
+    expect(createPatchHarness(gameControllerPatch).step().requestedNextFrame).toBe(false);
+    const none = createPatchHarness(gameControllerPatch, { services: { platform: { gamepads: () => [] } as never } });
+    expect(none.step().requestedNextFrame).toBe(true);
+    const held = createPatchHarness(gameControllerPatch, { services: { platform: { gamepads: () => [pad([0])] } as never } });
+    expect(held.run(3).requestedNextFrame).toBe(true);
+  });
+
   it("maps the standard layout: face buttons, shoulders, triggers, D-pad, sticks, and menus", () => {
     const snapshot = pad([0, 3, 4, 9, 10, 12, 15, 16], { axes: [0.05, -0.02, 1, 0], motion: { acceleration: [0, -1, 0], rotationRate: [1, 2, Number.NaN] } });
     (snapshot.buttons as { pressed: boolean; value: number }[])[7] = { pressed: true, value: 1.4 };

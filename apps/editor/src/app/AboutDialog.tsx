@@ -5,6 +5,7 @@ import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
 import { detectHostPlatform } from "../ui/commands/shortcutManager.ts";
 import { APP_NAME, CREDITS, EDITOR_VERSION } from "./about.ts";
+import { UpdateStatusLine } from "./updates/UpdateStatusLine.tsx";
 import "./dialogs.css";
 
 const PLATFORM_NAMES: Record<string, string> = { darwin: "macOS", win32: "Windows", linux: "Linux" };
@@ -15,7 +16,7 @@ export interface AboutDialogProps {
   onReportIssue: () => void;
 }
 
-/** About Sonobe: version, what it's for, the open-source software it's built with, and Report an Issue. */
+/** About Sonobe: version, where it stands with updates (desktop), what it's for, the open-source software it's built with, and Report an Issue. */
 export function AboutDialog({ open, onOpenChange, onReportIssue }: AboutDialogProps) {
   const api = getDesktopHostApi();
   const version = api?.version ?? EDITOR_VERSION;
@@ -25,6 +26,7 @@ export function AboutDialog({ open, onOpenChange, onReportIssue }: AboutDialogPr
       <Dialog.Header title={APP_NAME} description={<span className="sb-selectable">{`Version ${version} · ${where}`}</span>} onClose={() => onOpenChange(false)} />
       <Dialog.Body>
         <div className="sb-about__content" tabIndex={-1} data-autofocus>
+          <UpdateStatusLine />
           <p className="sb-about__text">Sonobe is an open-source app for interaction prototyping: layers, patches, and a live viewer, built from the start to work with Claude on your own plan.</p>
           <section aria-labelledby="sb-about-credits">
             <h3 className="sb-settings__section-title" id="sb-about-credits">

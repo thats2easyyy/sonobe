@@ -202,7 +202,9 @@ const watchdog = setTimeout(() => {
   process.exit(1);
 }, 420_000);
 
-const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_EDITOR_DIST: path.join(temp, "no-editor-build"), SONOBE_TEST: "1" };
+// SONOBE_UPDATES=off: no launch here ever asks for a new version (a checkout wouldn't anyway).
+const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_EDITOR_DIST: path.join(temp, "no-editor-build"), SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
+delete env.SONOBE_UPDATE_FEED;
 delete env.SONOBE_DEV_URL;
 delete env.SONOBE_MCP_PORT;
 delete env.SONOBE_LAN;
@@ -605,7 +607,7 @@ try {
     nodeProcess: typeof globalThis.process,
   }));
   assert(hostInfo.type === "object", "window.sonobeHost exists", hostInfo);
-  for (const key of ["closeViewerWindow", "commands", "drafts", "getMcpStatus", "onMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "notifyPrototypeRestarted", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "readProjectIfExists", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "version", "watchProject", "writeProject"]) {
+  for (const key of ["closeViewerWindow", "commands", "drafts", "getMcpStatus", "onMcpStatus", "getPreviewStatus", "getViewerWindowStatus", "notifyDocumentChanged", "notifyPrototypeRestarted", "onCommand", "onOpenProject", "onPreviewStatus", "onViewerWindowStatus", "openExternal", "openProjectDialog", "platform", "popOutViewer", "readProject", "readProjectIfExists", "recentProjects", "revealInFinder", "rpc", "saveProjectDialog", "secrets", "setDocumentEdited", "setTitle", "startPreview", "stopPreview", "updates", "version", "watchProject", "writeProject"]) {
     assert(hostInfo.keys.includes(key), `sonobeHost.${key}`, hostInfo.keys);
   }
   assert(hostInfo.platform === process.platform, "platform", hostInfo.platform);
@@ -705,6 +707,16 @@ try {
   // Menus and command delivery.
   const menuLabels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.map((i) => i.label) ?? []);
   for (const label of ["File", "Edit", "View", "Layer", "Patch", "Viewer", "Window", "Help"]) assert(menuLabels.includes(label), `menu ${label}`, menuLabels);
+
+  // Updates: this run never checks, never loads the updater, and its menus have no update item.
+  const updateStatus = await win.evaluate(() => window.sonobeHost.updates.status());
+  assert(updateStatus.mode === "off" && updateStatus.state === "idle" && updateStatus.asks === 0 && updateStatus.current === hostInfo.version, "sonobeHost.updates.status() is off", updateStatus);
+  const updateItems = await app.evaluate(({ Menu }) => {
+    const labels = (items) => items.flatMap((item) => [item.label, ...(item.submenu ? labels(item.submenu.items) : [])]);
+    return { labels: labels(Menu.getApplicationMenu()?.items ?? []).filter((label) => /Update/.test(label)), loaded: globalThis.__sonobeTest.updates.driverLoaded() };
+  });
+  assert(updateItems.labels.length === 0 && updateItems.loaded === false, "no update item in the menus, and the updater was never loaded", updateItems);
+  log(`updates are off (${updateStatus.reason})`);
   await win.evaluate(() => {
     window.__commands = [];
     window.sonobeHost.onCommand((id) => window.__commands.push(id));

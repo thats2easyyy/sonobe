@@ -462,6 +462,33 @@ describe("app host writes", () => {
     expect(w.names.asked).toBe(0);
   });
 
+  it("never sends the forms that pass Read only: an agent's save and open can't claim to be the person", async () => {
+    const storage = createMemoryProjectStorage();
+    const drafts = createMemoryProjectStorage();
+    const lost = editorWindow(1, { storage, drafts });
+    lost.session.document.getState().newDocument();
+    lost.session.document.getState().apply([{ op: "addLayer", layer: { type: "rectangle", name: "Card" } }], { label: "Add Card" });
+    await lost.session.drafts!.flush();
+    const draftId = lost.session.drafts!.current()!.id;
+
+    const w = editorWindow(2, { storage, drafts });
+    const sent: { method: string; params: unknown }[] = [];
+    const invoke = w.target.invoke;
+    w.target.invoke = (method: string, params?: unknown, opts?: { timeoutMs?: number }) => {
+      sent.push({ method, params });
+      return invoke(method, params, opts);
+    };
+    const host = appHost([w], { ...browserTargets(), drafts: { list: () => w.session.host!.drafts!.list() } });
+    // The editor lets `document.save { interactive }` and `document.recoverDraft { person }` through in Read
+    // only (agentAccess.ts), because only the app sends them. Whatever a tool call carries, these don't.
+    await host.openDocument(`draft:${draftId}`);
+    await host.saveDocument(undefined, { path: "~/Documents/Deck.sonobe", force: true, interactive: true, person: true } as never);
+    await host.saveDocument(undefined, { interactive: true } as never);
+    const params = (method: string) => sent.filter((call) => call.method === method).map((call) => call.params);
+    expect(params("document.recoverDraft")).toEqual([{ id: draftId }]);
+    expect(params("document.save")).toEqual([{ noDialog: true, path: "browser:Deck", force: true }, { noDialog: true }]);
+  });
+
   it("opens and creates documents", async () => {
     const w = editorWindow(1);
     const host = appHost([w]);

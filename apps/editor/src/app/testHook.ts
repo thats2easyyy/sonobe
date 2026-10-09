@@ -20,6 +20,8 @@ export interface SonobeTestHook {
   getValue(address: string): Value;
   frame(): number;
   playing(): boolean;
+  /** Playing with no frame scheduled: nothing in the prototype moves. A test that waits for the prototype waits for this or for frames. */
+  resting(): boolean;
   selection(): SelectionState;
   layout(): LayoutStore;
   apply(ops: Op[], label?: string): Pick<ApplyOpsResult, "ok" | "errors" | "idMap">;
@@ -53,6 +55,7 @@ export function installTestHook(session: EditorSession, target: Window = window)
     getValue: (address) => session.runtime.runtime.getValue(address),
     frame: () => session.runtime.runtime.frame,
     playing: () => session.runtime.isPlaying(),
+    resting: () => session.runtime.isResting(),
     selection: () => session.selection.getState(),
     layout: () => layoutStore.getState(),
     apply(ops, label = "Test change") {

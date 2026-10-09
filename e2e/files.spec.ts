@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot } from "./helpers.ts";
+import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, waitForPrototype } from "./helpers.ts";
 
 test.describe("documents, palette, and help", () => {
   test("renames, saves, and opens a prototype in browser storage", async ({ page }) => {
@@ -33,7 +33,7 @@ test.describe("documents, palette, and help", () => {
 
     // Reload the page: the demo comes back until a project is opened.
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3);
+    await waitForPrototype(page);
     expect(await hook(page, (s) => s.doc().project.name)).toBe("Photo Zoom");
 
     // Make an unsaved change, then Open: first the unsaved-changes prompt, then the picker.
