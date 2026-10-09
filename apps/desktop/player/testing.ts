@@ -70,6 +70,8 @@ export interface TestPlayerServer {
   port: number;
   /** What Sonobe sends when the prototype restarts there. */
   restart(): void;
+  /** A new revision of the document, pushed to connected players as an edit in Sonobe is. */
+  update(doc: SonobeDocument): void;
   close(): Promise<void>;
 }
 
@@ -80,18 +82,25 @@ export async function servePlayer(options: { doc: SonobeDocument; host?: string;
     await buildPlayer(playerRoot);
     const host = options.host ?? "127.0.0.1";
     const token = options.token ?? TEST_PLAYER_TOKEN;
+    let doc = options.doc;
+    let revision = 1;
     const handle = await startLanPreview({
       playerRoot,
       host,
       port: options.port ?? 0,
       token,
       version: "test",
-      getDocument: async () => ({ docId: "doc_test", name: options.doc.project.name, revision: 1, doc: options.doc }),
+      getDocument: async () => ({ docId: "doc_test", name: doc.project.name, revision, doc }),
     });
     return {
       url: `http://${host}:${handle.port}/p/${token}/`,
       port: handle.port,
       restart: () => handle.restart(),
+      update(next) {
+        doc = next;
+        revision++;
+        handle.poke();
+      },
       async close() {
         await handle.close();
         rmSync(playerRoot, { recursive: true, force: true });
