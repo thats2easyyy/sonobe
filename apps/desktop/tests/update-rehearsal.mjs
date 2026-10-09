@@ -17,8 +17,10 @@
  *      Keep Draft or Cancel. Cancel keeps everything. Keep Draft quits; macOS installs N+1 and opens it;
  *      the project is open again with the unsaved change; a tool call sent while the app was down wasn't
  *      applied; and the same relay carries on.
- *   B  Install on a normal quit, and "Sonobe was updated" once at the next launch.
+ *   B  Install on a normal quit, also one that stopped to ask about an unsaved change, and "Sonobe was
+ *      updated" once at the next launch.
  *   C  Notify: the ad-hoc build only says a version is available, and Download opens its release page.
+ *      About Sonobe in the menu shows the same.
  *   D  An install build outside an Applications folder only notifies, says why, and offers the move.
  *   E  A zip macOS must refuse (re-signed ad hoc) ends in "failed" with the release page as the way out,
  *      and never shows "ready".
@@ -31,9 +33,11 @@
  *
  * What it touches outside its temp folder, and puts back: ~/Library/Caches/sonobe-updater (the download),
  * ~/Library/Caches/dev.sonobe.app.ShipIt with the launchd job dev.sonobe.app.ShipIt (macOS's installer),
- * and the caches macOS keeps for the installer's own request (~/Library/Caches/dev.sonobe.app,
- * ~/Library/HTTPStorages/dev.sonobe.app), because the bundle id decides those names. It refuses to start
- * while the download or the installer's folder holds files, and removes the ones that weren't there before. Every app it
+ * the caches macOS keeps for the installer's own request (~/Library/Caches/dev.sonobe.app,
+ * ~/Library/HTTPStorages/dev.sonobe.app), and the installer's preferences file
+ * (~/Library/Preferences/ByHost/dev.sonobe.app.ShipIt.<id>.plist), because the bundle id decides those
+ * names. It refuses to start while the download or the installer's folder holds files, and removes the
+ * ones that weren't there before. Every app it
  * starts has its own data folder and SONOBE_HOME, muted, with the test cipher
  * (SONOBE_TEST=1), and the updated app is opened by macOS with the same folders, carried in its
  * Info.plist (package.mjs --launch-env). Afterwards every build is unregistered from LaunchServices and
@@ -108,6 +112,10 @@ if (holds(path.join(updaterCache, "pending")) || holds(shipItCache)) {
 }
 /** Folders under the real home that an update creates, and that go again afterwards unless they were already there. */
 const outside = [updaterCache, shipItCache, path.join(homedir(), "Library", "Caches", "dev.sonobe.app"), path.join(homedir(), "Library", "HTTPStorages", "dev.sonobe.app")].filter((dir) => !existsSync(dir));
+/** macOS's installer also keeps a small preferences file per machine, named after its job. */
+const byHost = path.join(homedir(), "Library", "Preferences", "ByHost");
+const installerPrefs = () => (existsSync(byHost) ? readdirSync(byHost).filter((name) => name.startsWith(`${SHIPIT_JOB}.`) && name.endsWith(".plist")).map((name) => path.join(byHost, name)) : []);
+const installerPrefsBefore = new Set(installerPrefs());
 const gitBefore = execFileSync("git", ["status", "--porcelain"], { cwd: repoDir, encoding: "utf8" });
 
 const root = values.reuse ? realpathSync(path.resolve(values.reuse)) : realpathSync(mkdtempSync(path.join(tmpdir(), "sonobe-update-rehearsal-")));
@@ -412,10 +420,11 @@ async function settle() {
   }
 }
 
-/** What the run leaves outside its temp folder goes back as it was: the installer's job, the two caches, LaunchServices. */
+/** What the run leaves outside its temp folder goes back as it was: the installer's job and its preferences, the caches, LaunchServices. */
 function restoreOutside() {
   clearUpdateState();
   for (const dir of outside) rmSync(dir, { recursive: true, force: true });
+  for (const file of installerPrefs()) if (!installerPrefsBefore.has(file)) rmSync(file, { force: true });
   for (const pid of strays()) {
     try {
       process.kill(pid, "SIGKILL");
@@ -625,11 +634,11 @@ try {
       }
     });
 
-    await step("A15", `the updated app remembers it ran as ${N} before`, async () => {
+    await step("A15", `the updated app records that ${N1} has run, so only this launch says "Sonobe was updated"`, async () => {
       // Written when updates start, a moment after the window shows.
       const read = () => JSON.parse(readFileSync(path.join(userData, "updates.json"), "utf8"));
       const saved = await poll(() => (read().lastRunVersion === N1 ? read() : null), { timeout: 30_000, message: "updates.json to name the new version" }).catch(read);
-      expect(saved.lastRunVersion === N1 && saved.previousVersion === N, "updates.json", saved);
+      expect(saved.lastRunVersion === N1, "updates.json", saved);
     });
 
     await step("A16", "the relay that was started under the old version carries on with the new one, without a reconnect", async () => {
@@ -646,7 +655,7 @@ try {
   });
 
   // -----------------------------------------------------------------------------------------------
-  await scenario("B", "a downloaded update also goes in on a normal quit, and the next launch says so once", async () => {
+  await scenario("B", "a downloaded update also goes in on a normal quit, one that asks about unsaved changes included, and the next launch says so once", async () => {
     clearUpdateState();
     install(zipOf(builds.n, N), path.dirname(installed));
     const vars = scenarioVars("b", MCP_PORT + 1);
@@ -657,12 +666,33 @@ try {
       expect(end.state === "ready" && end.version === N1, "ready", end);
     });
 
-    await step("B2", "quitting the ordinary way just quits: nothing asks, nothing reopens", async () => {
-      void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
-      expect(await exited(app, 30_000), "the app quit");
+    // Quit as the menu's Quit and ⌘Q do. (Quitting with nothing unsaved asks nothing: scenario E ends that way.)
+    const quit = () => void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => undefined);
+
+    await step("B2", "with an unsaved change, quitting asks Save, Don't Save or Cancel; Cancel keeps Sonobe running with the update still ready", async () => {
+      const direct = await connectHttp(vars.SONOBE_HOME);
+      try {
+        const edit = await direct.call("add_layers", { label: "added a ribbon", layers: [{ type: "rectangle", name: "Unsaved at quit" }] });
+        expect(!edit.isError, "add_layers", edit.text);
+      } finally {
+        await direct.close();
+      }
+      await answerDialogs(app, "Cancel");
+      quit();
+      const questions = await poll(async () => ((await asked(app)).length ? asked(app) : null), { message: "the unsaved-changes prompt" });
+      expect(questions[0].buttons.join() === "Save,Don't Save,Cancel", "a quit offers Save, Don't Save or Cancel", questions[0]);
+      await sleep(1500);
+      const after = await app.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length, status: globalThis.__sonobeTest.updates.status() }));
+      expect(after.windows === 1 && after.status.state === "ready" && plistVersion(installed) === N, `the app and its window are still here, the update is still ready, and the app on disk is still ${N}`, after);
     });
 
-    await step("B3", `macOS then replaces the app with ${N1} and leaves it closed`, async () => {
+    await step("B3", "quitting again and answering Don't Save ends the app, not only its window", async () => {
+      await answerDialogs(app, "Don't Save");
+      quit();
+      expect(await exited(app, 30_000), "the app quit once the prompt was answered", await app.evaluate(({ BrowserWindow }) => `still running, with ${BrowserWindow.getAllWindows().length} windows`).catch(() => "the app no longer answers"));
+    });
+
+    await step("B4", `macOS then replaces the app with ${N1} and leaves it closed`, async () => {
       await poll(() => plistVersion(installed) === N1, { timeout: 240_000, interval: 500, message: `the app on disk to become ${N1}` });
       // The installer's job stays listed after it has run; it is done when it has no process. The app must not have been opened.
       await poll(() => !/"PID" = \d+/.test(spawnSync("launchctl", ["list", SHIPIT_JOB], { encoding: "utf8" }).stdout ?? ""), { timeout: 60_000, message: "the installer to finish" });
@@ -671,12 +701,13 @@ try {
       expect(spawnSync("codesign", ["--verify", "--deep", "--strict", installed]).status === 0, "the installed app's signature verifies");
     });
 
-    await step("B4", `the next launch says "Sonobe was updated to ${N1}", with its release notes`, async () => {
+    await step("B5", `the next launch says "Sonobe was updated to ${N1}", with its release notes`, async () => {
       ({ app, page } = await launch(`b-${N1}`, installed, vars));
-      const first = await page.evaluate(() => window.sonobeHost.updates.status());
-      expect(first.current === N1 && first.updatedFrom === N && first.notesUrl === `${RELEASES_URL}/tag/v${N1}`, "the status names the version it ran as before", first);
       const updated = notice(page, `Sonobe was updated to ${N1}`);
       await updated.waitFor({ timeout: 10_000 });
+      // The app reports it until one window has heard it, so a window opened later in this launch doesn't say it again.
+      const told = await status(app);
+      expect(told.current === N1 && told.updatedFrom === null && told.notesUrl === null, "once the window has said it, the app no longer reports it", told);
       await app.evaluate(({ shell }) => {
         globalThis.__opened = [];
         shell.openExternal = async (url) => void globalThis.__opened.push(url);
@@ -686,7 +717,7 @@ try {
       expect(opened.join() === `${RELEASES_URL}/tag/v${N1}`, "Release notes opens this version's release page", opened);
     });
 
-    await step("B5", "and the launch after that doesn't say it again", async () => {
+    await step("B6", "and the launch after that doesn't say it again", async () => {
       await closeApp(app);
       ({ app, page } = await launch(`b-${N1}-again`, installed, vars));
       const again = await page.evaluate(() => window.sonobeHost.updates.status());
@@ -727,6 +758,14 @@ try {
       expect(paths.length > 0 && paths.every((p) => p === "/latest-mac.yml"), "only latest-mac.yml was asked for", paths);
       expect(!holds(path.join(updaterCache, "pending")) && !existsSync(path.join(updaterCache, "update.zip")) && !existsSync(shipItCache), "the update caches are empty");
       expect(feed.since(mark).every((r) => r.stagingId === "none"), "x-user-staging-id is the constant");
+    });
+
+    await step("C4", "About Sonobe in the menu opens the editor's About, which says the same and offers the download", async () => {
+      await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById("help.about").click());
+      const line = page.getByRole("dialog", { name: "Sonobe", exact: true }).locator(".sb-update-line");
+      await line.waitFor({ timeout: 5000 });
+      expect((await line.innerText()).includes(`Sonobe ${N1} is available.`), "About's update line", await line.innerText());
+      await line.getByRole("button", { name: "Download" }).waitFor({ timeout: 2000 });
     });
   });
 
