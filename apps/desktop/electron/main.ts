@@ -1563,14 +1563,19 @@ function main(): void {
 
     // Updates begin once the window is on screen, and a moment later still, so launch never waits on them. The first check comes
     // a few seconds after that (updates.ts).
-    const startUpdates = () =>
-      setTimeout(() => {
-        updates?.start();
-        updatesStarted();
-        if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
-      }, UPDATES_START_MS).unref();
-    if (first.win.isDestroyed() || first.win.isVisible()) startUpdates();
-    else first.win.once("show", startUpdates);
+    let begun = false;
+    const beginUpdates = () => {
+      if (begun) return;
+      begun = true;
+      updates?.start();
+      updatesStarted();
+      if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
+    };
+    const afterShow = () => setTimeout(beginUpdates, UPDATES_START_MS).unref();
+    if (first.win.isDestroyed() || first.win.isVisible()) afterShow();
+    else first.win.once("show", afterShow);
+    // A window that never shows (closed at once) doesn't hold updates back for good.
+    setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
 
     if (env.testHooks) {
       (globalThis as Record<string, unknown>).__sonobeTest = {
