@@ -35,7 +35,7 @@ import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import type { Command } from "../../ui/commands/commandRegistry.ts";
 import { isEditableTarget, type ShortcutBinding } from "../../ui/commands/shortcutManager.ts";
 import { cx } from "../../ui/lib/cx.ts";
-import { useLatest } from "../../ui/lib/hooks.ts";
+import { useEventCallback, useLatest } from "../../ui/lib/hooks.ts";
 import { readString, writeString } from "../../ui/lib/storage.ts";
 import { useElementSize } from "../../ui/lib/useElementSize.ts";
 import { rectOfElement } from "../../state/bounds.ts";
@@ -589,7 +589,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     }
     const names = layerNames(idx, snapshot.layers.map((l) => l.id));
     const duplicate = g.alt ? duplicateForDrag(snapshot) : null;
-    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: duplicate ? `Duplicate ${names}` : `Move ${names}`, defaultComponent: cid }), ...(duplicate ? { duplicate } : {}) };
+    gestureRef.current = { ...g, kind: "move", snapshot, txn: createEditTransaction(session.document, { label: duplicate ? `Duplicate ${names}` : `Move ${names}`, defaultComponent: cid, gesture: true }), ...(duplicate ? { duplicate } : {}) };
   };
 
   /** ⌥-drag (Origami, Figma): copy the selection in place, and the drag moves the copies. */
@@ -617,6 +617,17 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
     const result = store.amend(d.txnId, [...d.ops, ...moveOps], { label, defaultComponent: componentId });
     if (result.ok) session.selection.getState().select({ layers: selected, patches: [], comments: [] });
   };
+
+  // A move, resize or rotate still held when the canvas goes away (a view switch) is kept as one undo
+  // step, as letting go would. That also closes its gesture, which drafts and the patch editor wait for.
+  const finishDrag = useEventCallback(() => {
+    const g = gestureRef.current;
+    if (!g || (g.kind !== "move" && g.kind !== "resize" && g.kind !== "rotate")) return;
+    gestureRef.current = null;
+    g.txn.commit();
+    if (g.kind === "move" && g.duplicate) finishDuplicate(g.duplicate, g.txn.ops, g.txn.label, latest.current.componentId);
+  });
+  useEffect(() => () => finishDrag(), [finishDrag]);
 
   /** Focus from a click or a drop is not keyboard focus: the ring stays off (canvas.css reads data-kbd). */
   const focusFromPointer = () => {
@@ -653,13 +664,13 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         const snapshot = beginResize(idx, cid, ids, hit.handle, board);
         if (snapshot) {
           notifyBlocked(snapshot.blocked, "size");
-          gestureRef.current = { ...base, kind: "resize", snapshot, txn: createEditTransaction(session.document, { label: `Resize ${layerNames(idx, snapshot.members.map((m) => m.id))}`, defaultComponent: cid }) };
+          gestureRef.current = { ...base, kind: "resize", snapshot, txn: createEditTransaction(session.document, { label: `Resize ${layerNames(idx, snapshot.members.map((m) => m.id))}`, defaultComponent: cid, gesture: true }) };
         } else {
           notifyBlocked(ids, "size");
         }
       } else if (hit?.kind === "rotate" && c?.single) {
         const snapshot = beginRotate(idx, cid, c.single);
-        if (snapshot) gestureRef.current = { ...base, kind: "rotate", snapshot, txn: createEditTransaction(session.document, { label: `Rotate ${layerNames(idx, [c.single])}`, defaultComponent: cid }) };
+        if (snapshot) gestureRef.current = { ...base, kind: "rotate", snapshot, txn: createEditTransaction(session.document, { label: `Rotate ${layerNames(idx, [c.single])}`, defaultComponent: cid, gesture: true }) };
         else notifyBlocked([c.single], "rotation");
       } else {
         const sel = session.selection.getState();

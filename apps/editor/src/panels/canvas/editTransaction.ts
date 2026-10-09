@@ -2,6 +2,9 @@
  * Coalesced edits: a gesture (drag, resize, rotate, reorder) applies ops live so every panel follows
  * along, and ends as one undo entry holding only the final ops. Each `update` must describe the whole
  * gesture relative to the pre-gesture document (absolute values), so the last ops alone reproduce it.
+ *
+ * A pointer drag opens a document gesture too (`gesture: true`): the store says one is open until
+ * `commit` or `cancel`, so views that are slow to update follow behind and drafts wait for the end.
  */
 
 import type { ApplyOpsResult, Author, Id, Op, SonobeDocument } from "@sonobe/core";
@@ -13,6 +16,11 @@ export interface EditTransactionOptions {
   author?: Author;
   /** Coalesce key. Default: unique per transaction. */
   key?: string;
+  /**
+   * Hold a document gesture open from the first change to `commit` or `cancel` (a pointer drag).
+   * Leave it off for a run that stays open between key presses, which merges by time instead.
+   */
+  gesture?: boolean;
 }
 
 export interface EditTransaction {
@@ -59,6 +67,11 @@ export function createEditTransaction(store: DocumentStore, options: EditTransac
     return top.length === txnIds.length && top.every((id, i) => id === txnIds[txnIds.length - 1 - i]);
   };
 
+  /** The store stops reporting this transaction's gesture, whether or not anything changed. */
+  const endGesture = () => {
+    if (options.gesture) store.getState().endGesture(key);
+  };
+
   const undoAll = () => {
     const result = store.getState().undoTo(txnIds[0]!, options.author);
     if (result.ok) txnIds.length = 0;
@@ -82,7 +95,7 @@ export function createEditTransaction(store: DocumentStore, options: EditTransac
       if (lastResult && sameJson(ops, lastOps)) return lastResult;
       const state = store.getState();
       const before = state.doc;
-      const result = state.apply(ops, { ...applyOptions(), coalesceKey: key });
+      const result = state.apply(ops, { ...applyOptions(), coalesceKey: key, ...(options.gesture ? { gesture: applied === 0 ? ("begin" as const) : ("update" as const) } : {}) });
       const after = store.getState();
       if (result.ok && after.doc !== before) {
         startDoc ??= before;
@@ -99,6 +112,7 @@ export function createEditTransaction(store: DocumentStore, options: EditTransac
     commit() {
       if (finished) return;
       finished = true;
+      endGesture();
       if (txnIds.length === 0 || !onTop()) return;
       const doc = store.getState().doc;
       const unchanged = startDoc !== null && [...touched].every((id) => sameJson(startDoc!.components[id], doc.components[id]));
@@ -113,6 +127,7 @@ export function createEditTransaction(store: DocumentStore, options: EditTransac
     cancel() {
       if (finished) return;
       finished = true;
+      endGesture();
       if (txnIds.length > 0 && onTop()) undoAll();
     },
   };

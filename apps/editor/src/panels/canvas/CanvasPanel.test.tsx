@@ -214,6 +214,28 @@ describe("CanvasPanel", () => {
     expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Move Event Card"]);
   });
 
+  it("holds a document gesture open while a layer is dragged, and keeps the move when the canvas goes away mid-drag", () => {
+    mount();
+    pointer("pointerdown", at(200, 520));
+    pointer("pointerup", at(200, 520));
+    pointer("pointerdown", at(200, 520));
+    expect(session.document.getState().gesture).toBeNull();
+    for (let i = 1; i <= 6; i++) pointer("pointermove", at(200 + i * 5, 520 + i * 5), { metaKey: true });
+    expect(session.document.getState().gesture).not.toBeNull();
+    pointer("pointerup", at(230, 550));
+    expect(session.document.getState().gesture).toBeNull();
+
+    // A drag nobody let go of: a view switch unmounts the canvas with the pointer still down.
+    pointer("pointerdown", at(230, 550));
+    for (let i = 1; i <= 4; i++) pointer("pointermove", at(230 + i * 5, 550), { metaKey: true });
+    expect(session.document.getState().gesture).not.toBeNull();
+    act(() => root.unmount());
+    expect(session.document.getState().gesture).toBeNull();
+    expect(position("card")).toEqual([66, 176]);
+    expect(session.document.getState().historyEntries().map((e) => e.label)).toEqual(["Move Event Card", "Move Event Card"]);
+    root = createRoot(container);
+  });
+
   it("marks focus as keyboard focus only when it did not come from a pointer", () => {
     mount();
     act(() => body().focus());
