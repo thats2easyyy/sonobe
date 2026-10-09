@@ -1,11 +1,11 @@
 /**
  * Layer resolution and SceneFrame emission: resolve props per layer (literals, links, defaults),
  * replicate layers bound to loops, render component instances, run layout, and build scene nodes
- * with local and world transforms plus the layer-info snapshots patches read on the next frame.
+ * with local and world transforms. Patches read a build's layer geometry on the next frame.
  */
 
 import type { Color, Id, LayerRef, Value } from "@sonobe/core";
-import { computeLayout, type LayoutNode } from "../layout/computeLayout.ts";
+import { computeLayout, type LayoutNode, type LayoutResult } from "../layout/computeLayout.ts";
 import { compose, multiply } from "../math/matrix.ts";
 import { finiteOr, toVec2 } from "../math/vec.ts";
 import type { LayerInfoSnapshot, Loop, SceneFrame, SceneNode, TextMeasurer } from "../types.ts";
@@ -50,8 +50,15 @@ export interface SceneBuild {
   scene: SceneFrame;
   /** Every scene node by key. */
   nodes: Map<string, SceneNode>;
-  /** Layer geometry by scene key (read by patches on the next frame). */
-  info: Map<string, LayerInfoSnapshot>;
+  /**
+   * A layer's geometry by scene key, as patches read it on the next frame. Made on the first read,
+   * from the node and its layout, and kept, so every reader of a build gets the same object. Most
+   * layers are never asked. It can wait because the runtime only reads the build of a step that
+   * has finished, and nothing changes a build's nodes or layout after that.
+   */
+  info(key: string): LayerInfoSnapshot | undefined;
+  /** Frames and content sizes by scene key, as laid out (Text's textSize reads the content size). */
+  layout: ReadonlyMap<string, LayoutResult>;
   /** Copy counts of replicated layers (and their descendants) by prefixed layer id: "card", "card#2/badge". */
   counts: Map<string, number>;
   /** Some layer moves without the engine (LIVE_LAYERS), so the frames have to keep coming. */
@@ -153,7 +160,6 @@ interface Inherited {
 export function buildScene(env: SceneEnv): SceneBuild {
   const counts = new Map<string, number>();
   const nodes = new Map<string, SceneNode>();
-  const info = new Map<string, LayerInfoSnapshot>();
   let live = false;
   let shaders = false;
   let clones = false;
@@ -311,25 +317,40 @@ export function buildScene(env: SceneEnv): SceneBuild {
     if (isLive && !live) live = isLive(props, shown, node.opacity);
     if (node.type === "shader") shaders = true;
     else if (node.type === "clone") clones = true;
+    node.children = p.children.map((c) => emit(c, worldTransform, p, shown));
+    return node;
+  };
+
+  const infos = new Map<string, LayerInfoSnapshot>();
+  const info = (key: string): LayerInfoSnapshot | undefined => {
+    const known = infos.get(key);
+    if (known) return known;
+    const node = nodes.get(key);
+    if (!node) return undefined;
+    const props = node.props;
+    const scale = finiteOr(props.scale, 1);
+    const sxyz = Array.isArray(props.scaleXYZ) ? (props.scaleXYZ as unknown[]) : [];
     const anchor = toVec2(props.anchor, [0, 0]);
+    const parent = node.parentKey === null ? undefined : nodes.get(node.parentKey);
     let parentRef: LayerRef | null = null;
     if (parent) {
       const { prefix, instance } = splitSceneKey(parent.key);
-      parentRef = makeRef(parent.layer.id, instance, prefix);
+      parentRef = makeRef(parent.layerId, instance, prefix);
     }
-    info.set(p.key, {
-      type: p.layer.type,
+    const content = layout.get(key)?.contentSize ?? [0, 0];
+    const made: LayerInfoSnapshot = {
+      type: node.type,
       enabled: props.enabled !== false,
-      position: [f.x + anchor[0] * w, f.y + anchor[1] * h],
-      size: [w, h],
-      scale: [sx, sy],
+      position: [node.x + anchor[0] * node.width, node.y + anchor[1] * node.height],
+      size: [node.width, node.height],
+      scale: [scale * finiteOr(sxyz[0], 1), scale * finiteOr(sxyz[1], 1)],
       anchor,
       parent: parentRef,
-      worldTransform,
-      contentSize: [f.contentSize[0], f.contentSize[1]],
-    });
-    node.children = p.children.map((c) => emit(c, worldTransform, p, shown));
-    return node;
+      worldTransform: node.worldTransform,
+      contentSize: [content[0], content[1]],
+    };
+    infos.set(key, made);
+    return made;
   };
 
   const scene: SceneFrame = {
@@ -339,7 +360,7 @@ export function buildScene(env: SceneEnv): SceneBuild {
     background: env.background,
     roots: roots.map((r) => emit(r, null, null, true)),
   };
-  return { scene, nodes, info, counts, live: live || (shaders && clones) };
+  return { scene, nodes, info, layout, counts, live: live || (shaders && clones) };
 }
 
 /** Copy counts are the same. */
@@ -383,8 +404,8 @@ export function sameBuild(a: SceneBuild, b: SceneBuild): boolean {
     if (n.opacity !== m.opacity || n.visible !== m.visible || n.clip !== m.clip || n.zPosition !== m.zPosition) return false;
     if (!sameNumbers(n.worldTransform, m.worldTransform) || !sameProps(n.props, m.props)) return false;
     if (n.textField !== m.textField && !valuesEqual(n.textField, m.textField)) return false;
-    const c = a.info.get(n.key)!.contentSize;
-    const d = b.info.get(m.key)!.contentSize;
+    const c = a.layout.get(n.key)!.contentSize;
+    const d = b.layout.get(m.key)!.contentSize;
     if (c[0] !== d[0] || c[1] !== d[1]) return false;
   }
   return true;

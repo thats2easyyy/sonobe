@@ -631,7 +631,7 @@ class RuntimeImpl implements SonobeRuntime {
     const root = this.graph.root;
     const rootPath = this.rootPath;
     if (!root || !rootPath) {
-      return { scene: { frame: this.frame, time: this.time, size, background: this.background(), roots: [] }, nodes: new Map(), info: new Map(), counts: new Map(), live: false };
+      return { scene: { frame: this.frame, time: this.time, size, background: this.background(), roots: [] }, nodes: new Map(), info: () => undefined, layout: new Map(), counts: new Map(), live: false };
     }
     this.currentPath = null;
     return buildScene({
@@ -1182,8 +1182,8 @@ class RuntimeImpl implements SonobeRuntime {
   private derivedLayerOutput(layerType: string, outKey: string, sceneKey: string): Value | undefined {
     const snap = this.snapshot;
     if (layerType === "text" && outKey === "textSize") {
-      const info = snap?.info.get(sceneKey);
-      return info ? [info.contentSize[0], info.contentSize[1]] : undefined;
+      const content = snap?.layout.get(sceneKey)?.contentSize;
+      return content ? [content[0], content[1]] : undefined;
     }
     if (layerType === "textField") {
       const field = this.input.text.snapshot(sceneKey);
@@ -1228,7 +1228,7 @@ class RuntimeImpl implements SonobeRuntime {
       wheel: () => this.input.wheel.snapshot(),
       layerInfo: (ref) => {
         const key = this.resolveLayerKey(ref);
-        return key === null ? undefined : this.snapshot?.info.get(key);
+        return key === null ? undefined : this.snapshot?.info(key);
       },
       layerOutput: (ref, outKey) => {
         const key = this.resolveLayerKey(ref);
