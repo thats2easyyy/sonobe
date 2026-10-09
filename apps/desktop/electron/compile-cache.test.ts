@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { compileCacheDir, compileCacheKey, pruneCompileCaches, staleCompileCaches, startCompileCache, usesCompileCache, type CompileCacheStart } from "./compile-cache.ts";
+import { cliCompileCacheKey, compileCacheDir, compileCacheKey, pruneCompileCaches, staleCompileCaches, startCompileCache, usesCompileCache, type CompileCacheStart } from "./compile-cache.ts";
 import { APP_NAME } from "./env.ts";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -33,6 +33,11 @@ describe("where the compile cache lives", () => {
     expect(compileCacheKey({ version: "0.4.2", packaged: true })).toBe("app-0.4.2");
     expect(compileCacheKey({ version: "0.4.3", packaged: true })).toBe("app-0.4.3");
     expect(compileCacheKey({ version: "0.4.2", packaged: false })).toBe("checkout");
+  });
+
+  it("names the bundled CLI's folder after the app's version too, so the app knows which one to keep", () => {
+    expect(cliCompileCacheKey("0.4.2")).toBe("cli-0.4.2");
+    expect(staleCompileCaches(["cli-0.4.1", "cli-0.4.2", "app-0.4.1"], cliCompileCacheKey("0.4.2"), "cli-")).toEqual(["cli-0.4.1"]);
   });
 
   it("is under the data folder, so nothing is written inside the app", () => {

@@ -39,7 +39,8 @@ extraResources:
     filter:
       - "**/*"
       - "!**/*.map"
-  # The `sonobe` CLI: Resources/cli/sonobe runs sonobe.mjs with the app's runtime in Node mode.
+  # The `sonobe` CLI: Resources/cli/sonobe runs sonobe.mjs with the app's runtime in Node mode, and relay.mjs
+  # (the relay alone) for `sonobe mcp`.
   - from: dist/cli
     to: cli
     filter:

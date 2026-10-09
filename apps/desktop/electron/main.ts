@@ -22,7 +22,7 @@ import { registerAssistant, type AssistantRegistration } from "./assistant/regis
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
-import { compileCacheDir, compileCacheKey, pruneCompileCaches } from "./compile-cache.ts";
+import { cliCompileCacheKey, compileCacheDir, compileCacheKey, pruneCompileCaches } from "./compile-cache.ts";
 import { APP_NAME, launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
 import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
@@ -1638,12 +1638,16 @@ function main(): void {
     // A window that never shows (closed at once) doesn't hold updates back for good.
     setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
 
-    // The compile cache is written once launch is over, and an update's old folders go then too. Only a packaged app removes
-    // any, and only other versions of itself: a checkout shares the data folder with an installed app, whose cache isn't its to delete.
+    // The compile cache is written once launch is over, and an update's old folders go then too: the app's, and the bundled
+    // CLI's, which its launcher keeps under the Sonobe home. Only a packaged app removes any, and only other versions of
+    // itself: a checkout shares both folders with an installed app, whose caches aren't its to delete.
     void first.shown.then(() =>
       setTimeout(() => {
         keepCompileCache();
-        if (app.isPackaged) void pruneCompileCaches(path.dirname(compileCacheHome()), path.basename(compileCacheHome()), "app-");
+        if (app.isPackaged) {
+          void pruneCompileCaches(path.dirname(compileCacheHome()), path.basename(compileCacheHome()), "app-");
+          void pruneCompileCaches(path.join(env.home ?? defaultSonobeHome(), "compile-cache"), cliCompileCacheKey(VERSION), "cli-");
+        }
         // Recent projects whose folders aren't there (an unplugged drive, a share that isn't mounted) leave the menu until they're back.
         void refreshRecents();
       }, UPDATES_START_MS).unref(),

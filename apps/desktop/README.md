@@ -17,7 +17,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
 | `player/` | The web player for phones and the pop-out viewer: the editor viewer's platform services, the phone's device info, the three-finger menu and the Sonobe Viewer bridge |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
-| `scripts/` | `build.mjs`, `sfsymbol.ts`, `notices.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
+| `scripts/` | `build.mjs`, `cli-launchers.ts`, `sfsymbol.ts`, `notices.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
 
 ## Scripts
 
@@ -25,7 +25,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 | Command | Does |
 | --- | --- |
-| `npm run build` | Bundles main and its entry (`boot.cjs`, package.json's `main`, which turns on Node's compile cache and loads `main.cjs`), preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
+| `npm run build` | Bundles main and its entry (`boot.cjs`, package.json's `main`, which turns on Node's compile cache and loads `main.cjs`), preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI with its relay (`cli/sonobe.mjs`, `cli/relay.mjs` and the launchers) into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
 | `npm run start` | Builds and launches against `apps/editor/dist` (or `SONOBE_DEV_URL`) |
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
@@ -83,6 +83,7 @@ It reads the bundle first, then runs it:
 - **Update capability.** The packaged `package.json`'s `sonobe` field matches the real signature.
 - **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature or without Apple's secure timestamp.
 - **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and again from a copy outside the checkout (under `release/` it could load a package from the repository's `node_modules` that the bundle left out), and the app launches, shows the editor, answers `/health` and quits cleanly.
+- **The relay.** `Resources/cli/relay.mjs` is under 64 KB. `sonobe mcp` says how to start the app and exits 1 when none is running, and against the launched app it answers `initialize` and exits 0 when stdin closes. The CLI's own compile cache lands in `compile-cache/cli-<version>` under the launch's `SONOBE_HOME`.
 - **Compile cache.** The entry is `dist/boot.cjs`, the launch leaves `main.cjs`'s compiled code in `compile-cache/app-<version>` under the data folder, and `codesign --verify` still passes afterwards: nothing is written inside the app. A second launch with nowhere to keep a cache starts all the same.
 
 | Flag | Does |
@@ -98,7 +99,7 @@ It reads the bundle first, then runs it:
 
 ### What's inside
 
-The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
+The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs it with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. For exactly `sonobe mcp` the launcher runs `relay.mjs`, the relay alone in 17 KB, because every Claude session keeps one running; everything else runs `sonobe.mjs`, the whole CLI, with Node's compile cache in `~/.sonobe/compile-cache/cli-<version>` (`SONOBE_HOME` moves it, and a `NODE_COMPILE_CACHE` of your own is left alone). The app removes the caches of other versions when it launches. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
 
 On macOS the app also ships `Resources/bin/sfsymbol`, outside app.asar so it can run. Design imports use it to draw `<svg data-sf-symbol>` placeholders as real SF Symbols (macOS 13 or later), and the bundled CLI points headless servers at it through `SONOBE_SFSYMBOL`. It is built for the architecture being packaged, and as one file with both slices when a run builds more than one. Try it by hand: `sfsymbol heart.fill --size 17 --weight semibold --color '#FF3B30'` prints the SVG, and `sfsymbol --list` prints every name.
 

@@ -38,6 +38,9 @@ describe("§9.1 env switches", () => {
 
   it("lists the switches the CLI launcher and MCP guides read", () => {
     for (const name of switches(read("../scripts/build.mjs"))) expect(documented, name).toContain(name);
+    const launchers = switches(read("../scripts/cli-launchers.ts"));
+    expect([...launchers].sort()).toEqual(["SONOBE_HOME", "SONOBE_NODE", "SONOBE_SFSYMBOL"]);
+    for (const name of launchers) expect(documented, name).toContain(name);
     for (const name of switches(read("../../../packages/mcp/src/guides.ts"))) expect(documented, name).toContain(name);
     for (const name of switches(read("../../../packages/mcp/src/examples.ts"))) expect(documented, name).toContain(name);
   });

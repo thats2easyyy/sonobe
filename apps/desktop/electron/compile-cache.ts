@@ -5,6 +5,8 @@
  *
  * Where it lives: `<userData>/compile-cache/app-<version>` for a packaged app and `<userData>/compile-cache/checkout` for a
  * checkout, so the two never share a folder though they share a data folder, and nothing is ever written inside the app.
+ * The bundled CLI has one of its own, set by its launcher, under `~/.sonobe`: it runs outside the app, where the data
+ * folder isn't known.
  * Node names an entry after the module's path and checks the source's hash, so an entry of another build is never read;
  * the folder per version is what lets an update's old entries be removed.
  *
@@ -26,6 +28,14 @@ const FAILED = 0;
 /** The folder's name under `compile-cache`: a packaged app's version, or `checkout`. */
 export function compileCacheKey(build: { version: string; packaged: boolean }): string {
   return build.packaged ? `app-${build.version}` : "checkout";
+}
+
+/**
+ * The bundled CLI's folder under `<SONOBE_HOME or ~/.sonobe>/compile-cache`, which its launcher points Node at
+ * (scripts/cli-launchers.ts). Named after the app's version, so the app knows which one to keep.
+ */
+export function cliCompileCacheKey(version: string): string {
+  return `cli-${version}`;
 }
 
 export function compileCacheDir(userData: string, key: string): string {

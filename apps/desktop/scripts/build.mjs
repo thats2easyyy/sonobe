@@ -19,11 +19,13 @@
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
- * The CLI lands in dist/cli: sonobe.mjs (one ESM file), guides/, examples/, and `sonobe` / `sonobe.cmd`
- * launchers that run it with the app's own runtime (Electron in Node mode), so a packaged app needs no
- * separate Node install. It is always bundled here from packages/cli/src, whatever packages/cli/dist
- * holds, and nothing native is copied beside it: the packaged CLI has no headless screenshot renderer
- * (@resvg/resvg-js), and its hint says to open the project in the app, which draws screenshots itself.
+ * The CLI lands in dist/cli: sonobe.mjs (one ESM file), relay.mjs (the `sonobe mcp` relay alone, a few
+ * kilobytes, because every Claude session keeps one running), guides/, examples/, and `sonobe` / `sonobe.cmd`
+ * launchers (scripts/cli-launchers.ts) that run them with the app's own runtime (Electron in Node mode), so
+ * a packaged app needs no separate Node install. It is always bundled here from packages/cli/src, whatever
+ * packages/cli/dist holds, and nothing native is copied beside it: the packaged CLI has no headless
+ * screenshot renderer (@resvg/resvg-js), and its hint says to open the project in the app, which draws
+ * screenshots itself.
  */
 
 import { build, context } from "esbuild";
@@ -31,6 +33,7 @@ import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFile
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
+import { posixLauncher, windowsLauncher } from "./cli-launchers.ts";
 import { metafileInputs, noticePackages, renderNotices, sourceMapInputs } from "./notices.ts";
 import { externalLottiePlugin, leanCatalogPlugin } from "./player-bundle.ts";
 import { buildSymbolHelper } from "./sfsymbol.ts";
@@ -112,50 +115,12 @@ function copyStatic() {
   copyExampleTexts(path.join(dist, "examples"), path.join(repo, "examples"));
 }
 
-const POSIX_LAUNCHER = `#!/bin/sh
-# Runs the bundled Sonobe CLI. Uses SONOBE_NODE when set, else the app's own runtime (Electron in
-# Node mode) when this file is inside an installed Sonobe app, else \`node\` from PATH.
-DIR="$(cd "$(dirname "$0")" && pwd)"
-# Headless imports draw SF Symbols with the app's helper (Resources/bin/sfsymbol on a Mac).
-if [ -z "$SONOBE_SFSYMBOL" ] && [ -x "$DIR/../bin/sfsymbol" ]; then
-  SONOBE_SFSYMBOL="$DIR/../bin/sfsymbol"
-  export SONOBE_SFSYMBOL
-fi
-if [ -n "$SONOBE_NODE" ]; then
-  exec "$SONOBE_NODE" "$DIR/sonobe.mjs" "$@"
-fi
-for APP_EXE in "$DIR/../../MacOS/Sonobe" "$DIR/../../sonobe"; do
-  if [ -x "$APP_EXE" ] && [ ! -d "$APP_EXE" ]; then
-    ELECTRON_RUN_AS_NODE=1 exec "$APP_EXE" "$DIR/sonobe.mjs" "$@"
-  fi
-done
-exec node "$DIR/sonobe.mjs" "$@"
-`;
-
-// A bare `exit /b` returns the CLI's exit code. `exit /b %ERRORLEVEL%` inside a parenthesized block
-// wouldn't: cmd expands the variable when it reads the block, before the CLI has run.
-const WINDOWS_LAUNCHER = `@echo off\r
-rem Runs the bundled Sonobe CLI with the app's own runtime (Electron in Node mode), else node.\r
-setlocal\r
-if defined SONOBE_NODE (\r
-  "%SONOBE_NODE%" "%~dp0sonobe.mjs" %*\r
-  exit /b\r
-)\r
-if exist "%~dp0..\\..\\Sonobe.exe" (\r
-  set ELECTRON_RUN_AS_NODE=1\r
-  "%~dp0..\\..\\Sonobe.exe" "%~dp0sonobe.mjs" %*\r
-  exit /b\r
-)\r
-node "%~dp0sonobe.mjs" %*\r
-`;
-
 async function buildCli() {
   const out = path.join(dist, "cli");
   mkdirSync(out, { recursive: true });
-  const { metafile } = await build({
+  /** @type {import("esbuild").BuildOptions} */
+  const bundle = {
     absWorkingDir: repo,
-    entryPoints: [path.join(repo, "packages", "cli", "src", "main.ts")],
-    outfile: path.join(out, "sonobe.mjs"),
     bundle: true,
     platform: "node",
     format: "esm",
@@ -169,13 +134,20 @@ async function buildCli() {
     // main.ts's own #! line above the banner.)
     banner: { js: "import { createRequire as __sonobeCreateRequire } from 'node:module';\nconst require = __sonobeCreateRequire(import.meta.url);" },
     external: ["bufferutil", "utf-8-validate"],
-  });
+  };
+  // The relay is an entry of its own, not a chunk of the CLI: a Claude session that runs `sonobe mcp` loads
+  // these few kilobytes and never the 9 MB beside them.
+  const built = await Promise.all([
+    build({ ...bundle, entryPoints: [path.join(repo, "packages", "cli", "src", "main.ts")], outfile: path.join(out, "sonobe.mjs") }),
+    build({ ...bundle, entryPoints: [path.join(repo, "packages", "cli", "src", "relay-main.ts")], outfile: path.join(out, "relay.mjs") }),
+  ]);
   cpSync(path.join(repo, "packages", "mcp", "guides"), path.join(out, "guides"), { recursive: true });
   copyExampleTexts(path.join(out, "examples"), path.join(repo, "examples"));
-  writeFileSync(path.join(out, "sonobe"), POSIX_LAUNCHER);
+  writeFileSync(path.join(out, "sonobe"), posixLauncher(version));
   chmodSync(path.join(out, "sonobe"), 0o755);
-  writeFileSync(path.join(out, "sonobe.cmd"), WINDOWS_LAUNCHER);
-  return { metafile, summary: `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB` };
+  writeFileSync(path.join(out, "sonobe.cmd"), windowsLauncher(version));
+  const kb = (file) => `cli/${file} ${(statSync(path.join(out, file)).size / 1024).toFixed(1)} KB`;
+  return { metafiles: built.map((result) => result.metafile), summary: `${kb("sonobe.mjs")}, ${kb("relay.mjs")}` };
 }
 
 /**
@@ -236,7 +208,7 @@ if (watch) {
   const started = performance.now();
   const [built, cli] = await Promise.all([Promise.all(targets.map((options) => build(options))), buildCli()]);
   const helper = symbolHelper();
-  const notices = licenses ? [writeLicenses([...built.flatMap((result) => metafileInputs(result.metafile, root)), ...metafileInputs(cli.metafile, repo)])] : [];
+  const notices = licenses ? [writeLicenses([...built.flatMap((result) => metafileInputs(result.metafile, root)), ...cli.metafiles.flatMap((metafile) => metafileInputs(metafile, repo))])] : [];
   const sizes = targets.map((t) => `${path.relative(dist, path.join(root, t.outfile))} ${(statSync(path.join(root, t.outfile)).size / 1024).toFixed(1)} KB`);
   console.log(`[sonobe] built ${[...sizes, cli.summary, ...helper, ...notices].join(", ")} in ${Math.round(performance.now() - started)} ms`);
 }
