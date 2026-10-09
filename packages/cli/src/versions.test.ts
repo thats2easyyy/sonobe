@@ -3,7 +3,9 @@
  * each of them without touching anything else, and nothing in the docs needs a bump.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GENERATOR } from "@sonobe/core";
@@ -107,6 +109,25 @@ describe("set-version.ts", () => {
     expect(versionProblems(versions)).toEqual(["apps/desktop/package.json has 0.1.0, not 0.2.0"]);
     expect(versionProblems(versions, "0.1.0")).toEqual(["package.json has 0.2.0, not 0.1.0"]);
     expect(versionProblems(versions.slice(0, 1), "0.2.0")).toEqual([]);
+  });
+
+  it("runs its check when the checkout is reached through a symlinked folder", () => {
+    // /tmp on a Mac, or a linked workspace folder: Node resolves the link for the module, not for argv.
+    const temp = mkdtempSync(path.join(tmpdir(), "sonobe-version-"));
+    try {
+      const linked = path.join(temp, "checkout");
+      symlinkSync(ROOT, linked, "junction");
+      const script = path.join(linked, "scripts", "set-version.ts");
+      const check = (...args: string[]) =>
+        spawnSync(process.execPath, [script, "--check", ...args], { encoding: "utf8" });
+      expect(check().status).toBe(0);
+      expect(check().stdout).toContain(current);
+      const wrong = check("9.9.9");
+      expect(wrong.status).toBe(1);
+      expect(wrong.stderr).toContain(`package.json has ${current}, not 9.9.9`);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
   });
 
   it("takes three plain numbers, and says why a prerelease isn't one", () => {
