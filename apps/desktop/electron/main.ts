@@ -579,8 +579,9 @@ function main(): void {
     abortCaptures();
     const started = Date.now();
     while (BrowserWindow.getAllWindows().length > 0 && Date.now() - started < 5000) {
-      // They hold nothing of the person's, so one that's slow to go is destroyed.
-      if (Date.now() - started > 1500) for (const win of BrowserWindow.getAllWindows()) win.destroy();
+      // They hold nothing of the person's, so one that's slow to go is destroyed. Never an editor window: one that
+      // opened meanwhile (a prototype double-clicked in Finder) stays, and the restart is called off.
+      if (Date.now() - started > 1500) for (const win of BrowserWindow.getAllWindows()) if (!windows.has(win.webContents.id)) win.destroy();
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     return BrowserWindow.getAllWindows().length === 0;
