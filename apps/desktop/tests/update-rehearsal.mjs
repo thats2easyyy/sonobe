@@ -568,9 +568,8 @@ try {
       quitAt = Date.now();
     });
 
-    let whileDown;
     await step("A10", "a tool call sent while Sonobe is down is refused, not kept for later", async () => {
-      whileDown = await relay.call("add_layers", { label: "sent while Sonobe was down", layers: [{ type: "oval", name: "Sent while Sonobe was down" }] });
+      const whileDown = await relay.call("add_layers", { label: "sent while Sonobe was down", layers: [{ type: "oval", name: "Sent while Sonobe was down" }] });
       expect(whileDown.isError && /wasn't run|Lost connection|may or may not/.test(whileDown.text), "the relay answers with an error that says what happened", whileDown.text);
       return whileDown.text.split(". ")[0];
     });
