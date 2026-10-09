@@ -37,6 +37,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LARGE_GRAPH_NODES, useGestureDocument } from "./state/gestureDocument.ts";
+import { graphDocumentSelector, sameGraph } from "./state/graphDocument.ts";
 import { useStore } from "zustand";
 import { rectOfElement } from "../../state/bounds.ts";
 import type { GraphGeometryNode } from "../../state/graphGeometry.ts";
@@ -298,7 +299,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, []);
 
   // -- Document → graph ------------------------------------------------------
-  const liveDoc = useStore(session.document, (s) => s.doc);
+  // The document as the graph reads it: an edit the graph can't show (a layer moved, a color changed)
+  // doesn't render the patch editor at all (state/graphDocument.ts).
+  const liveDoc = useStore(session.document, useMemo(() => graphDocumentSelector(componentId, registry), [componentId, registry]));
   // While a gesture is open (an inspector scrub, a canvas drag), the graph follows at low priority, or
   // for a large graph a few times a second, so the pointer, the inspector and the viewer never wait for it.
   const gestureOpen = useStore(session.document, (s) => s.gesture !== null);
@@ -675,9 +678,9 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           nodes.push([node.id, r.x, r.y, r.width, r.height, node.measured?.width && node.measured.height ? 1 : 0]);
         }
         // Mid-gesture the graph can lag the document; -1 tells the caller these boxes are from an older revision.
-        return { component: componentId, shownComponent: componentId, revision: drawnDocRef.current === s.doc ? s.revision : -1, nodes };
+        return { component: componentId, shownComponent: componentId, revision: sameGraph(drawnDocRef.current, s.doc, componentId, registry) ? s.revision : -1, nodes };
       }),
-    [session, componentId],
+    [session, componentId, registry],
   );
 
   const syncSelection = useCallback(

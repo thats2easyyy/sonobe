@@ -3,7 +3,7 @@ import { applyOps, createEmptyDocument, getDiagnostics, type Op, type SonobeDocu
 import { createPatchRegistry } from "@sonobe/patches";
 import { describe, expect, it } from "vitest";
 import { createDemoDocument } from "../../../state/demoDocument.ts";
-import { deriveGraph, nodeShapeFromData, type CableEdge, type InterfaceNodeData, type LayerGraphNode, type PatchGraphNode } from "@sonobe/core/graph";
+import { deriveGraph, nodeShapeFromData, sameGraphSource, type CableEdge, type InterfaceNodeData, type LayerGraphNode, type PatchGraphNode } from "@sonobe/core/graph";
 import { reconcileNodes } from "./reconcile.ts";
 
 const registry = createPatchRegistry();
@@ -217,6 +217,77 @@ describe("deriveGraph", () => {
     // Component Inputs never shows a live value, so its outputs keep no slot for one.
     expect(nodeShapeFromData(ins.data as InterfaceNodeData).rows[0]!.out).toEqual({ label: "Pressed" });
     expect(nodeShapeFromData(patchNode(m, "spring").data).rows[0]!.out).toEqual({ label: "Output", reserve: 8 });
+  });
+});
+
+describe("sameGraphSource", () => {
+  const doc = createDemoDocument(registry);
+  const edit = (ops: Op[], from: SonobeDocument = doc): SonobeDocument => {
+    const r = applyOps(from, ops, { registry });
+    if (!r.ok) throw new Error(r.errors.map((e) => e.message).join("\n"));
+    return r.doc;
+  };
+  /** Edits the graph can't show: a layer's own literals. */
+  const neutral: Op[][] = [
+    [{ op: "updateLayer", id: "card", props: { position: [40, 200] } }],
+    [{ op: "updateLayer", id: "card", props: { cornerRadius: 12 } }],
+    [{ op: "updateLayer", id: "sun", props: { size: [80, 80] } }],
+    [{ op: "updateLayer", id: "card", props: { color: "#102030FF" } }],
+    [{ op: "updateLayer", id: "card", props: { position: [40, 200] } }, { op: "updateLayer", id: "title", props: { text: "Tonight" } }],
+  ];
+  /** Edits the graph reads, or might. */
+  const visible: Op[][] = [
+    [{ op: "updateLayer", id: "next_card", props: { repeat: 3 } }],
+    [{ op: "updateLayer", id: "next_card", props: { opacity: { loop: [0.2, 0.8] } } }],
+    [{ op: "setInput", target: "@next_card.opacity", value: { link: "zoom_spring.output" } }],
+    [{ op: "disconnect", to: "@photo.scale" }],
+    [{ op: "rename", id: "card", name: "Hero" }],
+    [{ op: "moveLayer", id: "next_card", index: 0 }],
+    [{ op: "updateLayer", id: "card", locked: true }],
+    [{ op: "setInput", target: "zoom_spring.bounciness", value: 3 }],
+    [{ op: "updatePatch", id: "liked", ui: { x: 300 } }],
+    [{ op: "setNodePositions", positions: { "@photo": [900, 40] } }],
+    [{ op: "addComment", comment: { text: "Note", rect: [0, 600, 200, 100] } }],
+    [{ op: "addKnob", knob: { id: "speed", name: "Speed", type: "number", value: 2 } }],
+    [{ op: "setProject", changes: { name: "Renamed" } }],
+    [{ op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent", layers: [], patches: {} } }],
+  ];
+
+  it("is true for the same document and for layer literals the graph never reads", () => {
+    expect(sameGraphSource(doc, doc, "main")).toBe(true);
+    for (const ops of neutral) expect(sameGraphSource(doc, edit(ops), "main"), JSON.stringify(ops)).toBe(true);
+  });
+
+  it("counts a property set for the first time as a difference, once", () => {
+    // A new property changes which properties the layer stores, and cables are listed in that order: not worth working out.
+    const first = edit([{ op: "updateLayer", id: "next_card", props: { rotation: 10 } }]);
+    expect(sameGraphSource(doc, first, "main")).toBe(false);
+    expect(sameGraphSource(first, edit([{ op: "updateLayer", id: "next_card", props: { rotation: 20 } }], first), "main")).toBe(true);
+  });
+
+  it("is false for anything else: Repeat, loops, cables, names, order, patches, saved positions, knobs, the project, other components", () => {
+    for (const ops of visible) expect(sameGraphSource(doc, edit(ops), "main"), JSON.stringify(ops)).toBe(false);
+    const chips = edit([{ op: "addComponent", component: { id: "chip", name: "Chip", kind: "layerComponent", layers: [{ id: "dot", type: "oval", name: "Dot", props: { opacity: 1 } }], patches: {} } }]);
+    expect(sameGraphSource(chips, edit([{ op: "updateLayer", component: "chip", id: "dot", props: { opacity: 0.5 } }], chips), "main")).toBe(false);
+    expect(sameGraphSource(chips, edit([{ op: "updateLayer", component: "chip", id: "dot", props: { opacity: 0.5 } }], chips), "chip")).toBe(true);
+  });
+
+  it("never calls two documents the same when their graphs differ", () => {
+    const sources = [doc, edit([{ op: "updateLayer", id: "next_card", props: { repeat: 3 } }]), edit([{ op: "setInput", target: "@next_card.opacity", value: { link: "zoom_spring.output" } }])];
+    const graph = (d: SonobeDocument) => {
+      const { nodes, edges } = deriveGraph({ doc: d, componentId: "main", registry });
+      return { nodes, edges };
+    };
+    let agreed = 0;
+    for (const from of sources) {
+      for (const ops of [...neutral, ...visible]) {
+        const r = applyOps(from, ops, { registry });
+        if (!r.ok || !sameGraphSource(from, r.doc, "main")) continue;
+        expect(graph(r.doc), JSON.stringify(ops)).toEqual(graph(from));
+        agreed++;
+      }
+    }
+    expect(agreed).toBeGreaterThanOrEqual(neutral.length * 2);
   });
 });
 
