@@ -4,8 +4,8 @@
  * its refusals are unit tested (electron/signing.test.ts). package.mjs acts on the plan, and
  * verify-package.mjs reads signatures and entitlements with the same parsers.
  *
- *   local      the default: ad-hoc signed, for the Mac that built it. Credentials in the shell never
- *              change it.
+ *   local      the default: ad-hoc signed, for the Mac that built it. Credentials in the shell and
+ *              certificates in the keychain never change it.
  *   rehearsal  --identity "<name>": signed with a certificate from the keychain, never notarized, and
  *              named -rehearsal. For trying a real update between two signed builds; not distributable.
  *   release    --release: Developer ID, hardened runtime, notarized, DMG and zip with the update feed.
@@ -30,7 +30,7 @@ export interface SigningInput {
   /** --skip-editor-build */
   skipEditorBuild?: boolean;
   env: Record<string, string | undefined>;
-  /** Certificate names from `security find-identity -v -p codesigning`. */
+  /** Certificate names from `security find-identity -v -p codesigning` (readIdentities). */
   identities: readonly string[];
   fileExists: (file: string) => boolean;
 }
@@ -50,8 +50,8 @@ export interface SigningPlan {
   /** One line for the build log. */
   label: string;
   /**
-   * electron-builder's `mac.identity`: "-" signs ad-hoc, a name picks that certificate, and undefined
-   * lets it search the temporary keychain it makes from CSC_LINK.
+   * electron-builder's `mac.identity`: "-" signs ad-hoc (macSigningOptions makes sure of it), a name
+   * picks that certificate, and undefined lets it search the temporary keychain it makes from CSC_LINK.
    */
   identity: string | undefined;
   /** The keychain certificate's full name, when the plan chose one. */
@@ -117,6 +117,24 @@ const withoutPrefix = (name: string): string => {
 
 const list = (names: readonly string[]): string =>
   names.length ? names.map((name) => `"${name}"`).join(", ") : "no code signing certificate at all";
+
+/** Two certificates with one name, a renewed one beside the old: no name can choose between them. */
+const sameName = (names: readonly string[]): boolean =>
+  names.length > 1 && new Set(names).size === 1;
+const DELETE_ONE =
+  "Delete the one you don't sign with in Keychain Access (the expiry dates tell them apart)";
+
+/**
+ * Reads what `security find-identity -v -p codesigning` prints: each certificate's name. A
+ * certificate that sits in two keychains is listed twice with one SHA-1, and counts once.
+ */
+export function readIdentities(securityText: string): string[] {
+  const names = new Map<string, string>();
+  for (const [, hash, name] of securityText.matchAll(/^\s*\d+\) ([0-9A-F]{40}) "(.+)"/gm)) {
+    names.set(hash!, name!);
+  }
+  return [...names.values()];
+}
 
 function planArchs(input: SigningInput, mode: SigningMode): PackageArch[] {
   const host: PackageArch = input.hostArch === "arm64" ? "arm64" : "x64";
@@ -184,6 +202,12 @@ function releaseCertificate(input: SigningInput): {
   const all = input.identities.filter((name) => name.startsWith(DEVELOPER_ID));
   const found = all.filter((name) => name.includes(wanted));
   if (found.length === 1) return { identity: withoutPrefix(found[0]!), certificate: found[0]! };
+  if (sameName(found)) {
+    throw new SigningError(
+      `This Mac has ${found.length} Developer ID certificates named "${found[0]}", and a release signs with exactly one.`,
+      `CSC_NAME can't choose between them. ${DELETE_ONE}, or pass the certificate as a file with CSC_LINK and CSC_KEY_PASSWORD.`,
+    );
+  }
   if (found.length > 1) {
     throw new SigningError(
       `This Mac has ${found.length} Developer ID certificates (${list(found)}), and a release signs with exactly one.`,
@@ -256,6 +280,12 @@ export function planSigning(input: SigningInput): SigningPlan {
     const found = exact.length
       ? exact
       : input.identities.filter((name) => asked !== "" && name.includes(asked));
+    if (sameName(found)) {
+      throw new SigningError(
+        `--identity "${asked}" matches ${found.length} certificates with the same name, "${found[0]}".`,
+        `${DELETE_ONE}, then build again.`,
+      );
+    }
     if (found.length !== 1) {
       throw new SigningError(
         found.length
@@ -323,11 +353,12 @@ export function planSigning(input: SigningInput): SigningPlan {
 /**
  * electron-builder's `mac` signing options for a plan. The entitlement files must be absolute paths:
  * electron-builder hands them to codesign as written, which resolves them against wherever
- * package.mjs was started from.
+ * package.mjs was started from. `sign` is @electron/osx-sign's signAsync, which signs an ad-hoc build.
  */
 export function macSigningOptions(
   plan: SigningPlan,
   entitlements: { app: string; inherit: string },
+  sign: (options: Record<string, unknown>) => Promise<void>,
 ): Record<string, unknown> {
   for (const file of [entitlements.app, entitlements.inherit]) {
     if (!/^(\/|[A-Za-z]:[\\/])/.test(file)) {
@@ -342,6 +373,13 @@ export function macSigningOptions(
     entitlements: entitlements.app,
     entitlementsInherit: entitlements.inherit,
     ...(plan.timestamp ? {} : { timestamp: "none" }),
+    // electron-builder reads "-" as part of a certificate's name before it reads it as ad-hoc: with
+    // "gdb-cert" or "Apple Development: Anne-Marie …" in the keychain it would sign with that one.
+    // It hands a `sign` function the options it would have signed with (the entitlements and the
+    // hardened runtime among them), so an ad-hoc build keeps those and never the certificate it found.
+    ...(plan.identity === "-"
+      ? { sign: (options: Record<string, unknown>) => sign({ ...options, identity: "-" }) }
+      : {}),
   };
 }
 
@@ -357,6 +395,7 @@ export interface Signature {
   teamId: string | undefined;
   /** The hardened runtime flag. */
   hardened: boolean;
+  /** Apple's timestamp server signed the time, which notarization requires. */
   timestamped: boolean;
 }
 
@@ -449,7 +488,7 @@ export function checkSignature(plan: SigningPlan, signature: Signature): Signing
   if (plan.mode === "local" && signature.kind !== "adhoc") {
     return new SigningError(
       `The local build has ${has}, and a local build is ad-hoc signed.`,
-      'electron-builder matched the ad-hoc identity "-" against a certificate whose name has a hyphen. Build a rehearsal with --identity "<name>" if a signed build is what you want.',
+      'scripts/package.mjs signs a local build itself, ad-hoc, whatever certificate electron-builder finds (macSigningOptions): check that its `mac.sign` option still reaches electron-builder. For a signed build, pass --identity "<name>".',
     );
   }
   if (signature.hardened !== plan.hardenedRuntime) {
@@ -459,4 +498,59 @@ export function checkSignature(plan: SigningPlan, signature: Signature): Signing
     );
   }
   return null;
+}
+
+/** The slices `lipo -archs` names for the architectures a run packages. */
+const slicesOf = (archs: readonly PackageArch[]): string[] => [
+  ...new Set(
+    archs.flatMap((arch) =>
+      arch === "universal" ? ["arm64", "x86_64"] : [arch === "x64" ? "x86_64" : "arm64"],
+    ),
+  ),
+];
+
+/**
+ * Whether the SF Symbols helper covers every architecture a release or rehearsal packages.
+ * scripts/build.mjs only warns without the helper; a build other people get must have it. `slices`
+ * is what `lipo -archs` prints for dist/bin/sfsymbol, empty when it wasn't built.
+ */
+export function checkHelper(plan: SigningPlan, slices: readonly string[]): SigningError | null {
+  const missing = plan.strict
+    ? slicesOf(plan.archs).filter((slice) => !slices.includes(slice))
+    : [];
+  if (!missing.length) return null;
+  const built = slices.length
+    ? `was built for ${slices.join(" and ")} only, without ${missing.join(" and ")}`
+    : "wasn't built";
+  return new SigningError(
+    `The SF Symbols helper ${built}, and a ${plan.mode} build never ships without it.`,
+    "Install Xcode's command line tools (xcode-select --install); the warning from scripts/build.mjs above says what went wrong.",
+  );
+}
+
+/**
+ * Whether release/ holds what an update needs from a release or rehearsal: each architecture's DMG,
+ * zip and blockmap, and one latest-mac.yml that lists every zip. An update downloads its
+ * architecture's zip through the feed, so one left out breaks updating for everyone on it once the
+ * release is published. `files` are the names in release/, `feed` is latest-mac.yml's text.
+ */
+export function checkArtifacts(
+  plan: SigningPlan,
+  version: string,
+  files: readonly string[],
+  feed: string,
+): SigningError | null {
+  const suffix = plan.mode === "rehearsal" ? "-rehearsal" : "";
+  const missing = plan.archs.flatMap((arch) => {
+    const base = `Sonobe-${version}-mac-${arch}${suffix}`;
+    const absent = [`${base}.dmg`, `${base}.zip`, `${base}.zip.blockmap`].filter(
+      (name) => !files.includes(name),
+    );
+    return feed.includes(`${base}.zip`) ? absent : [...absent, `${base}.zip in latest-mac.yml`];
+  });
+  if (!missing.length) return null;
+  return new SigningError(
+    `The ${plan.mode} build is incomplete: release/ has no ${missing.join(", ")}.`,
+    "electron-builder's log above says what it built. A release needs every architecture's DMG, zip and blockmap, and one latest-mac.yml that lists every zip; upload nothing from this run.",
+  );
 }

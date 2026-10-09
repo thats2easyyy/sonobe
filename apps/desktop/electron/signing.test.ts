@@ -11,12 +11,15 @@ import {
   DISABLE_LIBRARY_VALIDATION,
   SigningError,
   buildInfoFor,
+  checkArtifacts,
+  checkHelper,
   checkSignature,
   entitlementKeys,
   helperArch,
   macSigningOptions,
   planSigning,
   readAssessment,
+  readIdentities,
   readSignature,
   withLibraryValidationDisabled,
   type SigningInput,
@@ -31,6 +34,10 @@ const API_KEY = {
   APPLE_API_KEY_ID: "ABC123",
   APPLE_API_ISSUER: "issuer-uuid",
 };
+
+const PATHS = { app: "/repo/build/entitlements.mac.plist", inherit: "/repo/build/inherit.plist" };
+/** Stands in for @electron/osx-sign's signAsync. */
+const noSign = async () => {};
 
 const plan = (input: Partial<SigningInput> = {}) =>
   planSigning({
@@ -93,6 +100,43 @@ describe("planSigning: a local build", () => {
     const packageScript = read("../scripts/package.mjs");
     expect(packageScript).toContain("for (const name of plan.scrubEnv) delete process.env[name];");
     expect(packageScript).toContain("Object.assign(process.env, plan.setEnv);");
+  });
+
+  it("stays ad-hoc on a Mac whose keychain has a certificate with a hyphen in its name", async () => {
+    // electron-builder looks "-" up as part of a name first, and would sign with either of these.
+    const identities = ["gdb-cert", "Apple Development: Anne-Marie Example (FGHIJ67890)"];
+    const local = plan({ identities });
+    expect(local).toMatchObject({ mode: "local", identity: "-", certificate: undefined });
+    const signed: Record<string, unknown>[] = [];
+    const options = macSigningOptions(local, PATHS, async (opts) => void signed.push(opts));
+    // What electron-builder hands a `sign` function: the certificate it found, by its SHA-1, with
+    // the options it would have signed with.
+    const optionsForFile = () => ({ hardenedRuntime: true, entitlements: PATHS.app });
+    const found = {
+      app: "/release/mac-arm64/Sonobe.app",
+      identity: "0F".repeat(20),
+      optionsForFile,
+    };
+    await (options.sign as (opts: typeof found) => Promise<void>)(found);
+    expect(signed).toEqual([{ app: found.app, identity: "-", optionsForFile }]);
+    // And the build's own gate passes the result, where a signature from that certificate wouldn't.
+    expect(checkSignature(local, readSignature(ADHOC))).toBeNull();
+    expect(checkSignature(local, readSignature(signedBy("gdb-cert", "not set", "")))?.message).toBe(
+      'The local build has a signature from "gdb-cert", and a local build is ad-hoc signed.',
+    );
+    // A rehearsal or a release signs with the certificate it names, through electron-builder.
+    const rehearsal = plan({ identity: "gdb-cert", identities });
+    expect(rehearsal).toMatchObject({ identity: "gdb-cert", certificate: "gdb-cert" });
+    expect(macSigningOptions(rehearsal, PATHS, noSign)).not.toHaveProperty("sign");
+    const release = plan({
+      release: true,
+      env: API_KEY,
+      identities: [...identities, DEVELOPER_ID],
+    });
+    expect(macSigningOptions(release, PATHS, noSign)).not.toHaveProperty("sign");
+    expect(read("../scripts/package.mjs")).toContain(
+      'createRequire(builderLib)("@electron/osx-sign")',
+    );
   });
 
   it("names the architectures --arch takes", () => {
@@ -185,6 +229,34 @@ describe("planSigning: a release", () => {
     ).toContain('CSC_NAME is "Nobody"');
   });
 
+  it("says a name can't choose between two certificates that share one, and what can", () => {
+    // A renewed certificate installed beside the old one.
+    const identities = [DEVELOPER_ID, DEVELOPER_ID];
+    for (const env of [API_KEY, { ...API_KEY, CSC_NAME: "ABCDE12345" }]) {
+      expect(refusal({ release: true, env, identities })).toEqual({
+        message: `This Mac has 2 Developer ID certificates named "${DEVELOPER_ID}", and a release signs with exactly one.`,
+        hint: "CSC_NAME can't choose between them. Delete the one you don't sign with in Keychain Access (the expiry dates tell them apart), or pass the certificate as a file with CSC_LINK and CSC_KEY_PASSWORD.",
+      });
+    }
+    expect(refusal({ identity: "Jane", identities: [DEVELOPMENT, DEVELOPMENT] })).toEqual({
+      message: `--identity "Jane" matches 2 certificates with the same name, "${DEVELOPMENT}".`,
+      hint: "Delete the one you don't sign with in Keychain Access (the expiry dates tell them apart), then build again.",
+    });
+    // One certificate that sits in two keychains is one certificate: `security` lists it twice.
+    const listed = [
+      `  1) ${"AB".repeat(20)} "${DEVELOPER_ID}"`,
+      `  2) ${"CD".repeat(20)} "${DEVELOPMENT}"`,
+      `  3) ${"AB".repeat(20)} "${DEVELOPER_ID}"`,
+      "     3 valid identities found",
+    ].join("\n");
+    expect(readIdentities(listed)).toEqual([DEVELOPER_ID, DEVELOPMENT]);
+    expect(readIdentities("     0 valid identities found\n")).toEqual([]);
+    expect(release({ env: API_KEY, identities: readIdentities(listed) }).certificate).toBe(
+      DEVELOPER_ID,
+    );
+    expect(read("../scripts/package.mjs")).toContain('readIdentities(found.stdout ?? "")');
+  });
+
   it("leaves the identity to electron-builder when CSC_LINK supplies the certificate", () => {
     const ci = release({
       env: { ...API_KEY, CSC_LINK: "base64…", CSC_KEY_PASSWORD: "x" },
@@ -197,9 +269,7 @@ describe("planSigning: a release", () => {
       build: { signing: "developer-id", updates: "install" },
     });
     expect(ci.label).toContain("CSC_LINK");
-    expect(
-      macSigningOptions(ci, { app: "/b/app.plist", inherit: "/b/inherit.plist" }),
-    ).not.toHaveProperty("identity");
+    expect(macSigningOptions(ci, PATHS, noSign)).not.toHaveProperty("identity");
   });
 
   it("refuses flags that would make it less than a release, and other platforms", () => {
@@ -246,7 +316,7 @@ describe("planSigning: a rehearsal", () => {
     expect(rehearsal.label).toContain("not notarized: do not distribute");
     // With CSC_LINK left in the environment electron-builder would search only that certificate's keychain.
     expect(rehearsal.scrubEnv).toContain("CSC_LINK");
-    expect(plan({ identity: "Tyler", dir: true, arch: "arm64,x64" })).toMatchObject({
+    expect(plan({ identity: "Jane", dir: true, arch: "arm64,x64" })).toMatchObject({
       targets: ["dir"],
       archs: ["arm64", "x64"],
     });
@@ -266,7 +336,7 @@ describe("planSigning: a rehearsal", () => {
     const several = refusal({ identity: "e", identities: [DEVELOPMENT, DEVELOPER_ID] });
     expect(several.message).toContain("matches 2 certificates");
     expect(several.hint).toContain(DEVELOPER_ID);
-    expect(refusal({ identity: "Tyler", identities: [] }).hint).toContain(
+    expect(refusal({ identity: "Jane", identities: [] }).hint).toContain(
       "no code signing certificate at all",
     );
   });
@@ -356,7 +426,7 @@ describe("reading a signature back", () => {
     });
     expect(checkSignature(release, readSignature(ADHOC))?.message).toContain("an ad-hoc signature");
 
-    const rehearsal = plan({ identity: "Tyler" });
+    const rehearsal = plan({ identity: "Jane" });
     expect(checkSignature(rehearsal, readSignature(APPLE_DEVELOPMENT))).toBeNull();
     expect(checkSignature(rehearsal, readSignature(ADHOC))?.message).toBe(
       `The rehearsal build has an ad-hoc signature, not one from "${DEVELOPMENT}".`,
@@ -376,12 +446,70 @@ describe("reading a signature back", () => {
   });
 });
 
+describe("what a release or rehearsal must hold", () => {
+  const release = plan({ release: true, env: API_KEY, identities: [DEVELOPER_ID] });
+  const rehearsal = plan({ identity: "Jane" });
+
+  it("has the SF Symbols helper for every architecture it packages; a local build goes without", () => {
+    expect(checkHelper(release, ["x86_64", "arm64"])).toBeNull();
+    expect(checkHelper(release, ["arm64"])).toMatchObject({
+      message:
+        "The SF Symbols helper was built for arm64 only, without x86_64, and a release build never ships without it.",
+      hint: expect.stringContaining("xcode-select --install"),
+    });
+    expect(checkHelper(rehearsal, [])?.message).toBe(
+      "The SF Symbols helper wasn't built, and a rehearsal build never ships without it.",
+    );
+    expect(checkHelper(rehearsal, ["arm64"])).toBeNull();
+    const universal = plan({ identity: "Jane", arch: "universal" });
+    expect(checkHelper(universal, ["x86_64"])?.message).toContain("without arm64");
+    expect(checkHelper(plan(), [])).toBeNull();
+    expect(read("../scripts/package.mjs")).toContain("checkHelper(plan, slices)");
+  });
+
+  it("has each architecture's DMG, zip and blockmap, and a feed that lists every zip", () => {
+    const files = (arch: string, suffix = "") => [
+      `Sonobe-0.2.0-mac-${arch}${suffix}.dmg`,
+      `Sonobe-0.2.0-mac-${arch}${suffix}.zip`,
+      `Sonobe-0.2.0-mac-${arch}${suffix}.zip.blockmap`,
+    ];
+    const both = [...files("arm64"), ...files("x64"), "latest-mac.yml", "mac-arm64", "mac"];
+    const feed = "files:\n  - url: Sonobe-0.2.0-mac-arm64.zip\n  - url: Sonobe-0.2.0-mac-x64.zip\n";
+    expect(checkArtifacts(release, "0.2.0", both, feed)).toBeNull();
+    // A second electron-builder run overwrites the first's feed: one that lists a single zip.
+    expect(
+      checkArtifacts(release, "0.2.0", both, feed.replace(/  - url: \S+x64\.zip\n/, "")),
+    ).toMatchObject({
+      message:
+        "The release build is incomplete: release/ has no Sonobe-0.2.0-mac-x64.zip in latest-mac.yml.",
+      hint: expect.stringContaining("upload nothing from this run"),
+    });
+    const noBlockmap = both.filter((name) => name !== "Sonobe-0.2.0-mac-arm64.zip.blockmap");
+    expect(checkArtifacts(release, "0.2.0", noBlockmap, feed)?.message).toBe(
+      "The release build is incomplete: release/ has no Sonobe-0.2.0-mac-arm64.zip.blockmap.",
+    );
+    expect(checkArtifacts(release, "0.2.0", [], "")?.message).toContain(
+      "Sonobe-0.2.0-mac-arm64.dmg, Sonobe-0.2.0-mac-arm64.zip, Sonobe-0.2.0-mac-arm64.zip.blockmap, Sonobe-0.2.0-mac-arm64.zip in latest-mac.yml, Sonobe-0.2.0-mac-x64.dmg",
+    );
+    // A rehearsal's files are named so, and it builds this machine's architecture alone.
+    const rehearsed = files("arm64", "-rehearsal");
+    const rehearsedFeed = "files:\n  - url: Sonobe-0.2.0-mac-arm64-rehearsal.zip\n";
+    expect(checkArtifacts(rehearsal, "0.2.0", rehearsed, rehearsedFeed)).toBeNull();
+    expect(checkArtifacts(rehearsal, "0.2.0", files("arm64"), feed)?.message).toContain(
+      "The rehearsal build is incomplete",
+    );
+    expect(read("../scripts/package.mjs")).toContain(
+      "checkArtifacts(plan, version, readdirSync(release), feed)",
+    );
+  });
+});
+
 describe("what verify-package.mjs holds a build to", () => {
   it("expects the update capability each plan records, from the signature alone", () => {
     const env = API_KEY;
     const built = [
       [plan(), ADHOC],
-      [plan({ identity: "Tyler" }), APPLE_DEVELOPMENT],
+      [plan({ identity: "Jane" }), APPLE_DEVELOPMENT],
       [plan({ identity: "Example Co", identities: [DEVELOPER_ID] }), DEVELOPER_ID_SIGNED],
       [plan({ release: true, env, identities: [DEVELOPER_ID] }), DEVELOPER_ID_SIGNED],
     ] as const;
@@ -447,30 +575,28 @@ describe("the entitlements", () => {
   });
 
   it("reach electron-builder as absolute paths, with the plan's signing options", () => {
-    const paths = {
-      app: "/repo/build/entitlements.mac.plist",
-      inherit: "/repo/build/inherit.plist",
-    };
-    expect(macSigningOptions(plan(), paths)).toEqual({
+    expect(macSigningOptions(plan(), PATHS, noSign)).toEqual({
       identity: "-",
       hardenedRuntime: true,
       notarize: false,
-      entitlements: paths.app,
-      entitlementsInherit: paths.inherit,
+      entitlements: PATHS.app,
+      entitlementsInherit: PATHS.inherit,
       timestamp: "none",
+      // An ad-hoc build is signed here, not by electron-builder's certificate lookup.
+      sign: expect.any(Function),
     });
     const release = plan({ release: true, env: API_KEY, identities: [DEVELOPER_ID] });
-    expect(macSigningOptions(release, paths)).toEqual({
+    expect(macSigningOptions(release, PATHS, noSign)).toEqual({
       identity: "Example Co (ABCDE12345)",
       hardenedRuntime: true,
       notarize: true,
-      entitlements: paths.app,
-      entitlementsInherit: paths.inherit,
+      entitlements: PATHS.app,
+      entitlementsInherit: PATHS.inherit,
     });
     // electron-builder passes a relative path to codesign as written, so it would depend on the
     // folder package.mjs was started from.
     expect(() =>
-      macSigningOptions(plan(), { ...paths, app: "build/entitlements.mac.plist" }),
+      macSigningOptions(plan(), { ...PATHS, app: "build/entitlements.mac.plist" }, noSign),
     ).toThrow(/must be absolute/);
   });
 });
@@ -491,7 +617,7 @@ describe("electron-builder.yml", () => {
     }
     expect(yml).not.toMatch(setting("forceCodeSigning"));
     const packageScript = read("../scripts/package.mjs");
-    expect(packageScript).toContain("mac: macSigningOptions(plan, entitlements)");
+    expect(packageScript).toContain("mac: macSigningOptions(plan, entitlements, signAsync)");
     expect(packageScript).toContain('publish: "never"');
     expect(packageScript).not.toMatch(/publish: "(always|onTag|onTagOrDraft)"/);
   });

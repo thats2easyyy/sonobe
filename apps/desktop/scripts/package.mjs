@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { SigningError, checkSignature, helperArch, macSigningOptions, planSigning, readSignature, withLibraryValidationDisabled } from "./signing.ts";
+import { SigningError, checkArtifacts, checkHelper, checkSignature, helperArch, macSigningOptions, planSigning, readIdentities, readSignature, withLibraryValidationDisabled } from "./signing.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
@@ -65,7 +65,7 @@ function fail(err) {
 function keychainIdentities() {
   if (process.platform !== "darwin") return [];
   const found = spawnSync("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"], { encoding: "utf8", timeout: 15_000 });
-  return [...(found.stdout ?? "").matchAll(/^\s*\d+\) [0-9A-F]{40} "(.+)"/gm)].map((match) => match[1]);
+  return readIdentities(found.stdout ?? "");
 }
 
 let plan;
@@ -100,7 +100,10 @@ if (values["skip-editor-build"] && existsSync(editorIndex)) {
   try {
     execFileSync(npm, ["run", "build", "-w", "@sonobe/editor"], { cwd: repo, stdio: "inherit", shell: process.platform === "win32" });
   } catch (err) {
-    if (plan.strict) fail(new SigningError(`The editor build failed, and a ${plan.mode} build never packages an older apps/editor/dist.`, "Fix the errors above (npm run build -w @sonobe/editor shows them alone), then package again."));
+    if (plan.strict) {
+      const message = `The editor build failed, and a ${plan.mode} build never packages an older apps/editor/dist.`;
+      fail(new SigningError(message, "Fix the errors above (npm run build -w @sonobe/editor shows them alone), then package again."));
+    }
     if (!existsSync(editorIndex)) throw err;
     console.warn(`[package] WARN the editor build failed; packaging the previous apps/editor/dist (${new Date(statSync(editorIndex).mtimeMs).toISOString()})`);
   }
@@ -113,15 +116,17 @@ if (plan.strict) {
   // build.mjs only warns without the helper; a build other people get must have it, for every architecture it holds.
   const helper = path.join(root, "dist", "bin", "sfsymbol");
   const slices = existsSync(helper) ? execFileSync("lipo", ["-archs", helper], { encoding: "utf8" }).trim().split(/\s+/) : [];
-  const needed = plan.archs.flatMap((arch) => (arch === "universal" ? ["arm64", "x86_64"] : [arch === "x64" ? "x86_64" : "arm64"]));
-  const missing = [...new Set(needed)].filter((slice) => !slices.includes(slice));
-  if (missing.length) fail(new SigningError(`The SF Symbols helper ${slices.length ? `was built for ${slices.join(" and ")} only, without ${missing.join(" and ")}` : "wasn't built"}, and a ${plan.mode} build never ships without it.`, "Install Xcode's command line tools (xcode-select --install); the warning from scripts/build.mjs above says what went wrong."));
+  const problem = checkHelper(plan, slices);
+  if (problem) fail(problem);
 }
 step("generating icons");
 execFileSync(process.execPath, [path.join(root, "scripts", "icons.mjs")], { cwd: root, stdio: "inherit" });
 
 // 5. electron-builder.
 const { build, Platform, Arch } = await import("electron-builder");
+// electron-builder's own @electron/osx-sign, found from where it finds it: a local build signs with it (scripts/signing.ts).
+const builderLib = createRequire(require.resolve("electron-builder/package.json")).resolve("app-builder-lib/package.json");
+const { signAsync } = createRequire(builderLib)("@electron/osx-sign");
 const electronPackage = require.resolve("electron/package.json");
 const electronVersion = JSON.parse(readFileSync(electronPackage, "utf8")).version;
 const localDist = path.join(path.dirname(electronPackage), "dist");
@@ -156,7 +161,8 @@ if (plan.disableLibraryValidation) {
  * and every build ships the same files.
  */
 function afterExtract(context) {
-  const resources = context.electronPlatformName === "darwin" ? path.join(context.appOutDir, context.packager.info.framework.distMacOsAppName, "Contents", "Resources") : path.join(context.appOutDir, "resources");
+  const macResources = () => path.join(context.appOutDir, context.packager.info.framework.distMacOsAppName, "Contents", "Resources");
+  const resources = context.electronPlatformName === "darwin" ? macResources() : path.join(context.appOutDir, "resources");
   rmSync(path.join(resources, "default_app.asar"), { force: true });
 }
 
@@ -172,7 +178,8 @@ function afterSign(context) {
   const problem = checkSignature(plan, readSignature(described.stderr ?? ""));
   if (problem) throw problem;
   if (plan.notarize && spawnSync("xcrun", ["stapler", "validate", app], { stdio: "ignore" }).status !== 0) {
-    throw new SigningError("The release build has no notarization ticket stapled to it.", 'electron-builder notarizes right after signing; its log above says why it didn\'t (look for "skipped macOS notarization"). Nothing was packaged for download.');
+    const hint = 'electron-builder notarizes right after signing; its log above says why it didn\'t (look for "skipped macOS notarization"). Nothing was packaged for download.';
+    throw new SigningError("The release build has no notarization ticket stapled to it.", hint);
   }
   step(`signature checked: ${path.relative(root, app)}`);
 }
@@ -198,7 +205,7 @@ try {
       extraMetadata: { sonobe: plan.build },
       afterExtract,
       afterSign,
-      mac: macSigningOptions(plan, entitlements),
+      mac: macSigningOptions(plan, entitlements, signAsync),
       // A rehearsal's files say so, so none can be mistaken for a release.
       ...(plan.mode === "rehearsal" ? { artifactName: "${productName}-${version}-${os}-${arch}-rehearsal.${ext}" } : {}),
     },
@@ -219,14 +226,10 @@ if (plan.targets.includes("zip")) {
   const archive = path.join(release, `Sonobe-${version}-sourcemaps${suffix}.tar.gz`);
   execFileSync("tar", ["-czf", archive, "-C", maps, "editor", "desktop"], { stdio: "inherit", env: { ...process.env, COPYFILE_DISABLE: "1" } });
   artifacts.push(archive);
-  // An update downloads an architecture's zip through latest-mac.yml. A feed that leaves one out, or a zip
-  // without its blockmap, breaks updating for everyone on that architecture once the release is published.
+  // What an update downloads must all be there before anything is uploaded (checkArtifacts).
   const feed = existsSync(path.join(release, "latest-mac.yml")) ? readFileSync(path.join(release, "latest-mac.yml"), "utf8") : "";
-  const missing = plan.archs.flatMap((arch) => {
-    const base = `Sonobe-${version}-mac-${arch}${suffix}`;
-    return [...[`${base}.dmg`, `${base}.zip`, `${base}.zip.blockmap`].filter((name) => !existsSync(path.join(release, name))), ...(feed.includes(`${base}.zip`) ? [] : [`${base}.zip in latest-mac.yml`])];
-  });
-  if (missing.length) abandon(new SigningError(`The ${plan.mode} build is incomplete: release/ has no ${missing.join(", ")}.`, "electron-builder's log above says what it built. A release needs every architecture's DMG, zip and blockmap, and one latest-mac.yml that lists every zip; upload nothing from this run."));
+  const incomplete = checkArtifacts(plan, version, readdirSync(release), feed);
+  if (incomplete) abandon(incomplete);
 }
 
 const unpacked = readdirSync(release).filter((name) => statSync(path.join(release, name)).isDirectory() && !name.startsWith("."));
