@@ -14,7 +14,7 @@ import type { Id, Op } from "@sonobe/core";
 import type { SceneFrame } from "@sonobe/engine";
 import { createDomRenderer, DomTextMeasurer, type DomRenderer } from "@sonobe/renderer";
 import { ChevronDown, Circle, Group, MousePointer2, Ruler, Sparkles, Square, Type } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useStore } from "zustand";
 import { layoutStore, useLayout } from "../../shell/layoutStore.ts";
 import { Panel } from "../../shell/Panel.tsx";
@@ -26,6 +26,7 @@ import type { EditorSession } from "../../state/session.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
+import { loadable } from "../../ui/loadable.tsx";
 import { Menu, type MenuEntry } from "../../ui/Menu.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { toast } from "../../ui/Toast.tsx";
@@ -117,7 +118,7 @@ const DESIGN_BOX_MIN_HEIGHT = 250;
 const DRAFT_WHOLE_ZOOM = 0.45;
 
 // The Design with Claude box loads the first time it opens.
-const DesignBox = lazy(() => import("../design/DesignBox.tsx").then((m) => ({ default: m.DesignBox })));
+const DesignBox = loadable(() => import("../design/DesignBox.tsx").then((m) => m.DesignBox), { name: "Design with Claude" });
 
 interface GestureBase {
   pointerId: number;
@@ -1325,9 +1326,15 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
         )}
       </div>
       {designLoaded && (
-        <Suspense fallback={null}>
-          <DesignBox session={session} bounds={layerBounds} onHeightChange={onDesignHeight} />
-        </Suspense>
+        <DesignBox
+          session={session}
+          bounds={layerBounds}
+          onHeightChange={onDesignHeight}
+          onLoadError={() => {
+            designStore.getState().closeBox();
+            setDesignLoaded(false);
+          }}
+        />
       )}
     </Panel>
   );
