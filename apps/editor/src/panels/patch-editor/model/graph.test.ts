@@ -114,6 +114,20 @@ describe("deriveGraph", () => {
     expect(next.nodes.find((n) => n.id === "zoom_spring")).toBe(model.nodes.find((n) => n.id === "zoom_spring"));
   });
 
+  it("hands back the previous model itself when no node or cable changed", () => {
+    const derive = (next: SonobeDocument) => deriveGraph({ doc: next, componentId: "main", registry, diagnostics: getDiagnostics(next, registry), previous: model });
+    expect(derive(doc)).toBe(model);
+    // Edits the graph doesn't show: a layer's own literal, the project's name.
+    expect(derive(applyOps(doc, [{ op: "updateLayer", id: "card", props: { cornerRadius: 12 } }], { registry }).doc)).toBe(model);
+    expect(derive(applyOps(doc, [{ op: "setProject", changes: { name: "Renamed" } }], { registry }).doc)).toBe(model);
+    // One the graph shows gets a new model, and a later derive from it finds its patches again.
+    const literal = applyOps(doc, [{ op: "setInput", target: "zoom_spring.bounciness", value: 3 }], { registry }).doc;
+    const next = derive(literal);
+    expect(next).not.toBe(model);
+    expect(next.edges).toBe(model.edges);
+    expect(deriveGraph({ doc: literal, componentId: "main", registry, diagnostics: getDiagnostics(literal, registry), previous: next })).toBe(next);
+  });
+
   it("marks looped patches and knows literal loop lengths", () => {
     const loopDoc = build([
       { op: "addPatch", patch: { id: "count", type: "loop", inputs: { count: 5 }, ui: { x: 0, y: 0 } } },

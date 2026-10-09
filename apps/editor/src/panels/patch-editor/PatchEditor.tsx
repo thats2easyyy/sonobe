@@ -583,11 +583,20 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
   }, [held, updateNodeInternals]);
 
   // Cables at either end of a selected patch or layer light up (data.related). An edge keeps its object
-  // while its flags hold, so a selection change re-renders only the cables it touches.
+  // while its flags hold, so a selection change re-renders only the cables it touches, and the list
+  // keeps its identity while no cable changed, so React Flow doesn't rebuild its lookups for a
+  // selection no cable touches.
   const focusNodes = useMemo(() => new Set<string>([...selectedPatches, ...selectedLayers.map(layerNodeId)]), [selectedPatches, selectedLayers]);
   const flaggedEdges = useRef(new Map<string, FlaggedEdge>());
   const labelledEdges = useRef(new Map<string, LabelledEdge>());
+  const shownEdges = useRef<CableFlowEdge[]>([]);
   const edges = useMemo(() => {
+    const keep = (next: CableFlowEdge[]) => {
+      const shown = shownEdges.current;
+      if (next.length === shown.length && next.every((e, i) => e === shown[i])) return shown;
+      shownEdges.current = next;
+      return next;
+    };
     const hidden = held.missing.length ? new Set(held.missing) : null;
     const titles = nodeTitles(model);
     const kept = new Map<string, LabelledEdge>();
@@ -604,7 +613,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     const picked = selectedEdges.length ? new Set(selectedEdges) : null;
     if (!picked && focusNodes.size === 0) {
       flaggedEdges.current.clear();
-      return ready;
+      return keep(ready);
     }
     const flagged = new Map<string, FlaggedEdge>();
     const next = ready.map((e) => {
@@ -621,7 +630,7 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
       return edge;
     });
     flaggedEdges.current = flagged;
-    return next;
+    return keep(next);
   }, [model, selectedEdges, focusNodes, held]);
 
   const onFlowError = useCallback<OnError>((code, message) => {

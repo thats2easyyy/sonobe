@@ -665,7 +665,10 @@ export function deriveGraph(options: DeriveGraphOptions): GraphModel {
     cablesBySource.set(l.from, list);
   }
 
-  const result = share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  const shared = share({ componentId, nodes, edges, cablesBySource, outputAddresses, ports, nodeIds }, options.previous);
+  // The same nodes and cables as before (a layer moved, a color changed): the previous model itself,
+  // since the rest of a model is made from those two lists. What's memoized on the model then holds.
+  const result = options.previous && shared.nodes === options.previous.nodes && shared.edges === options.previous.edges ? options.previous : shared;
   // Remember the node objects the model actually holds, so the next derive hands them back.
   for (const node of result.nodes) {
     const entry = node.type === "patch" ? cache.entries.get(node.id) : undefined;
