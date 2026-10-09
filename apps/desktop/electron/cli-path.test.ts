@@ -26,4 +26,13 @@ describe("bundledCliPath", () => {
     const builder = read("../electron-builder.yml");
     expect(builder).toMatch(/- from: dist\/cli\s+to: cli/);
   });
+
+  it("is bundled one way, whatever packages/cli/dist holds, and its Windows launcher returns the CLI's exit code", () => {
+    const build = read("../scripts/build.mjs");
+    expect(build).toContain('path.join(repo, "packages", "cli", "src", "main.ts")');
+    expect(build).not.toMatch(/prebuilt|"packages", "cli", "dist"/);
+    const launcher = /const WINDOWS_LAUNCHER = `([^`]+)`/.exec(build)![1]!;
+    expect(launcher).not.toContain("%ERRORLEVEL%");
+    expect(launcher.match(/exit \/b\\r/g)).toHaveLength(2);
+  });
 });
