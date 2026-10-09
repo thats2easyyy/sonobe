@@ -29,7 +29,7 @@ function initScript({ seenWelcome }: { seenWelcome: boolean }) {
       localStorage.setItem("sonobe.welcome.v1", "seen");
     }
   } catch {}
-  const perf: any = { longTasks: [], events: [], marks: {}, frames: [], recording: false };
+  const perf: any = { longTasks: [], events: [], marks: {}, frames: [], recording: false, rafRequests: 0 };
   (window as any).__perf = perf;
   try {
     new PerformanceObserver((list) => {
@@ -41,7 +41,14 @@ function initScript({ seenWelcome }: { seenWelcome: boolean }) {
       for (const e of list.getEntries() as PerformanceEventTiming[]) perf.events.push({ name: e.name, start: e.startTime, duration: e.duration });
     }).observe({ type: "event", durationThreshold: 16, buffered: true } as PerformanceObserverInit);
   } catch {}
+  // Animation frames the app asks for are counted: a prototype at rest should ask for none. The
+  // recorders here use the browser's own function (perf.raf), so they aren't in the count.
   const raf = window.requestAnimationFrame.bind(window);
+  perf.raf = raf;
+  window.requestAnimationFrame = (callback) => {
+    perf.rafRequests++;
+    return raf(callback);
+  };
   perf.startFrames = () => {
     perf.frames = [];
     perf.recording = true;
@@ -57,6 +64,8 @@ function initScript({ seenWelcome }: { seenWelcome: boolean }) {
     return perf.frames;
   };
   // Boot marks, read once a frame until the editor is usable: the first prototype frames and panel contents.
+  // A prototype where nothing moves stops after two or three frames, so "frame4" is also reached
+  // when it has drawn and come to rest (builds from before rest have no resting()).
   const mark = (name: string) => {
     if (perf.marks[name] === undefined) perf.marks[name] = performance.now();
   };
@@ -66,7 +75,7 @@ function initScript({ seenWelcome }: { seenWelcome: boolean }) {
     if (hook) {
       try {
         if (hook.frame() > 0) mark("frame1");
-        if (hook.frame() > 3) mark("frame4");
+        if (hook.frame() > 3 || (hook.frame() >= 0 && hook.resting?.())) mark("frame4");
       } catch {}
     }
     for (const [name, selector] of Object.entries(selectors)) if (perf.marks[name] === undefined && document.querySelector(selector)) mark(name);
@@ -112,7 +121,7 @@ export async function newPage(browser: Browser, { seenWelcome = true } = {}): Pr
   return { context, page, cdp, problems };
 }
 
-/** Open the editor and wait until it's usable: the prototype past frame 3, Layers rows, a patch node. */
+/** Open the editor and wait until it's usable: the prototype past frame 3 or at rest, Layers rows, a patch node. */
 export async function openEditor(page: Page, base: string): Promise<void> {
   await page.goto(`${base}/?sonobeTest`);
   await page.waitForFunction(() => (window as any).__perf?.marks.usable !== undefined, undefined, { timeout: 30_000 });
