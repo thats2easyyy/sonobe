@@ -2,7 +2,7 @@
  * The real editor: one EditorSession wired into the shell. Layers, viewer, canvas, patch editor,
  * inspector, HUD, Learn, and Connect Claude; toolbar bound to the document and runtime; document
  * commands, menu routing, the welcome screen, Settings and About, and (inside the desktop app) the
- * MCP bridge handlers behind the agent-permission guard.
+ * MCP bridge handlers behind the agent-permission guard and the update notices.
  *
  * The patch editor (React Flow and ELK), the Learn drawer (guides, examples, lessons, patch reference),
  * the welcome screen, and the dialogs load on demand so the first paint stays small.
@@ -52,6 +52,8 @@ import { getAppSession } from "./session.ts";
 import { dialogsFor } from "./sessionServices.ts";
 import { applyMotionPreference, settingsStore } from "./settings.ts";
 import { installTestHook, shouldInstallTestHook } from "./testHook.ts";
+import { attachUpdateNotices } from "./updates/notices.ts";
+import { followUpdates } from "./updates/updateStore.ts";
 import { useAppCommands } from "./useAppCommands.tsx";
 import { hasSeenWelcome, shouldShowWelcomeOnLaunch, useWelcome, welcomeStore } from "./welcome/welcomeStore.ts";
 import "./app.css";
@@ -182,6 +184,7 @@ function Workspace() {
   const lessonDocked = useLessonLayout((s) => s.active);
   const [patchTools, setPatchTools] = useState<HTMLDivElement | null>(null);
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
+  const [reopening] = useState(() => getDesktopHostApi()?.reopening === true);
 
   // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
   useRegisterCommands(() => [assistantCommand(), explainCommand(session), ...designCommands(session)], [session]);
@@ -206,14 +209,27 @@ function Workspace() {
     };
   }, []);
 
-  // The welcome screen on the first launch (or every launch, when Settings asks for it).
+  // Updates (desktop): the status the app reports, and the notices about it.
   useEffect(() => {
-    if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch)) welcomeStore.getState().show("launch");
+    const unfollow = followUpdates();
+    const unnotice = attachUpdateNotices();
+    return () => {
+      unnotice();
+      unfollow();
+    };
   }, []);
 
-  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section),
-  // unless something already replaced or edited the launch document (a project opened from Finder).
+  // The welcome screen on the first launch (or every launch, when Settings asks for it), except in the window
+  // that opens again what was open before a restart for an update.
   useEffect(() => {
+    if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch, reopening)) welcomeStore.getState().show("launch");
+  }, [reopening]);
+
+  // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section),
+  // unless something already replaced or edited the launch document (a project opened from Finder), or the
+  // app is bringing the work back itself after an update.
+  useEffect(() => {
+    if (reopening) return;
     let cancelled = false;
     void session
       .recoverableDrafts()
@@ -224,7 +240,7 @@ function Workspace() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, reopening]);
 
   // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered
   // (so does a draft Claude recovers, which has no project path yet).
