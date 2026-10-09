@@ -1358,7 +1358,7 @@ export function CanvasPanel({ session: sessionProp, sceneSource, onSceneSourceCh
           session={session}
           bounds={layerBounds}
           onHeightChange={onDesignHeight}
-          onLoadError={() => {
+          onFailed={() => {
             designStore.getState().closeBox();
             setDesignLoaded(false);
           }}
