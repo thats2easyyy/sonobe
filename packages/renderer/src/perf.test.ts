@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 /**
- * Render benchmark: a 500-node frame (100 list rows × 5 layers) must reconcile in under 4 ms
- * and write only what changed. Timings use the median of many frames so GC pauses don't flake;
- * CI machines get a wider budget. Each timed case prints its median.
+ * Render benchmark: a 500-node frame (100 list rows × 5 layers) must reconcile within its budget
+ * and write only what changed. Timings use the median of many frames so GC pauses don't flake.
+ * Each timed case prints its median. On a laptop the budget is three to four times what the case
+ * measures alone (0.15 to 0.38 ms), which is about twice what it measures with the whole suite
+ * running beside it, so a regression of 4x fails and a smaller one shows in the printed figure.
+ * CI machines get a wider budget.
  *
  * happy-dom's CSSStyleDeclaration.setProperty re-serializes the whole declaration on every call
  * (tens of µs, far slower than a browser), so style writes are stubbed while timing: the budget
@@ -16,7 +19,13 @@ import { createDomRenderer } from "./renderer.ts";
 import type { DomRenderer } from "./renderer.ts";
 import { DomTextMeasurer } from "./textMeasurer.ts";
 
-const BUDGET_MS = process.env.CI ? 12 : 4;
+const budget = (local: number, ci: number) => (process.env.CI ? ci : local);
+/** One draw of 500 nodes: 0.15 to 0.21 ms alone, up to 0.45 ms beside the suite (0.9 to 1 ms for engine frames before unchanged boxes and texts were skipped). */
+const BUDGET_MS = budget(0.8, 12);
+/** A draw that writes every node: 0.38 ms alone, up to 0.79 ms beside the suite. */
+const BUDGET_ALL_MS = budget(1.6, 12);
+/** The engine's step over 200 wrapped paragraphs: 0.34 ms alone, over 4 ms before the measurer kept a wrapped layout. */
+const BUDGET_STEP_MS = budget(1, 6);
 const ROWS = 100;
 
 const mat = (x: number, y: number) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1];
@@ -155,9 +164,9 @@ describe("render performance (500 nodes)", { retry: 2 }, () => {
   it("moves every layer with one write per node", () => {
     renderer.render(listFrame(0, 0));
     const { median, writesPerFrame } = measure(renderer, Array.from({ length: 40 }, (_, i) => listFrame(i + 1, i + 1)));
-    report("move every layer", median);
+    report("move every layer", median, `budget ${BUDGET_ALL_MS}`);
     expect(writesPerFrame.every((w) => w === ROWS * 5)).toBe(true);
-    expect(median).toBeLessThan(BUDGET_MS);
+    expect(median).toBeLessThan(BUDGET_ALL_MS);
   });
 
   it("keeps zPosition ranks without writes: a static lifted list writes nothing, a scrolling one only transforms", () => {
@@ -170,6 +179,7 @@ describe("render performance (500 nodes)", { retry: 2 }, () => {
     const scrolled = measure(renderer, Array.from({ length: 40 }, (_, i) => listFrame(4 + i, 0, 0.5, true)));
     report("scrolling lifted list", scrolled.median);
     expect(scrolled.writesPerFrame.every((w) => w === ROWS)).toBe(true);
+    expect(scrolled.median).toBeLessThan(BUDGET_MS);
     expect(renderer.getStats().moved).toBe(moved);
     renderer.render(listFrame(0));
   });
@@ -264,9 +274,9 @@ describe("render performance (engine frames, 500 layers)", { retry: 2 }, () => {
     const { step, draw, writesPerFrame } = measureLive(runtime, renderer, 60);
     report("300 boxes + 200 wrapped paragraphs, one box turning: draw", draw);
     // The measurer keeps a wrapped layout, so a paragraph is wrapped once, not on every frame (that took over 4 ms here).
-    report("300 boxes + 200 wrapped paragraphs, one box turning: engine step (lays the text out)", step, `budget ${BUDGET_MS / 2}`);
+    report("300 boxes + 200 wrapped paragraphs, one box turning: engine step (lays the text out)", step, `budget ${BUDGET_STEP_MS}`);
     expect(writesPerFrame.every((w) => w === 1)).toBe(true);
     expect(draw).toBeLessThan(BUDGET_MS);
-    expect(step).toBeLessThan(BUDGET_MS / 2);
+    expect(step).toBeLessThan(BUDGET_STEP_MS);
   });
 });

@@ -110,7 +110,7 @@ The subscription path is experimental and off by default. Only the app run from 
 
 The interactions are synthetic: 60 awaited mouse steps per drag, with the prototype playing. The example is still, so its idle rows should read about 0 rAF/s and 0 steps/s, with main-thread time near the `paused.idle` row; the stress document never stops moving, so its rows show what a frame costs. `run.ts` lists the options.
 
-What one frame costs without a browser is in two test files, which print it per case and hold it to a budget: `packages/engine/src/runtime/benchmark.test.ts` (the engine's step) and `packages/renderer/src/perf.test.ts` (the draw, with its style writes counted). Run them with `npx vitest run <file> --reporter=default` before and after a change to the scene build, layout or the renderer, and add a case when yours needs one.
+What one frame costs without a browser is in two test files, which print it per case and hold it to a budget (about three times the case's cost on a quiet laptop, so read the printed figure for anything smaller): `packages/engine/src/runtime/benchmark.test.ts` (the engine's step) and `packages/renderer/src/perf.test.ts` (the draw, with its style writes counted). Run them with `npx vitest run <file> --reporter=default` before and after a change to the scene build, layout or the renderer, and add a case when yours needs one.
 
 ## UI rules
 

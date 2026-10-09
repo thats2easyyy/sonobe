@@ -1,7 +1,10 @@
 /**
- * Engine frame cost. Each case prints its ms per frame and holds it to a budget: a tight one on a
- * laptop, where a regression should fail, and a generous one on CI, whose runners are slow and uneven.
- * A frame at 120 fps is 8.3 ms, and the renderer and the browser need most of it.
+ * Engine frame cost. Each case prints its ms per frame and holds it to a budget. On a laptop the
+ * budget is about three times what the case measures alone, which is about twice what it measures
+ * with the whole suite running beside it (`npm test` slows a case by 1.3x to 1.9x here). So a
+ * regression of 3x or more fails, and a smaller one shows in the printed figure and in the cases
+ * that compare two measurements (Repeat, different layers). CI's runners are slow and uneven, and
+ * get a generous budget. A frame at 120 fps is 8.3 ms, and the renderer and the browser need most of it.
  *
  *   npx vitest run packages/engine/src/runtime/benchmark.test.ts --reporter=default
  *
@@ -11,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { buildDoc, createMockRegistry, createTestRuntime, defineMock, pointerEvent, port, type PatchInput } from "../testing/index.ts";
 import type { Runtime } from "../types.ts";
 
+/** `local` beside each case: what it measured alone on an M-series laptop when the budget was set. */
 const budget = (local: number, ci: number) => (process.env.CI ? ci : local);
 
 /**
@@ -73,7 +77,8 @@ describe("runtime: performance", { retry: 2 }, () => {
     const patches: Record<string, PatchInput> = { p0: { type: "splitter", inputs: { value: 1 } } };
     for (let i = 1; i < 500; i++) patches[`p${i}`] = { type: "add", inputs: { value1: { link: `p${i - 1}.output` }, value2: 1 } };
     const rt = createTestRuntime(buildDoc({ patches }));
-    const limit = budget(0.5, 12);
+    // 0.07 ms alone.
+    const limit = budget(0.25, 12);
     const ms = perFrame(rt, { warm: 60, frames: 100 });
     report("500 chained patches", ms, `budget ${limit}`);
     expect(rt.getValue("p499.output")).toBe(500);
@@ -109,7 +114,8 @@ describe("runtime: performance", { retry: 2 }, () => {
       patches[`grow_${i}`] = { type: "transition", inputs: { progress: { link: `touch_${i}.down` } } };
     }
     const rt = createTestRuntime(buildDoc({ layers, patches }, reg), reg);
-    const limit = budget(5, 12);
+    // 0.87 ms alone.
+    const limit = budget(3, 12);
     const ms = perFrame(rt, { warm: 30, frames: 40 });
     report("1,000 copies beside 20 empty lists", ms, `budget ${limit}`);
     expect(rt.scene().roots).toHaveLength(1000);
@@ -186,7 +192,8 @@ describe("runtime: performance", { retry: 2 }, () => {
     patches.grow = { type: "transition", inputs: { progress: { link: "rowToggle.on" }, start: 1, end: 1.1 } };
 
     const rt = createTestRuntime(buildDoc({ layers: layers as never, patches }, reg), reg);
-    const limit = budget(8.3, 24);
+    // 1.5 ms alone (3.3 to 3.8 ms before layers shared their type's defaults and kept their references).
+    const limit = budget(5, 24);
     // A tap on the next card every 6 frames, so a few springs are always running.
     const ms = perFrame(rt, {
       warm: 60,
