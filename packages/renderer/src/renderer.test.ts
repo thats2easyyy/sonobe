@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import type { SceneFrame, SceneNode } from "@sonobe/engine";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDomRenderer, lisIndices } from "./renderer.ts";
 import type { DomRenderer } from "./renderer.ts";
 import { writtenStyle } from "./style.ts";
+import { DomTextMeasurer } from "./textMeasurer.ts";
 
 function mat(x = 0, y = 0): number[] {
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1];
@@ -245,6 +246,88 @@ describe("createDomRenderer", () => {
     expect(container.querySelector(".sonobe-stage")).toBeNull();
     expect(container.hasAttribute("tabindex")).toBe(false);
     expect(container.style.touchAction).toBe("");
+  });
+});
+
+describe("a text layer that didn't change", () => {
+  let container: HTMLElement;
+  let renderer: DomRenderer;
+  let fonts: EventTarget;
+  let lineHeight: number;
+  /** Calls of the measurer's lineHeightFor: the text drawer asks once each time it draws a text. */
+  let drawn: { mock: { calls: unknown[] } };
+
+  beforeEach(() => {
+    lineHeight = 20;
+    fonts = new EventTarget();
+    const measurer = new DomTextMeasurer({ measureWidth: (t) => [...t].length * 10, measureLineHeight: () => lineHeight, document: { fonts } as unknown as Document });
+    drawn = vi.spyOn(measurer, "lineHeightFor");
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    renderer = createDomRenderer(container, { resolveAssetUrl: () => undefined, textMeasurer: measurer });
+  });
+
+  afterEach(() => {
+    renderer.dispose();
+    container.remove();
+  });
+
+  const label = (props: Record<string, unknown> = {}, extra: Partial<SceneNode> = {}) => node("label", "text", { text: "Hello", fontSize: 20, ...props }, [], extra);
+  const textEl = () => renderer.elementForKey("label")!.querySelector(".sonobe-text") as HTMLElement;
+  const draws = (render: () => void) => {
+    const before = drawn.mock.calls.length;
+    render();
+    return drawn.mock.calls.length - before;
+  };
+
+  it("isn't drawn again: when it only moves, its transform is written and nothing else", () => {
+    expect(draws(() => renderer.render(frame([label()])))).toBe(1);
+    const before = renderer.getStats().styleWrites;
+    // New props objects holding the same values, as the engine makes on every frame.
+    expect(draws(() => renderer.render(frame([label({}, { x: 10, y: 20 })])))).toBe(0);
+    expect(draws(() => renderer.render(frame([label({}, { x: 10, y: 20 })])))).toBe(0);
+    expect(renderer.getStats().styleWrites - before).toBe(1);
+    expect(writtenStyle(renderer.elementForKey("label")!, "transform")).toBe("matrix(1, 0, 0, 1, 10, 20)");
+    expect(textEl().textContent).toBe("Hello");
+  });
+
+  it("is drawn again when its text, a color, its size, its opacity, the stage scale or the hit-target overlay changes", () => {
+    const red = { r: 1, g: 0, b: 0, a: 1 };
+    renderer.render(frame([label({ textColor: red })]));
+    expect(draws(() => renderer.render(frame([label({ textColor: red })])))).toBe(0);
+    expect(draws(() => renderer.render(frame([label({ textColor: red, text: "Goodbye" })])))).toBe(1);
+    expect(textEl().textContent).toBe("Goodbye");
+    expect(draws(() => renderer.render(frame([label({ textColor: { r: 0, g: 0, b: 1, a: 1 }, text: "Goodbye" })])))).toBe(1);
+    expect(writtenStyle(textEl(), "color")).toBe("rgba(0, 0, 255, 1)");
+    const blue = (extra: Partial<SceneNode> = {}) => frame([label({ textColor: red, text: "Goodbye" }, extra)]);
+    renderer.render(blue());
+    expect(draws(() => renderer.render(blue({ width: 140 })))).toBe(1);
+    expect(draws(() => renderer.render(blue({ width: 140, opacity: 0.5 })))).toBe(1);
+    expect(draws(() => renderer.render(blue({ width: 140, opacity: 0.5 })))).toBe(0);
+    expect(draws(() => renderer.setScale(2))).toBe(1);
+    expect(draws(() => renderer.setShowHitTargets(true, ["label"]))).toBe(1);
+    expect(draws(() => renderer.render(blue({ width: 140, opacity: 0.5 })))).toBe(0);
+  });
+
+  it("is truncated again in the middle when its width changes", () => {
+    const name = { text: "abcdefghijklmnop", fontSize: 17, maxLines: 1, truncation: "middle" };
+    renderer.render(frame([label(name, { width: 70 })]));
+    expect(textEl().textContent).toBe("abc…nop");
+    renderer.render(frame([label(name, { width: 90 })]));
+    expect(textEl().textContent).toBe("abcd…mnop");
+  });
+
+  it("is drawn again when a font finishes loading, with the font's own line height", () => {
+    renderer.render(frame([label()]));
+    expect(writtenStyle(textEl(), "line-height")).toBe("20px");
+    // The web font has arrived, but nothing has said so yet.
+    lineHeight = 26;
+    expect(draws(() => renderer.render(frame([label()])))).toBe(0);
+    expect(writtenStyle(textEl(), "line-height")).toBe("20px");
+    // The measurer forgets what it measured and the renderer draws its last frame again.
+    expect(draws(() => fonts.dispatchEvent(new Event("loadingdone")))).toBe(1);
+    expect(writtenStyle(textEl(), "line-height")).toBe("26px");
+    expect(draws(() => renderer.render(frame([label()])))).toBe(0);
   });
 });
 

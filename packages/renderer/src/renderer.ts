@@ -97,13 +97,21 @@ const BLEND_MODES: Record<string, string> = {
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-/** Box layers draw only from their props, size, opacity and visibility, so an unchanged one only needs its transform written. */
-const STATIC_TYPES: ReadonlySet<string> = new Set(["group", "componentInstance", "rectangle", "oval", "colorFill", "gradient"]);
+/**
+ * Box and text layers draw only from their props, size, opacity and visibility (text also from the
+ * fonts that have loaded), so an unchanged one only needs its transform written. See StyleMemo.
+ */
+const STATIC_TYPES: ReadonlySet<string> = new Set(["group", "componentInstance", "rectangle", "oval", "colorFill", "gradient", "text"]);
 /** Props already folded into a node's transform and size. */
 const GEOMETRY_KEYS: ReadonlySet<string> = new Set(["position", "size", "anchor", "pivot", "scale", "scaleXYZ", "rotation", "rotationX", "rotationY", "zPosition"]);
 const NO_PROPS: Readonly<Record<string, unknown>> = Object.freeze({});
 
-/** What a static host was last drawn from. */
+/**
+ * What a static host was last drawn from. The host is skipped while all of it is the same: its
+ * props by identity (the ones the transform and size don't already cover), its size, opacity,
+ * visibility and clip, the renderer's modes, scale and pixel ratio, and `fonts`, which counts the
+ * times a font finished loading, because a text's line height and middle truncation are measured.
+ */
 interface StyleMemo {
   type: string;
   props: Readonly<Record<string, unknown>>;
@@ -116,6 +124,7 @@ interface StyleMemo {
   keys: ReadonlySet<string>;
   scale: number;
   dpr: number;
+  fonts: number;
   visibleResult: boolean;
   cursor: boolean;
 }
@@ -255,6 +264,8 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   let disposed = false;
   let rendering = false;
   let invalidated = false;
+  /** How many times a font has finished loading (StyleMemo.fonts). */
+  let fonts = 0;
   /** The last frame-to-frame time that wasn't a gap (see RenderContext.frameDelta). */
   let ordinaryDelta = 1 / 60;
   let maskCounter = 0;
@@ -511,9 +522,10 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
       memo.keys === ctx.hitTargetKeys &&
       memo.scale === ctx.scale &&
       memo.dpr === ctx.dpr &&
+      memo.fonts === fonts &&
       sameStyleProps(props, memo.props)
     ) {
-      // A moving box layer: nothing but its transform changed, and that's written above.
+      // A moving box or text layer: nothing but its transform changed, and that's written above.
       memo.props = props;
       if (memo.cursor) hasCursors = true;
       return memo.visibleResult;
@@ -582,6 +594,7 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
         keys: ctx.hitTargetKeys,
         scale: ctx.scale,
         dpr: ctx.dpr,
+        fonts,
         visibleResult: visible,
         cursor: typeof props.cursor === "string" && props.cursor !== "auto",
       });
@@ -703,7 +716,10 @@ export function createDomRenderer(container: HTMLElement, opts: DomRendererOptio
   function rerender(): void {
     if (lastFrame) render(lastFrame);
   }
-  const unsubscribeFonts = measurer.onInvalidate(rerender);
+  const unsubscribeFonts = measurer.onInvalidate(() => {
+    fonts++;
+    rerender();
+  });
   const unsubscribeTextures = shaders.onTextureChange(rerender);
 
   return {
