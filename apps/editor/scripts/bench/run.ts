@@ -25,7 +25,13 @@ import { BOOT_RUNS, type Sample } from "./boot.ts";
 import { runScenario, type DocumentName, type Run } from "./interactions.ts";
 import { launch, REPO, stats } from "./lib.ts";
 
+const OPTIONS = ["baseline", "url", "reps", "only", "filter", "throttle", "profile", "trace", "json", "port"];
 const args = process.argv.slice(2);
+const stray = args.find((arg) => arg.startsWith("--") && !OPTIONS.includes(arg.slice(2)));
+if (stray !== undefined) {
+  console.error(`"${stray}" isn't an option of the benchmark. It takes ${OPTIONS.map((name) => `--${name}`).join(", ")}${/\s/.test(stray) ? ", each as an argument of its own" : ""}.`);
+  process.exit(1);
+}
 const flag = (name: string) => args.includes(`--${name}`);
 const option = (name: string) => (flag(name) ? args[args.indexOf(`--${name}`) + 1] : undefined);
 const list = (name: string) => (option(name) ?? "").split(",").filter(Boolean);
@@ -49,7 +55,13 @@ async function serveThisCheckout(): Promise<{ url: string; close: () => Promise<
   const root = path.join(REPO, "apps/editor");
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "sonobe-bench-"));
   console.log("Building the editor…");
-  await build({ root, logLevel: "warn", build: { outDir, emptyOutDir: true } });
+  try {
+    await build({ root, logLevel: "warn", build: { outDir, emptyOutDir: true } });
+  } catch {
+    fs.rmSync(outDir, { recursive: true, force: true });
+    console.error("The editor didn't build, so there's nothing to measure. Run `npm run build -w @sonobe/editor` to see why.");
+    process.exit(1);
+  }
   const server = await preview({ root, logLevel: "warn", build: { outDir }, preview: { port: Number(option("port") ?? 5290), host: "localhost" } });
   const url = server.resolvedUrls?.local[0]?.replace(/\/$/, "");
   const close = async () => {
