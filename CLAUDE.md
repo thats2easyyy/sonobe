@@ -43,6 +43,7 @@ These run by hand, outside CI:
 npm run smoke -w @sonobe/desktop   # the muted Electron end-to-end run
 npm run test:ios                   # Sonobe Viewer on an iOS Simulator (Xcode)
 node evals/run.ts                  # Claude builds each eval case (uses your Claude account)
+node apps/desktop/tests/update-rehearsal.mjs --identity "<name>"   # a real update between two signed builds (macOS)
 ```
 
 The evals run `packages/cli/dist`, so run `npm run build -w @sonobe/cli` before them; the desktop build always bundles the CLI from source. The Electron run rewrites the screenshots in `apps/desktop/screenshots`; keep only the ones you meant to change.
