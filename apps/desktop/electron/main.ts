@@ -24,9 +24,10 @@ import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
 import { cliCompileCacheKey, compileCacheDir, compileCacheKey, pruneCompileCaches } from "./compile-cache.ts";
 import { APP_NAME, launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
-import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
+import type { LaunchInfo, McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
+import { planLaunch, showsLaunch, type LaunchPlan } from "./launch.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { buildMenuSpec, toMenuTemplate, type NativeAction } from "./menu.ts";
 import { OwnWriteRegistry, ProjectAccess, readProject, resolveProjectSelection, writeProject, type WriteProjectInput } from "./project-io.ts";
@@ -157,8 +158,11 @@ function main(): void {
   let restartRunning: Promise<boolean> | null = null;
   /** Rejects the install step of a restart when the updater reports an error. */
   let restartFailed: ((err: Error) => void) | null = null;
-  /** The next editor window opens again what was open before a restart, so its editor skips the welcome screen. */
-  let reopenInNextWindow = false;
+  /**
+   * What the next editor window starts on (launch.ts): a prototype the app was asked to open, or what a restart closed. Its
+   * editor asks before its first render, so that is its first frame.
+   */
+  let nextLaunch: Promise<LaunchInfo> | null = null;
   /** Settles once a launch that reopens work has done so. MCP calls wait for it: one that got in first would land on the blank launch document. */
   let reopened: Promise<void> = Promise.resolve();
   /** A quit that stopped at a window's unsaved-changes prompt carries on once that window has closed (update-restart.ts). */
@@ -299,14 +303,14 @@ function main(): void {
   };
 
   const createWindow = (): Promise<AppWindow> => {
-    const reopening = reopenInNextWindow;
-    reopenInNextWindow = false;
+    const launch = nextLaunch;
+    nextLaunch = null;
     return createAppWindow({
       preloadPath: path.join(__dirname, "preload.cjs"),
       source: resolveContentSource(),
       statePath: path.join(app.getPath("userData"), "window-state.json"),
       mute: env.mute,
-      reopening,
+      ...(launch ? { launch } : {}),
       rpc: rpc!,
       appName: APP_NAME,
       log,
@@ -387,10 +391,37 @@ function main(): void {
     }
   };
 
+  /** No editor window is open and none is opening: the next one is new, and can be started on something. */
+  const noWindow = () => !primaryWindow() && !creating;
+
+  /**
+   * The next window starts on the first of `paths` that is a prototype, else on a restart's first step, instead of the demo
+   * (launch.ts). The folder is approved for the editor before its page is answered. Resolves what's left to open the usual ways.
+   */
+  const startNextWindowOn = (paths: readonly string[], steps: readonly ReopenStep[] = []): Promise<LaunchPlan> => {
+    const plan = planLaunch({ paths, steps, resolve: resolveProjectSelection, exists: existsSync, draftAt }).then((planned) => {
+      const { open, problems } = planned.info;
+      for (const problem of problems) log("warn", `Not a Sonobe project: ${problem.path}`);
+      // A restart's draft opens its project underneath. Main wrote the record for a folder the person had open, so the
+      // editor may read it again, whatever its name and whether or not it's still among the recent ones.
+      const dir = open?.kind === "project" ? open.path : open?.project;
+      if (dir) access.approve(dir);
+      return planned;
+    });
+    nextLaunch = plan.then((planned) => planned.info);
+    return plan;
+  };
+
   const openProjects = async (paths: readonly string[]) => {
     if (!ready) {
       pendingOpen.push(...paths);
       return;
+    }
+    // With no window to open them in (macOS keeps the app running without one), the window that opens starts on the first.
+    if (noWindow()) {
+      const plan = startNextWindowOn(paths);
+      (await ensureWindow()).focus();
+      paths = (await plan).restPaths;
     }
     for (const candidate of paths) {
       const dir = await resolveProjectSelection(candidate);
@@ -634,12 +665,12 @@ function main(): void {
     return BrowserWindow.getAllWindows().length === 0;
   };
 
-  /** The editor showing `dir` in `w`, or the wait running out: opening a project is asked of the editor, which answers later. */
-  const waitForProject = async (w: AppWindow, dir: string, timeoutMs = 15_000) => {
+  /** The editor in `w` showing a document `shows` accepts, or the wait running out: opening is asked of the editor, which answers later. */
+  const waitForDocument = async (w: AppWindow, shows: (info: { projectPath?: unknown; draft?: unknown } | null) => boolean, timeoutMs = 15_000) => {
     const started = Date.now();
     while (!w.webContents.isDestroyed() && rpc && Date.now() - started < timeoutMs) {
-      const info = await rpc.invoke<{ projectPath?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 2000 }).catch(() => null);
-      if (info?.projectPath === dir) return;
+      const info = await rpc.invoke<{ projectPath?: unknown; draft?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 2000 }).catch(() => null);
+      if (shows(info)) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   };
@@ -659,7 +690,7 @@ function main(): void {
       if (!dir) continue;
       await openProjects([dir]);
       const w = primaryWindow();
-      if (w) await waitForProject(w, dir);
+      if (w) await waitForDocument(w, (info) => info?.projectPath === dir);
     }
   };
 
@@ -668,7 +699,8 @@ function main(): void {
     // The record was for a launch that isn't coming.
     takeReopenRecord(reopenFile());
     const steps = await reopenSteps({ version: 1, windows: open });
-    reopenInNextWindow = steps.length > 0;
+    // The window shows no welcome screen over the work that's coming back, which is asked of its editor as before.
+    if (steps.length && noWindow()) nextLaunch = Promise.resolve({ reopening: true, open: null, problems: [] });
     await ensureWindow();
     await reopen(steps);
   };
@@ -1115,10 +1147,8 @@ function main(): void {
       pendingOpen.push(...paths);
       return;
     }
-    void ensureWindow().then((w) => {
-      w.focus();
-      if (paths.length) void openProjects(paths);
-    });
+    // Opening comes first: a window that has to open for it starts on the prototype (openProjects).
+    void (paths.length ? openProjects(paths) : Promise.resolve()).then(ensureWindow).then((w) => w.focus());
   });
 
   app.on("web-contents-created", (_event, contents) => {
@@ -1461,6 +1491,8 @@ function main(): void {
       if (typeof count === "number") trustedWindow(event)?.setCommandListeners(count);
     });
     ipcMain.on(IPC.openProjectReady, (event) => trustedWindow(event)?.markOpenReady());
+    // What the window was opened for (launch.ts). Its page asks as it loads and is answered once.
+    ipcMain.handle(IPC.launch, (event) => requireWindow(event).takeLaunch());
     ipcMain.on(IPC.setDocumentEdited, (event, edited: unknown) => trustedWindow(event)?.setDocumentEdited(edited === true));
     ipcMain.on(IPC.setTitle, (event, title: unknown) => {
       if (typeof title === "string") trustedWindow(event)?.setTitle(title.slice(0, 512));
@@ -1589,7 +1621,6 @@ function main(): void {
     const reopening = record && !pendingOpen.length ? await reopenSteps(record) : [];
     let finishReopen = () => undefined as void;
     if (reopening.length) {
-      reopenInNextWindow = true;
       // MCP calls wait for the work to be back (the endpoint below listens before the window exists), 30 s at most.
       reopened = new Promise((resolve) => (finishReopen = resolve));
       setTimeout(finishReopen, 30_000).unref();
@@ -1617,10 +1648,28 @@ function main(): void {
     // The window comes after the work above on purpose. `new BrowserWindow` returns about 60 ms after `ready` however early
     // it is called (creating it first, with that work moved behind it, brought it 2 ms forward and delayed the page's
     // navigation by as much), so the work above runs in time the window would spend waiting anyway.
+    //
+    // It starts on what the app was asked to open before now (the command line, a double-click in Finder), else on what the
+    // restart closed: its editor asks before its first render, so the first frame is that document and not the demo.
+    const asked = pendingOpen.splice(0);
+    const launching = asked.length || reopening.length ? startNextWindowOn(asked, reopening) : null;
     const first = await ensureWindow();
     ready = true;
+    if (launching) {
+      const { info, restPaths, restSteps } = await launching;
+      const { open } = info;
+      if (info.reopening && open) {
+        // The editor registers its methods with its first render, which waits for the document it was started on. Main still
+        // looks that it's the one showing: an editor that gave up waiting renders first, and MCP calls must not land before the work.
+        await waitForEditor(first);
+        await waitForDocument(first, (shown) => showsLaunch(open, shown));
+        await reopen(restSteps).catch((err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`));
+      }
+      pendingOpen.unshift(...restPaths);
+    }
+    // The other prototypes named at launch, then whatever was asked for while the window was coming up (open-file and a
+    // second instance queue until `ready`): the editor takes them one at a time after its launch document, so the last one shows.
     if (pendingOpen.length) await openProjects(pendingOpen.splice(0));
-    else if (reopening.length) await reopen(reopening).catch((err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`));
     finishReopen();
     if (env.lan) void startPreview();
 

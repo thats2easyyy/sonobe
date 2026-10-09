@@ -1,12 +1,12 @@
 import { app, BrowserWindow, dialog, screen, shell, type WebContents } from "electron";
 import { existsSync } from "node:fs";
-import type { SonobeCommandId } from "./host-api.d.ts";
+import type { LaunchInfo, SonobeCommandId } from "./host-api.d.ts";
 import { ISSUES_URL } from "./commands.ts";
 import { DARK_BACKGROUND, placeholderHtml, toDataUrl } from "./placeholder.ts";
 import type { RendererRpcHub } from "./rpc.ts";
 import { isAllowedSubframeUrl, isAppUrl, isExternalUrl, isMailtoUrl, type AppContent } from "./security.ts";
 import { ZOOM_MAX, ZOOM_MIN, loadWindowState, saveWindowStateSync, type WindowState } from "./window-state.ts";
-import { IPC, MUTED_ARG, REOPENING_ARG } from "./ipc.ts";
+import { IPC, LAUNCH_QUERY, MUTED_ARG } from "./ipc.ts";
 import type { NativeAction } from "./menu.ts";
 import { resolveClosePrompt, type CloseOutcome, type CloseReason } from "./update-restart.ts";
 
@@ -20,8 +20,8 @@ export interface AppWindowOptions {
   source: WindowContentSource;
   statePath: string;
   mute: boolean;
-  /** This window opens again what was open before a restart: its editor skips the welcome screen (sonobeHost.reopening). */
-  reopening?: boolean;
+  /** What this window starts on (electron/launch.ts). Its page is loaded with LAUNCH_QUERY, and its editor asks before its first render. */
+  launch?: Promise<LaunchInfo>;
   rpc: RendererRpcHub;
   appName: string;
   log(level: "info" | "warn" | "error", message: string): void;
@@ -47,6 +47,11 @@ export interface AppWindow {
   /** The editor in this window listens for update status, so its notices answer Check for Updates…. */
   showsUpdates(): boolean;
   sendCommand(id: SonobeCommandId): void;
+  /**
+   * What the window was opened for, the first time its page asks, and null from then on: a page that loads again (a
+   * crashed editor reloads itself) starts as usual, so the welcome screen can offer the draft the crash left.
+   */
+  takeLaunch(): Promise<LaunchInfo> | null;
   /** Queue or deliver a project folder to the renderer. */
   openProject(dir: string): void;
   markOpenReady(): void;
@@ -118,7 +123,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       spellcheck: false,
       safeDialogs: true,
       // System speech plays through the OS, past setAudioMuted, so the editor has to know to stay quiet.
-      additionalArguments: [...(opts.mute ? [MUTED_ARG] : []), ...(opts.reopening ? [REOPENING_ARG] : [])],
+      additionalArguments: opts.mute ? [MUTED_ARG] : [],
     },
   });
   const wc = win.webContents;
@@ -128,6 +133,7 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   let commandListeners = 0;
   let updateListeners = 0;
   let openReady = false;
+  let launch = opts.launch ?? null;
   const pendingOpens: string[] = [];
   const pendingCommands: SonobeCommandId[] = [];
   let edited = false;
@@ -310,6 +316,11 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
       else if (wc.isLoading()) pendingCommands.push(id);
       else nativeFallback(win, id);
     },
+    takeLaunch() {
+      const taken = launch;
+      launch = null;
+      return taken;
+    },
     openProject(dir) {
       pendingOpens.push(dir);
       deliverOpens();
@@ -378,14 +389,16 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   };
   try {
     if (opts.source.kind === "dev") {
+      const url = new URL(opts.source.url.href);
+      if (opts.launch) url.searchParams.set(LAUNCH_QUERY, "1");
       try {
-        await wc.loadURL(opts.source.url.href);
+        await wc.loadURL(url.href);
       } catch (err) {
         opts.log("warn", `Dev server unreachable at ${opts.source.url.href}`);
         await showPlaceholder(placeholderHtml({ kind: "dev-server-unreachable", url: opts.source.url.href, error: err instanceof Error ? (err.message.match(/ERR_[A-Z_]+/)?.[0] ?? err.message) : String(err) }));
       }
     } else if (existsSync(opts.source.index)) {
-      await wc.loadFile(opts.source.index);
+      await wc.loadFile(opts.source.index, opts.launch ? { search: LAUNCH_QUERY } : {});
     } else {
       opts.log("warn", `Editor build not found at ${opts.source.index}; showing setup page`);
       await showPlaceholder(placeholderHtml({ kind: "missing-editor", editorIndex: opts.source.index }));

@@ -1,6 +1,7 @@
 /**
  * The app's EditorSession: the desktop host inside Electron, otherwise the browser host with in-app
- * dialogs for naming and picking prototypes. Starts on the Photo Zoom demo until a project opens.
+ * dialogs for naming and picking prototypes. It starts on the Photo Zoom demo until a project opens,
+ * except in a window the desktop app opened for something, which starts on that (launch.ts).
  */
 
 import { createBrowserHost, type BrowserHostOptions } from "../host/browserHost.ts";
@@ -36,17 +37,26 @@ export function createAppSession(options: AppSessionOptions = {}): EditorSession
   const { dialogs: _dialogs, host: hostOption, ...rest } = options;
   const api = getDesktopHostApi();
   const host = hostOption !== undefined ? hostOption : api ? createDesktopHost(api) : createAppBrowserHost(dialogs);
-  return createEditorSession({ ...rest, host, confirmDiscard: (info) => dialogs.confirmDiscard(info) });
+  return createEditorSession({
+    // A prototype opened from Finder or Open Recent that didn't open says so, in the welcome screen's words for it.
+    onOpenFailed: (_path, result) => void toast.error("Couldn't open the prototype", { description: result.error ?? "It may have moved or been deleted." }),
+    ...rest,
+    host,
+    confirmDiscard: (info) => dialogs.confirmDiscard(info),
+  });
 }
 
 let appSession: EditorSession | null = null;
 
 /** The app-wide session (created once, outside React, so StrictMode doesn't create two runtimes). */
 export function getAppSession(): EditorSession {
-  if (!appSession) {
-    appSession = createAppSession();
-    setDefaultSession(appSession);
-  }
+  return appSession ?? startAppSession();
+}
+
+/** Creates the app-wide session with options of its own: launch.ts starts it on what the window was opened for, before the first render. */
+export function startAppSession(options: AppSessionOptions = {}): EditorSession {
+  appSession = createAppSession(options);
+  setDefaultSession(appSession);
   return appSession;
 }
 

@@ -5,9 +5,9 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { attachAssistantBridge } from "./assistant/preload.ts";
-import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
+import type { DesignCaptureProgress, DesignCaptureReply, DraftInfo, DraftReply, LaunchInfo, McpStatus, PreviewStatus, ProjectChange, ProjectFiles, ProjectWrite, RpcHandler, SecretsStatus, SonobeCommandId, SonobeDrafts, SonobeHost, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { isCommandId, listCommands, toHostPlatform } from "./commands.ts";
-import { IPC, MUTED_ARG, REOPENING_ARG } from "./ipc.ts";
+import { IPC, LAUNCH_QUERY, MUTED_ARG } from "./ipc.ts";
 import { createRpcFailure, createRpcServer } from "./rpc.ts";
 
 const platform = toHostPlatform(process.platform);
@@ -48,6 +48,21 @@ ipcRenderer.on(IPC.updatesChanged, (_event, status: UpdateStatus) => {
   for (const listener of [...updateListeners]) listener(status);
 });
 
+// A window the app opened for something asks what, now: the editor's code is still loading, and its first render waits for the answer.
+const launching = new URLSearchParams(location.search).has(LAUNCH_QUERY);
+const launch: Promise<LaunchInfo | null> = launching ? (ipcRenderer.invoke(IPC.launch) as Promise<LaunchInfo | null>).catch(() => null) : Promise.resolve(null);
+// The project it names is read now too, for the editor's first readProject of it. Asked when the editor is ready for it,
+// the main process is busy putting the window's first frame on screen, and its answer comes some 60 ms later.
+type ReadReply = { files: Record<string, string>; binaries: Record<string, Uint8Array> };
+let launchRead: { dir: string; reply: Promise<ReadReply> } | null = null;
+if (launching) {
+  void launch.then((info) => {
+    if (info?.open?.kind !== "project") return;
+    launchRead = { dir: info.open.path, reply: ipcRenderer.invoke(IPC.readProject, info.open.path) as Promise<ReadReply> };
+    launchRead.reply.catch(() => undefined);
+  });
+}
+
 let watchCounter = 0;
 
 /** invoke() whose errors carry the main process's message without Electron's "Error invoking remote method" prefix. */
@@ -62,13 +77,17 @@ const host: SonobeHost = {
   platform,
   version: __SONOBE_VERSION__,
   muted: process.argv.includes(MUTED_ARG),
-  reopening: process.argv.includes(REOPENING_ARG),
+  launching,
+  launch: () => launch,
 
   openProjectDialog: () => ipcRenderer.invoke(IPC.dialogOpenProject) as Promise<string | null>,
   saveProjectDialog: (defaultName) => ipcRenderer.invoke(IPC.dialogSaveProject, String(defaultName ?? "Untitled")) as Promise<string | null>,
 
   async readProject(dir): Promise<ProjectFiles> {
-    const result = (await ipcRenderer.invoke(IPC.readProject, dir)) as { files: Record<string, string>; binaries: Record<string, Uint8Array> };
+    // Once: what was read at launch is what's on disk only then.
+    const early = launchRead?.dir === dir ? launchRead.reply : null;
+    launchRead = null;
+    const result = await (early ?? (ipcRenderer.invoke(IPC.readProject, dir) as Promise<ReadReply>));
     const binaries: Record<string, ArrayBuffer> = {};
     for (const [rel, bytes] of Object.entries(result.binaries)) binaries[rel] = toArrayBuffer(bytes);
     return { files: result.files, binaries };

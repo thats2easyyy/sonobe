@@ -408,13 +408,28 @@ export interface SonobeHostRpc {
   fail(code: string, message: string, data?: unknown): unknown;
 }
 
+/** What a window starts on, when the app opened it for something (electron/launch.ts). */
+export interface LaunchInfo {
+  /** The window opens again what was open before a restart for an update: its editor shows no welcome screen and offers no recovered drafts. */
+  reopening: boolean;
+  /**
+   * The document the editor starts on instead of its demo: a project folder, or a draft of unsaved work (with the
+   * project to open when the draft doesn't come back). Null: nothing, and the editor starts as on a plain launch.
+   */
+  open: { kind: "project"; path: string } | { kind: "draft"; id: string; project: string | null } | null;
+  /** Paths the app was asked to open and couldn't: nothing is there ("missing"), or what's there isn't a prototype ("notProject"). */
+  problems: { path: string; reason: "missing" | "notProject" }[];
+}
+
 export interface SonobeHost {
   readonly platform: "darwin" | "win32" | "linux" | string;
   readonly version: string;
   /** True when the app runs muted (SONOBE_MUTE). The editor then speaks silently too: system speech plays past Chromium's audio mute. */
   readonly muted: boolean;
-  /** True in the window that opens again what was open before a restart for an update: the editor skips its welcome screen there. */
-  readonly reopening: boolean;
+  /** True when the app opened this window for something (a prototype from Finder, or the work a restart closed): the editor waits for `launch()` before its first render. */
+  readonly launching: boolean;
+  /** What this window starts on. The preload asks as it loads, so the answer is usually there when the editor wants it. Null when there's nothing (a plain launch, or a page that loaded again). */
+  launch(): Promise<LaunchInfo | null>;
 
   /** Native folder picker for a *.sonobe project. Resolves the project directory or null. */
   openProjectDialog(): Promise<string | null>;
