@@ -5,19 +5,22 @@
  * examples' READMEs and tests next to main.cjs, and on macOS compiles the SF Symbols helper into
  * dist/bin (scripts/sfsymbol.ts).
  *
- *   node scripts/build.mjs           one-off build into dist/
- *   node scripts/build.mjs --watch   rebuild on change (skips the CLI bundle)
+ *   node scripts/build.mjs               one-off build into dist/
+ *   node scripts/build.mjs --watch       rebuild on change (skips the CLI bundle)
+ *   node scripts/build.mjs --arch x64    the SF Symbols helper for another architecture (arm64, x64 or
+ *                                        universal; scripts/package.mjs passes the app's)
  *
  * At runtime the main process loads ../editor/dist/index.html, or SONOBE_DEV_URL when set.
  *
  * The CLI lands in dist/cli: sonobe.mjs (one ESM file), guides/, examples/, and `sonobe` / `sonobe.cmd`
  * launchers that run it with the app's own runtime (Electron in Node mode), so a packaged app needs no
- * separate Node install. When packages/cli ships a prebuilt bundle (its package.json `bin` points
- * into dist/), that bundle is copied instead of bundling from source.
+ * separate Node install. It is always bundled here from packages/cli/src, whatever packages/cli/dist
+ * holds, and nothing native is copied beside it: the packaged CLI has no headless screenshot renderer
+ * (@resvg/resvg-js), and its hint says to open the project in the app, which draws screenshots itself.
  */
 
 import { build, context } from "esbuild";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyExampleTexts } from "../../../packages/mcp/src/examples.ts";
@@ -28,6 +31,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
 const dist = path.join(root, "dist");
 const watch = process.argv.includes("--watch");
+const archFlag = process.argv.indexOf("--arch");
+const helperArch = archFlag < 0 ? undefined : process.argv[archFlag + 1];
+if (helperArch !== undefined && !["arm64", "x64", "universal"].includes(helperArch)) {
+  console.error(`[sonobe] --arch must be arm64, x64 or universal (got ${helperArch ?? "nothing"})`);
+  process.exit(1);
+}
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 
 /** @type {import("esbuild").BuildOptions} */
@@ -100,77 +109,61 @@ done
 exec node "$DIR/sonobe.mjs" "$@"
 `;
 
+// A bare `exit /b` returns the CLI's exit code. `exit /b %ERRORLEVEL%` inside a parenthesized block
+// wouldn't: cmd expands the variable when it reads the block, before the CLI has run.
 const WINDOWS_LAUNCHER = `@echo off\r
 rem Runs the bundled Sonobe CLI with the app's own runtime (Electron in Node mode), else node.\r
 setlocal\r
 if defined SONOBE_NODE (\r
   "%SONOBE_NODE%" "%~dp0sonobe.mjs" %*\r
-  exit /b %ERRORLEVEL%\r
+  exit /b\r
 )\r
 if exist "%~dp0..\\..\\Sonobe.exe" (\r
   set ELECTRON_RUN_AS_NODE=1\r
   "%~dp0..\\..\\Sonobe.exe" "%~dp0sonobe.mjs" %*\r
-  exit /b %ERRORLEVEL%\r
+  exit /b\r
 )\r
 node "%~dp0sonobe.mjs" %*\r
 `;
 
-/** A prebuilt CLI bundle from packages/cli, when its `bin` points into dist/. */
-function prebuiltCli() {
-  const cliPkgPath = path.join(repo, "packages", "cli", "package.json");
-  if (!existsSync(cliPkgPath)) return null;
-  const cliPkg = JSON.parse(readFileSync(cliPkgPath, "utf8"));
-  const bin = typeof cliPkg.bin === "string" ? cliPkg.bin : cliPkg.bin?.sonobe;
-  if (typeof bin !== "string" || !/^(\.\/)?dist\//.test(bin)) return null;
-  const entry = path.join(repo, "packages", "cli", bin);
-  return existsSync(entry) ? entry : null;
-}
-
 async function buildCli() {
   const out = path.join(dist, "cli");
   mkdirSync(out, { recursive: true });
-  const prebuilt = prebuiltCli();
-  if (prebuilt) {
-    cpSync(path.dirname(prebuilt), out, { recursive: true });
-    const name = path.basename(prebuilt);
-    if (name !== "sonobe.mjs") writeFileSync(path.join(out, "sonobe.mjs"), `import ${JSON.stringify(`./${name}`)};\n`);
-  } else {
-    await build({
-      absWorkingDir: repo,
-      entryPoints: [path.join(repo, "packages", "cli", "src", "main.ts")],
-      outfile: path.join(out, "sonobe.mjs"),
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      target: "node22",
-      minify: false,
-      sourcemap: false,
-      legalComments: "none",
-      logLevel: "warning",
-      // CommonJS dependencies bundled into ESM still call require() for Node built-ins. (esbuild keeps
-      // main.ts's own #! line above the banner.)
-      banner: { js: "import { createRequire as __sonobeCreateRequire } from 'node:module';\nconst require = __sonobeCreateRequire(import.meta.url);" },
-      external: ["bufferutil", "utf-8-validate"],
-    });
-  }
+  await build({
+    absWorkingDir: repo,
+    entryPoints: [path.join(repo, "packages", "cli", "src", "main.ts")],
+    outfile: path.join(out, "sonobe.mjs"),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    minify: false,
+    sourcemap: false,
+    legalComments: "none",
+    logLevel: "warning",
+    // CommonJS dependencies bundled into ESM still call require() for Node built-ins. (esbuild keeps
+    // main.ts's own #! line above the banner.)
+    banner: { js: "import { createRequire as __sonobeCreateRequire } from 'node:module';\nconst require = __sonobeCreateRequire(import.meta.url);" },
+    external: ["bufferutil", "utf-8-validate"],
+  });
   cpSync(path.join(repo, "packages", "mcp", "guides"), path.join(out, "guides"), { recursive: true });
-  if (!prebuilt) copyExampleTexts(path.join(out, "examples"), path.join(repo, "examples"));
+  copyExampleTexts(path.join(out, "examples"), path.join(repo, "examples"));
   writeFileSync(path.join(out, "sonobe"), POSIX_LAUNCHER);
   chmodSync(path.join(out, "sonobe"), 0o755);
   writeFileSync(path.join(out, "sonobe.cmd"), WINDOWS_LAUNCHER);
-  return prebuilt ? `cli (prebuilt ${path.relative(repo, prebuilt)})` : `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB`;
+  return `cli/sonobe.mjs ${(statSync(path.join(out, "sonobe.mjs")).size / 1024).toFixed(1)} KB`;
 }
 
 /** The SF Symbols helper in dist/bin on macOS (scripts/sfsymbol.ts). Without it imports keep placeholders, so it only warns. */
 function symbolHelper() {
   const warn = (why) => console.warn(`[sonobe] no SF Symbols helper: ${why}. Design imports will show SF Symbols as gray placeholders.`);
   try {
-    const helper = buildSymbolHelper({ out: path.join(dist, "bin", "sfsymbol") });
+    const helper = buildSymbolHelper({ out: path.join(dist, "bin", "sfsymbol"), arch: helperArch });
     if (helper.skipped) {
       if (process.platform === "darwin") warn(helper.skipped);
       return [];
     }
-    return [`bin/sfsymbol${helper.cached ? " (cached)" : ""}`];
+    return [`bin/sfsymbol${helperArch ? ` ${helperArch}` : ""}${helper.cached ? " (cached)" : ""}`];
   } catch (err) {
     warn(`swiftc failed (${String(err.message ?? err).split("\n")[0]})`);
     return [];

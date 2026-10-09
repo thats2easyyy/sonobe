@@ -103,7 +103,7 @@ claude mcp add --scope local sonobe-headless -- /Applications/Sonobe.app/Content
 
 Headless mode serves a project folder directly, with editing, simulation, saving and screenshots. Changes save after every edit. Add `--no-autosave` to keep them in memory until Claude calls `save_document`. If the folder changes while Claude works, because you, git or the app wrote to it, saving stops with `disk_changed` instead of writing over it, and Claude asks whether to reload or overwrite.
 
-Headless screenshots are drawn without the app, so text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need a native image library installed beside the CLI. The CLI and plugin builds include it, and if it's missing, Claude is told so and checks the prototype with the outline and simulations instead. Only the app knows what you've selected in the editor.
+Headless screenshots are drawn without the app, so text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need a native image library installed beside the CLI. A checkout's CLI build and the plugin build include it. The CLI inside the Sonobe app doesn't, so there Claude is told to open the project in the app, and checks the prototype with the outline and simulations instead. Only the app knows what you've selected in the editor.
 
 ## Connect Claude Desktop
 

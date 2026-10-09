@@ -6,7 +6,8 @@
  * Electron when the target matches this machine.
  *
  *   npm run package -w @sonobe/desktop                   this platform; on a Mac an arm64 or x64 DMG
- *   node scripts/package.mjs --arch x64                  another architecture (downloads that Electron)
+ *   node scripts/package.mjs --arch x64                  another architecture (downloads that Electron, and
+ *                                                        builds the SF Symbols helper for it)
  *   node scripts/package.mjs --dir                       an unpacked app only, no installer
  *   node scripts/package.mjs --skip-editor-build         reuse apps/editor/dist as is
  *
@@ -58,7 +59,7 @@ if (values["skip-editor-build"] && existsSync(editorIndex)) {
 
 // 2. Desktop bundles + CLI, 3. icons.
 step("building main, preload, player, scene renderer and CLI");
-execFileSync(process.execPath, [path.join(root, "scripts", "build.mjs")], { cwd: root, stdio: "inherit" });
+execFileSync(process.execPath, [path.join(root, "scripts", "build.mjs"), "--arch", arch], { cwd: root, stdio: "inherit" });
 step("generating icons");
 execFileSync(process.execPath, [path.join(root, "scripts", "icons.mjs")], { cwd: root, stdio: "inherit" });
 
