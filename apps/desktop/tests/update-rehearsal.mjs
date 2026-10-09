@@ -33,7 +33,7 @@
  * ~/Library/Caches/dev.sonobe.app.ShipIt with the launchd job dev.sonobe.app.ShipIt (macOS's installer),
  * and the caches macOS keeps for the installer's own request (~/Library/Caches/dev.sonobe.app,
  * ~/Library/HTTPStorages/dev.sonobe.app), because the bundle id decides those names. It refuses to start
- * while a download or an install is waiting, and removes the ones that weren't there before. Every app it
+ * while the download or the installer's folder holds files, and removes the ones that weren't there before. Every app it
  * starts has its own data folder and SONOBE_HOME, muted, with the test cipher
  * (SONOBE_TEST=1), and the updated app is opened by macOS with the same folders, carried in its
  * Info.plist (package.mjs --launch-env). Afterwards every build is unregistered from LaunchServices and
@@ -102,8 +102,8 @@ const shipItState = path.join(shipItCache, "ShipItState.plist");
 
 const holds = (dir) => existsSync(dir) && readdirSync(dir).length > 0;
 if (holds(path.join(updaterCache, "pending")) || holds(shipItCache)) {
-  console.error(`[rehearsal] An update is already waiting on this Mac (${holds(shipItCache) ? shipItCache : path.join(updaterCache, "pending")} holds files).`);
-  console.error("[rehearsal] That is an installed Sonobe's download, or what a rehearsal that was killed left behind. Quit Sonobe, delete that folder, and run this again.");
+  console.error(`[rehearsal] ${holds(shipItCache) ? shipItCache : path.join(updaterCache, "pending")} holds files.`);
+  console.error("[rehearsal] They are an installed Sonobe's update (waiting, or already installed), or what a rehearsal that was killed left behind. The rehearsal uses that folder and empties it, so it won't start over files it didn't make. Quit Sonobe, delete the folder, and run this again.");
   process.exit(1);
 }
 /** Folders under the real home that an update creates, and that go again afterwards unless they were already there. */
