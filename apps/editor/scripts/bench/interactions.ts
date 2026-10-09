@@ -276,7 +276,10 @@ async function typeInPicker(page: Page): Promise<Gesture> {
 
 const idle: () => Promise<Gesture> = async () => () => sleep(3000);
 
-/** Three seconds paused: the floor an idle prototype is compared with. */
+/**
+ * Three seconds paused: the floor an idle prototype is compared with. The few frames it asks for are
+ * the empty ones that measure the display after a pause (runtime/displayRate.ts), and the one play asks for.
+ */
 const pausedIdle = (page: Page) => async () => async () => {
   await page.evaluate(() => (window as any).__sonobe.session.runtime.pause());
   await sleep(3000);
