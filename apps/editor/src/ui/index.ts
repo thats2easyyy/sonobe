@@ -9,7 +9,7 @@ export { CommandPalette, type CommandPaletteProps } from "./CommandPalette.tsx";
 export { ContextMenu, Menu, MenuList, useContextMenu, type ContextMenuProps, type MenuCloseReason, type MenuEntry, type MenuItemEntry, type MenuListProps, type MenuProps } from "./Menu.tsx";
 export { DIALOG_WIDTH, Dialog, type DialogHeaderProps, type DialogMotion, type DialogProps } from "./Dialog.tsx";
 export { EmptyState, type EmptyStateProps } from "./EmptyState.tsx";
-export { ErrorBoundary, SurfaceProblem, failRender, type BoundaryProblem, type ErrorBoundaryProps, type SurfaceProblemProps } from "./ErrorBoundary.tsx";
+export { DialogBoundary, ErrorBoundary, SurfaceProblem, failRender, type BoundaryProblem, type DialogBoundaryProps, type ErrorBoundaryProps, type SurfaceProblemProps } from "./ErrorBoundary.tsx";
 export { IconButton, type IconButtonProps } from "./IconButton.tsx";
 export { Kbd, type KbdProps } from "./Kbd.tsx";
 export { Popover, type PopoverProps } from "./Popover.tsx";

@@ -9,6 +9,7 @@ import { createAssetService } from "../../state/assets.ts";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { getRegistry } from "../../state/registry.ts";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
+import { failRender } from "../../ui/ErrorBoundary.tsx";
 import { completeConnectionToLayerProp, dropTargetAt, instanceChoiceKey, patchEditorBridge } from "../patch-editor/index.ts";
 import { enumFitsSegments } from "./controls.tsx";
 import { InspectorPanel } from "./InspectorPanel.tsx";
@@ -119,6 +120,57 @@ async function eventually(check: () => void) {
     await vi.waitFor(check, { timeout: 3000 });
   });
 }
+
+describe("Inspector containment", () => {
+  const problem = () => container.querySelector(".sb-surface-problem .sb-empty__title")?.textContent ?? null;
+  const tabs = () => [...container.querySelectorAll<HTMLElement>('.sb-panel__header [role="tab"]')];
+
+  afterEach(() => {
+    failRender("The Knobs tab", false);
+    act(() => layoutStore.getState().setInspectorTab("properties"));
+  });
+
+  it("keeps its tabs when what's selected can't be drawn, and clears the problem when the selection changes", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const s = mount(fixture());
+    // A bug in drawing one kind of layer: ovals can't be inspected, everything else can.
+    const get = registry.layers.get.bind(registry.layers);
+    vi.spyOn(registry.layers, "get").mockImplementation((type) => {
+      if (type === "oval") throw new Error("no such layer type");
+      return get(type);
+    });
+    act(() => s.selection.getState().select({ layers: ["dot"] }));
+    expect(problem()).toBe("The Properties tab hit a problem");
+    expect(tabs().map((tab) => tab.textContent)).toEqual(["Properties", "Knobs"]);
+    const header = container.querySelector(".sb-panel__header");
+
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    expect(problem()).toBeNull();
+    expect(input("Opacity").value).toBe("50");
+    expect(container.querySelector(".sb-panel__header")).toBe(header);
+
+    // Back on the layer that fails, the problem is back; the Knobs tab still opens beside it.
+    act(() => s.selection.getState().select({ layers: ["dot"] }));
+    expect(problem()).toBe("The Properties tab hit a problem");
+    act(() => tabs()[1]!.click());
+    expect(problem()).toBeNull();
+    expect(layoutStore.getState().inspectorTab).toBe("knobs");
+  });
+
+  it("keeps its tabs when the Knobs tab can't be drawn, and Properties still works", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const s = mount(fixture());
+    act(() => s.selection.getState().select({ layers: ["card"] }));
+    act(() => failRender("The Knobs tab"));
+    act(() => layoutStore.getState().setInspectorTab("knobs"));
+    expect(problem()).toBe("The Knobs tab hit a problem");
+    expect(tabs().map((tab) => tab.textContent)).toEqual(["Properties", "Knobs"]);
+
+    act(() => tabs()[0]!.click());
+    expect(problem()).toBeNull();
+    expect(input("Opacity").value).toBe("50");
+  });
+});
 
 describe("InspectorPanel", () => {
   it("shows a friendly empty state with the component's notes", () => {

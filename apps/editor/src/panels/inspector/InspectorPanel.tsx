@@ -7,6 +7,7 @@ import { layoutStore, useLayout, type InspectorTab } from "../../shell/layoutSto
 import { Panel } from "../../shell/Panel.tsx";
 import { useCurrentComponent, useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
+import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -74,7 +75,9 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
     >
       {tab === "knobs" ? (
         <TabPanel idBase={TABS_ID} value="knobs" active className="sb-insp sb-scroll">
-          <KnobsPanel />
+          <ErrorBoundary name="The Knobs tab">
+            <KnobsPanel />
+          </ErrorBoundary>
         </TabPanel>
       ) : (
         <div className="sb-insp sb-scroll" role="tabpanel" id={`${TABS_ID}-panel-properties`} aria-labelledby={`${TABS_ID}-tab-properties`} onFocusCapture={() => session.selection.getState().setFocusedPanel("inspector")}>
@@ -93,9 +96,12 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
               />
             </div>
           )}
-          {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
-          {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
-          {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+          {/* A failure here usually belongs to what's selected: the tabs stay, and selecting something else clears it. */}
+          <ErrorBoundary name="The Properties tab" resetKey={`${mode}:${layers.join(",")}:${patches.join(",")}`}>
+            {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
+            {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
+            {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+          </ErrorBoundary>
         </div>
       )}
     </Panel>

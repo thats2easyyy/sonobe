@@ -1,13 +1,15 @@
 /**
  * Error containment (ARCHITECTURE §9): a part of the editor that throws while it renders shows a
  * problem in its own place, and the rest keeps working. `ErrorBoundary` catches, `SurfaceProblem` is
- * what a failed part says, whether its code didn't load (`loadable`) or it threw. Boundaries don't
- * report: the root's error handlers do (`app/errorReports.ts`), so each failure is logged once.
+ * what a failed part says, whether its code didn't load (`loadable`) or it threw, and `DialogBoundary`
+ * closes a dialog that threw. Boundaries don't report: the root's error handlers do
+ * (`app/errorReports.ts`), so each failure is logged once.
  */
 
 import { Component, useSyncExternalStore, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "./Button.tsx";
 import { EmptyState } from "./EmptyState.tsx";
+import { toast } from "./Toast.tsx";
 
 export interface BoundaryProblem {
   error: unknown;
@@ -79,6 +81,30 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, BoundaryState> 
       </>
     );
   }
+}
+
+export interface DialogBoundaryProps extends Pick<ErrorBoundaryProps, "name" | "resetKey" | "children"> {
+  /** Close the dialog, or settle what was waiting on it. */
+  onFailed?: () => void;
+}
+
+const nothing = () => null;
+
+/**
+ * Contains a dialog, or anything with no place of its own to say a problem in: a failure draws
+ * nothing, says so in a toast and calls `onFailed`, so a broken dialog never traps the person or
+ * leaves a caller waiting.
+ */
+export function DialogBoundary({ name, resetKey, onFailed, children }: DialogBoundaryProps) {
+  const failed = () => {
+    toast({ id: `problem:${name}`, title: `${name} hit a problem`, description: "It closed. The rest of Sonobe still works.", tone: "warn" });
+    onFailed?.();
+  };
+  return (
+    <ErrorBoundary name={name} resetKey={resetKey} fallback={nothing} onError={failed}>
+      {children}
+    </ErrorBoundary>
+  );
 }
 
 export interface SurfaceProblemProps {

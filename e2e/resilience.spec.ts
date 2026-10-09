@@ -4,7 +4,7 @@
  * the way a broken component inside it would.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, waitForPrototype } from "./helpers.ts";
 
 test.describe("when the editor can't draw", () => {
@@ -75,6 +75,117 @@ test.describe("when the editor can't draw", () => {
     expect(url).toContain("github.com/thats2easyyy/sonobe/issues/new");
     expect(url).toContain("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
     expect(url).toMatch(/Sonobe 0\.1\.0 · browser/);
+  });
+});
+
+test.describe("when one part of the editor can't draw", () => {
+  const layerRow = (page: Page, name: string) => page.locator(".sb-layerspanel .sb-tree__row", { has: page.locator(".sb-tree__label", { hasText: new RegExp(`^${name}$`) }) });
+  const layerNames = (page: Page) => hook(page, (s) => s.doc().components[s.doc().project.root]!.layers.map((l) => l.name));
+
+  test("the Inspector says so in its own place, and selecting, undo, Save and the console still work", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await openEditor(page);
+    const mod = await modKey(page);
+    const names = await layerNames(page);
+    const [first, second] = [names[0]!, names[1]!];
+    await layerRow(page, first).click();
+    const inspector = page.locator("#sb-inspector");
+    await expect(inspector.locator(".sb-insp-row").first()).toBeVisible();
+
+    await hook(page, (s) => s.failRender("The Inspector"));
+    await expect(inspector.locator(".sb-surface-problem")).toContainText("The Inspector hit a problem");
+    await expect(inspector.locator(".sb-surface-problem")).toContainText("The rest of Sonobe still works.");
+    await expect(inspector.locator(".sb-panel__title")).toHaveText("Inspector");
+    await expect(page.locator(".sb-recovery")).toHaveCount(0);
+
+    // The console opened on the editor's error, as it does on a prototype's first: one line, from the editor.
+    const hud = page.locator("#sb-hud");
+    await expect(hud.getByRole("tab", { name: /^Console/ })).toHaveAttribute("aria-selected", "true");
+    await expect(hud.locator(".sb-logrow")).toHaveCount(1);
+    await expect(hud.locator(".sb-logrow")).toContainText("Editor");
+    await expect(hud.locator(".sb-logrow")).toContainText("The Inspector hit a problem and stopped drawing. If it keeps happening, save your work and restart Sonobe, or use Help → Report an Issue.");
+    await page.waitForTimeout(250);
+    await screenshot(page, "resilience-02-panel-problem");
+
+    // The document, the selection and the commands live outside the panel that failed.
+    await layerRow(page, second).click();
+    expect(await hook(page, (s) => s.selection().layers.length)).toBe(1);
+    await page.keyboard.press("Backspace");
+    expect(await layerNames(page)).not.toContain(second);
+    await page.keyboard.press(`${mod}+z`);
+    expect(await layerNames(page)).toEqual(names);
+
+    await hook(page, (s) => s.apply([{ op: "setProject", changes: { name: "Still Works" } }], "Rename"));
+    await blurFields(page);
+    await page.keyboard.press(`${mod}+s`);
+    const saveDialog = page.getByRole("dialog", { name: "Save prototype" });
+    await saveDialog.getByRole("button", { name: "Save" }).click();
+    await expect.poll(() => hook(page, (s) => s.session.document.getState().projectPath)).toBe("browser:Still Works");
+    expect(await hook(page, (s) => s.session.document.getState().dirty)).toBe(false);
+
+    // Try again while it still fails shows the problem again; once it can draw, the Inspector is back.
+    await inspector.getByRole("button", { name: "Try again" }).click();
+    await expect(inspector.locator(".sb-surface-problem")).toBeVisible();
+    await hook(page, (s) => s.failRender("The Inspector", false));
+    await inspector.getByRole("button", { name: "Try again" }).click();
+    await expect(inspector.locator(".sb-surface-problem")).toHaveCount(0);
+    await expect(inspector.locator(".sb-insp")).toBeVisible();
+    // What the console printed is the forced error, twice, and nothing else.
+    expect(problems.filter((line) => !line.includes("[sonobe] The Inspector hit a problem."))).toEqual([]);
+    expect(problems).toHaveLength(2);
+  });
+
+  test("every panel, tab and drawer is contained, and a dialog that can't draw closes", async ({ page }) => {
+    await openEditor(page);
+    const mod = await modKey(page);
+    const problem = page.locator(".sb-surface-problem");
+
+    /** Fail one part, expect its problem in its place and nowhere else, then let it draw again. */
+    const contained = async (name: string, place: string, stays?: string) => {
+      await hook(page, (s, n) => s.failRender(n), name);
+      await expect(page.locator(place).locator(".sb-surface-problem"), name).toContainText(`${name} hit a problem`);
+      await expect(problem, name).toHaveCount(1);
+      await expect(page.locator(".sb-toolbar"), name).toBeVisible();
+      if (stays) await expect(page.locator(stays), name).toBeVisible();
+      await hook(page, (s, n) => s.failRender(n, false), name);
+      await problem.getByRole("button", { name: "Try again" }).click();
+      await expect(problem, name).toHaveCount(0);
+    };
+
+    await contained("Layers", "#sb-layers", "#sb-inspector .sb-insp");
+    await contained("The Viewer", "#sb-viewer", "#sb-layers .sb-tree__row >> nth=0");
+    await contained("The canvas", ".sb-shell__canvas", ".sb-pe .react-flow__node >> nth=0");
+    await contained("The Patches panel", ".sb-shell__patches", ".sb-cv");
+    // The patch editor's own boundary is inside its panel: the header with the breadcrumbs stays.
+    await contained("The patch editor", ".sb-shell__patches", ".sb-app-patches .sb-panel__header");
+    await contained("The Inspector", "#sb-inspector", "#sb-layers .sb-tree__row >> nth=0");
+    await contained("The Properties tab", "#sb-inspector", '#sb-inspector .sb-panel__header [role="tab"] >> nth=0');
+    // The first failure opened the bottom panel on its Console tab.
+    await contained("The Console tab", "#sb-hud", "#sb-hud .sb-hudx__bar");
+    await contained("The bottom panel", "#sb-hud", "#sb-inspector .sb-insp");
+
+    await hook(page, (s) => s.layout().setDrawer("learn"));
+    await expect(page.locator(".sb-drawer")).toBeVisible();
+    await contained("Learn", ".sb-drawer", "#sb-layers .sb-tree__row >> nth=0");
+    await hook(page, (s) => s.layout().setDrawer(null));
+
+    // The Assistant's sheet keeps its header when the chat can't be drawn.
+    await blurFields(page);
+    await page.keyboard.press(`${mod}+6`);
+    await expect(page.locator(".sb-assistant-sheet")).toBeVisible();
+    await contained("The chat", ".sb-assistant-sheet", '.sb-assistant-sheet button[aria-label="Close Assistant"]');
+    await page.locator('.sb-assistant-sheet button[aria-label="Close Assistant"]').click();
+
+    // A dialog has no place of its own: it closes with a toast, and opens again once it can draw.
+    await hook(page, (s) => s.failRender("Settings"));
+    await blurFields(page);
+    await page.keyboard.press(`${mod}+,`);
+    await expect(page.locator(".sb-toast__title", { hasText: "Settings hit a problem" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+    await expect(problem).toHaveCount(0);
+    await hook(page, (s) => s.failRender("Settings", false));
+    await page.keyboard.press(`${mod}+,`);
+    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   });
 });
 

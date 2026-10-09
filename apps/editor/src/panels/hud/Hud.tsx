@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Gauge, Sparkles, SquareTerminal, TriangleAlert 
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { useRuntimeState } from "../../state/EditorProvider.tsx";
 import { Badge } from "../../ui/Badge.tsx";
+import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
@@ -47,7 +48,8 @@ const TAB_ICONS: Record<HudTabId, ReactNode> = {
 
 /**
  * Bottom HUD: Console, Diagnostics, AI Activity, and Performance, with a live fps and frame-time
- * readout ("At rest" while nothing in the prototype moves). Fills its container; mount inside an EditorProvider.
+ * readout ("At rest" while nothing in the prototype moves). Each tab's view is contained, so one that throws leaves the
+ * bar and the other tabs. Fills its container; mount inside an EditorProvider.
  */
 export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = false, onToggleCollapse, onConnectClaude, className }: HudProps) {
   const [current, setCurrent] = useControllableState<HudTabId>(tab, defaultTab, onTabChange);
@@ -113,16 +115,24 @@ export function Hud({ tab, defaultTab = "console", onTabChange, collapsed = fals
       {!collapsed && (
         <div className="sb-hudx__body">
           <TabPanel idBase={ID_BASE} value="console" active={current === "console"} keepMounted className="sb-hudx__panel">
-            <ConsoleView />
+            <ErrorBoundary name="The Console tab">
+              <ConsoleView />
+            </ErrorBoundary>
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="diagnostics" active={current === "diagnostics"} className="sb-hudx__panel">
-            <DiagnosticsView filter={severities} onFilterChange={setSeverities} />
+            <ErrorBoundary name="The Diagnostics tab">
+              <DiagnosticsView filter={severities} onFilterChange={setSeverities} />
+            </ErrorBoundary>
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="ai" active={current === "ai"} className="sb-hudx__panel">
-            <AiActivityView {...(onConnectClaude ? { onConnectClaude } : {})} />
+            <ErrorBoundary name="The AI Activity tab">
+              <AiActivityView {...(onConnectClaude ? { onConnectClaude } : {})} />
+            </ErrorBoundary>
           </TabPanel>
           <TabPanel idBase={ID_BASE} value="performance" active={current === "performance"} keepMounted className="sb-hudx__panel">
-            <PerformanceView active={current === "performance"} />
+            <ErrorBoundary name="The Performance tab">
+              <PerformanceView active={current === "performance"} />
+            </ErrorBoundary>
           </TabPanel>
         </div>
       )}

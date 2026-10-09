@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { failRender } from "../ui/ErrorBoundary.tsx";
 import { createDialogStore, type DialogStore } from "../state/dialogs.ts";
 import { ServiceDialogs } from "./ServiceDialogs.tsx";
 
@@ -28,6 +29,29 @@ afterEach(() => {
 const buttonNamed = (text: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)!;
 
 describe("ServiceDialogs", () => {
+  it("answers as Cancel does when a dialog can't be drawn, and shows the next request once it can", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let confirm!: Promise<boolean>;
+    let prompt!: Promise<string | null>;
+    act(() => failRender("The dialog"));
+    act(() => {
+      confirm = store.confirm({ title: "Delete “Bouncy”?", danger: true });
+      prompt = store.prompt({ title: "Rename layer" });
+    });
+    await expect(confirm).resolves.toBe(false);
+    await expect(prompt).resolves.toBeNull();
+    expect(store.getState().queue).toEqual([]);
+
+    failRender("The dialog", false);
+    let again!: Promise<boolean>;
+    act(() => {
+      again = store.confirm({ title: "Delete “Bouncy”?" });
+    });
+    act(() => buttonNamed("OK").click());
+    await expect(again).resolves.toBe(true);
+    vi.restoreAllMocks();
+  });
+
   it("opens a danger confirm on Cancel, so Enter can't delete", async () => {
     let answer!: Promise<boolean>;
     act(() => {

@@ -13,7 +13,7 @@
  */
 
 import { createElement, useEffect, useSyncExternalStore, type Attributes, type ComponentType, type ReactNode } from "react";
-import { ErrorBoundary, SurfaceProblem } from "./ErrorBoundary.tsx";
+import { DialogBoundary, ErrorBoundary, SurfaceProblem } from "./ErrorBoundary.tsx";
 import { useLatest } from "./lib/hooks.ts";
 import { toast } from "./Toast.tsx";
 
@@ -35,9 +35,6 @@ export interface LoadableOptions {
 }
 
 type LoadState<P> = { status: "loading" | "failed" } | { status: "ready"; Component: ComponentType<P> };
-
-/** A dialog that threw draws nothing: its caller closes it. */
-const nothing = () => null;
 
 export function loadable<P extends object>(load: () => Promise<ComponentType<P>>, options: LoadableOptions): Loadable<P> {
   let state: LoadState<P> = { status: "loading" };
@@ -88,14 +85,10 @@ export function loadable<P extends object>(load: () => Promise<ComponentType<P>>
     if (current.status === "ready") {
       const surface = createElement(current.Component, props as unknown as P & Attributes);
       if (inline) return <ErrorBoundary name={options.name}>{surface}</ErrorBoundary>;
-      const failed = () => {
-        toast({ id: `loadable:${options.name}`, title: `${options.name} hit a problem`, description: "It closed. The rest of Sonobe still works.", tone: "warn" });
-        onFailed?.();
-      };
       return (
-        <ErrorBoundary name={options.name} fallback={nothing} onError={failed}>
+        <DialogBoundary name={options.name} {...(onFailed ? { onFailed } : {})}>
           {surface}
-        </ErrorBoundary>
+        </DialogBoundary>
       );
     }
     if (current.status === "failed" && inline) return <SurfaceProblem name={options.name} kind="load" />;
