@@ -141,7 +141,7 @@ The updater in the first release is the one every person keeps. A release whose 
 node apps/desktop/tests/update-rehearsal.mjs --identity "Apple Development: Your Name"
 ```
 
-It takes about four minutes and prints one PASS or FAIL line per step. A step that fails ends its scenario, and the lines say which step was the last to pass.
+It takes about three minutes on an Apple silicon Mac and prints one PASS or FAIL line per step. A step that fails ends its scenario, and the lines say which step was the last to pass.
 
 - **What it builds.** This version and the next patch version as rehearsal builds signed with that certificate (`package.mjs --identity`, with `--version` and `--launch-env`), and one local ad-hoc build, all into a temp folder. No tracked file changes, and `apps/desktop/dist` is rebuilt as a normal build afterwards.
 - **How it runs them.** The first build is unpacked into `<temp>/Applications`, which macOS counts as an Applications folder, and the second is served from `127.0.0.1:5250` (`SONOBE_UPDATE_FEED`). Every app is muted, has its own data folder and `SONOBE_HOME`, and uses the test cipher (`SONOBE_TEST=1`), so nothing asks for your keychain. macOS opens the updated app itself, without the first one's environment, so both signed builds carry those folders in Info.plist and refuse to start without them.
