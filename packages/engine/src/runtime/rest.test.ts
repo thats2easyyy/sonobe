@@ -76,7 +76,35 @@ const gesture = defineMock({
   },
 });
 
-const registry = createMockRegistry([countTo, clock, restarter, gesture]);
+/** Keeps the prototype's time at its last pulse. */
+const stamp = defineMock<{ at: number }>({
+  type: "stamp",
+  name: "Stamp",
+  inputs: [port("go", "pulse")],
+  outputs: [port("at", "number")],
+  state: () => ({ at: -1 }),
+  evaluate(ctx) {
+    if (ctx.pulsed("go")) ctx.state.at = ctx.time;
+    ctx.output("at", ctx.state.at);
+  },
+});
+
+/** When the press on a layer began, beside the prototype's time on that frame. */
+const press = defineMock({
+  type: "pressProbe",
+  name: "Press Probe",
+  inputs: [port("layer", "layer", { default: null })],
+  outputs: [port("start", "number"), port("now", "number")],
+  evaluate(ctx) {
+    const pressed = ctx.services.pointers(ctx.input<LayerRef | null>("layer") ?? null)[0];
+    if (!pressed) return;
+    ctx.output("start", pressed.startTime);
+    ctx.output("now", ctx.time);
+  },
+});
+
+const MOCKS = [countTo, clock, restarter, gesture, stamp, press];
+const registry = createMockRegistry(MOCKS);
 
 const apply = (doc: SonobeDocument, ops: Op[]) => {
   const r = applyOps(doc, ops, { registry });
@@ -105,7 +133,7 @@ function tapDoc(): SonobeDocument {
 /** A live runtime at rest, counting the times it called onWake. */
 function rested(doc: SonobeDocument, definitions: readonly PatchDefinition[] = []) {
   let wakes = 0;
-  const reg = definitions.length ? createMockRegistry([countTo, clock, restarter, gesture, ...definitions]) : registry;
+  const reg = definitions.length ? createMockRegistry([...MOCKS, ...definitions]) : registry;
   const rt = createTestRuntime(doc, reg, { deterministic: false, platform: {}, onWake: () => wakes++ });
   for (let i = 0; i < 400 && !rt.resting; i++) rt.step(1 / 60);
   expect(rt.resting).toBe(true);
@@ -365,6 +393,32 @@ describe("rest: what reads the frame before settles first", () => {
     // The first step reads the layout made before it, so the size is there from frame 0.
     expect(seen).toEqual([false, false, true, true, true]);
   });
+
+  it("a chain of Text layers, each wrapped to the size of the one before, ends where stepping every frame ends", () => {
+    // No patch writes an output here: each step moves the layout one layer down the chain, and only
+    // the scene shows it. Resting on outputs alone would freeze the chain half laid out.
+    const layers: DocInput["layers"] = [{ id: "l0", type: "text", name: "L0", props: { text: "Hello there, this is the first line", fontSize: 20 } }];
+    for (let i = 1; i <= 5; i++) {
+      layers.push({ id: `l${i}`, type: "text", name: `L${i}`, props: { text: "Each of these wraps to the size of the one before it", fontSize: 20, widthMode: "fixed", heightMode: "auto", size: { link: `@l${i - 1}.textSize` } } });
+    }
+    const doc = buildDoc({ layers }, registry);
+    const sizes = (rt: Runtime) => rt.scene().roots.map((n) => [n.width, n.height]);
+    const every = createTestRuntime(doc, registry);
+    runFrames(every, 30);
+    const rt = createTestRuntime(doc, registry);
+    let steps = 0;
+    while (!rt.resting && steps < 30) {
+      rt.step();
+      steps++;
+    }
+    expect(steps).toBeGreaterThan(REST_AFTER_STILL_STEPS + 2);
+    expect(steps).toBeLessThan(12);
+    expect(sizes(rt)).toEqual(sizes(every));
+    // The chain did wrap: the last layer isn't the size it had on the first frame.
+    const first = createTestRuntime(doc, registry);
+    first.step();
+    expect(sizes(rt)[5]).not.toEqual(sizes(first)[5]);
+  });
 });
 
 describe("rest: layers that move without the engine", () => {
@@ -456,6 +510,41 @@ describe("rest: time", () => {
     }
     expect(traced.values["toggle.on"]![0]).toBe(true);
     expect(traced.values["pop.output"]).toEqual(live);
+  });
+});
+
+describe("rest: clocks that follow the prototype's time", () => {
+  it("a trace of a live runtime that rested starts from the same time", () => {
+    const doc = buildDoc(
+      { layers: [CARD], patches: { touch: { type: "interaction", inputs: { layer: { layer: "card" } } }, when: { type: "stamp", inputs: { go: { link: "touch.tap" } } } } },
+      registry,
+    );
+    const { rt } = rested(doc);
+    const before = rt.time;
+    // The tap ends seven seconds of rest, so the time it stamps is past that.
+    rt.dispatch([pointerEvent("down", 50, 50)]);
+    rt.step(7);
+    rt.dispatch([pointerEvent("up", 50, 50)]);
+    rt.step(1 / 60);
+    const at = rt.getValue("when.at") as number;
+    expect(at).toBeCloseTo(before + 7 + 1 / 60, 9);
+    // The trace replays the log on a copy: the copy stamps the same time, and goes on from the same time.
+    const traced = rt.trace(["when.at"], 50);
+    expect(traced.values["when.at"]).toEqual([at, at, at]);
+    const copy = rt.trace(["when.at"], 50, [{ atMs: 0, events: [pointerEvent("down", 50, 50), pointerEvent("up", 50, 50)] }]);
+    expect(copy.values["when.at"]![0]).toBeCloseTo(rt.time + 1 / 60, 9);
+  });
+
+  it("a press that begins on the step after a rest starts at that step's time", () => {
+    const doc = buildDoc({ layers: [CARD], patches: { p: { type: "pressProbe", inputs: { layer: { layer: "card" } } } } }, registry);
+    const { rt } = rested(doc);
+    rt.dispatch([pointerEvent("down", 50, 50)]);
+    rt.step(7);
+    expect(rt.getValue("p.now")).toBe(rt.time);
+    expect(rt.getValue("p.start")).toBeCloseTo(rt.time, 9);
+    // Held for ten frames, the press is ten frames old: a long press counts from the touch, not from before the rest.
+    for (let i = 0; i < 10; i++) rt.step(1 / 60);
+    expect((rt.getValue("p.now") as number) - (rt.getValue("p.start") as number)).toBeCloseTo(10 / 60, 9);
   });
 });
 
