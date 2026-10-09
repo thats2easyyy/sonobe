@@ -100,6 +100,7 @@ function main(): void {
   const ownWrites = new OwnWriteRegistry();
   const pendingOpen: string[] = projectPathsFromArgv(process.argv.slice(1), process.cwd());
   let recents: RecentProjects | null = null;
+  let recentsLookedAt = 0;
   let rpc: RendererRpcHub | null = null;
   let mcp: McpServerHandle | null = null;
   let mcpHandler: NodeMcpHandler | null = null;
@@ -222,7 +223,7 @@ function main(): void {
         else if (id === "help.about" && windows.size === 0) app.showAboutPanel();
         else void ensureWindow().then((w) => w.sendCommand(id));
       },
-      openRecent: (dir) => void openProjects([dir]),
+      openRecent: (dir) => void openRecent(dir),
       action: (action: NativeAction) => void handleAction(action),
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -248,6 +249,24 @@ function main(): void {
     await recents.add(dir);
     if (platform !== "linux") app.addRecentDocument(dir);
     rebuildMenu();
+  };
+
+  /** Looks which recent projects are there now (recent-projects.ts), and rebuilds the menu when that changed what it lists. */
+  const refreshRecents = async () => {
+    if (!recents) return;
+    const listed = recents.snapshot().join("\n");
+    recentsLookedAt = Date.now();
+    await recents.available();
+    if (recents.snapshot().join("\n") !== listed) rebuildMenu();
+  };
+
+  /** Open Recent. A folder that has gone since the menu last looked is said so, and leaves the menu until it's back. */
+  const openRecent = async (dir: string) => {
+    if (await resolveProjectSelection(dir)) return openProjects([dir]);
+    await refreshRecents();
+    const options = { type: "info" as const, message: `“${path.basename(dir).replace(/\.sonobe$/, "")}” isn't there right now.`, detail: "It may be on a drive or share that isn't connected. Sonobe lists it under Open Recent again when it's back." };
+    const parent = primaryWindow()?.win;
+    await (parent && !parent.isDestroyed() ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
   };
 
   const handleAction = async (action: NativeAction) => {
@@ -1121,6 +1140,8 @@ function main(): void {
   // The players show the document in front, so switching editor windows may change what they show.
   app.on("browser-window-focus", (_event, win) => {
     if (windows.has(win.webContents.id)) pokePlayers();
+    // Coming back to Sonobe is when a drive may have been plugged in: a recent project that wasn't there is looked for again.
+    if (recents?.hasMissing() && Date.now() - recentsLookedAt > 10_000) void refreshRecents();
   });
 
   app.on("will-quit", () => {
@@ -1257,9 +1278,11 @@ function main(): void {
       if (typeof target === "string" && path.isAbsolute(target)) shell.showItemInFolder(target);
     });
 
+    // The welcome screen's list: the recent projects that are there now.
     ipcMain.handle(IPC.recentProjects, async (event) => {
       requireWindow(event);
-      return recents ? recents.list() : [];
+      await refreshRecents();
+      return recents?.snapshot() ?? [];
     });
 
     ipcMain.handle(IPC.mcpStatus, (event): McpStatus => {
@@ -1550,6 +1573,8 @@ function main(): void {
       onDocumentChange,
     });
 
+    // Every saved folder may be opened by the editor and is in the menu, without a look at any of them: whether a folder is
+    // there (it may be on a drive that isn't plugged in, or a share that's slow to answer) is looked at after the window is shown.
     recents = new RecentProjects(path.join(app.getPath("userData"), "recent-projects.json"));
     for (const dir of await recents.list()) {
       // A draft folder an older build opened as a project.
@@ -1589,6 +1614,9 @@ function main(): void {
       }
     }
 
+    // The window comes after the work above on purpose. `new BrowserWindow` returns about 60 ms after `ready` however early
+    // it is called (creating it first, with that work moved behind it, brought it 2 ms forward and delayed the page's
+    // navigation by as much), so the work above runs in time the window would spend waiting anyway.
     const first = await ensureWindow();
     ready = true;
     if (pendingOpen.length) await openProjects(pendingOpen.splice(0));
@@ -1616,6 +1644,8 @@ function main(): void {
       setTimeout(() => {
         keepCompileCache();
         if (app.isPackaged) void pruneCompileCaches(path.dirname(compileCacheHome()), path.basename(compileCacheHome()), "app-");
+        // Recent projects whose folders aren't there (an unplugged drive, a share that isn't mounted) leave the menu until they're back.
+        void refreshRecents();
       }, UPDATES_START_MS).unref(),
     );
 
