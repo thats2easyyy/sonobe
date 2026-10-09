@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer } from "./helpers.ts";
+import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer, waitForPrototype } from "./helpers.ts";
 
 test.describe("building an interaction in the UI", () => {
   test("inserts a patch from the picker", async ({ page }) => {
@@ -338,6 +338,21 @@ test.describe("patch editor chrome and graph states", () => {
     await expect(page.getByRole("button", { name: /^Patches zoom/ })).toBeVisible();
     await page.reload();
     await expect(canvas).toHaveAttribute("data-narrow", "true");
+  });
+
+  test("a layout changed just before a reload is kept", async ({ page }) => {
+    await openEditor(page);
+    await expect(page.locator(".sb-pe__canvas")).toBeVisible();
+    // The layout is saved a moment after a change; the page going away writes it at once.
+    const reloaded = page.waitForEvent("load");
+    await page.evaluate(() => {
+      window.__sonobe!.layout().setViewMode("canvas");
+      window.location.reload();
+    });
+    await reloaded;
+    await waitForPrototype(page);
+    expect(await hook(page, (s) => s.layout().viewMode)).toBe("canvas");
+    await expect(page.locator(".sb-pe__canvas")).toHaveCount(0);
   });
 
   test("a component path folds into a menu and stays inside the Patches header at 1180 wide", async ({ page }) => {
