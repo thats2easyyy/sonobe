@@ -110,6 +110,42 @@ describe("createLayoutStore", () => {
     expect(saved()).toMatchObject({ viewMode: "patches", split: 0.8 });
   });
 
+  it("writes a pending change when the page goes away, before any timer runs", () => {
+    const page = new EventTarget();
+    const store = createLayoutStore({ storageKey: "test.layout", persistDelayMs: 100, page });
+    store.getState().setViewMode("patches");
+    expect(localStorage.getItem("test.layout")).toBeNull();
+    page.dispatchEvent(new Event("pagehide"));
+    expect(JSON.parse(localStorage.getItem("test.layout")!).viewMode).toBe("patches");
+
+    // The timer it replaced writes nothing more.
+    localStorage.removeItem("test.layout");
+    vi.advanceTimersByTime(500);
+    expect(localStorage.getItem("test.layout")).toBeNull();
+  });
+
+  it("writes nothing when the page goes away with nothing pending", () => {
+    const page = new EventTarget();
+    const store = createLayoutStore({ storageKey: "test.layout", persistDelayMs: 100, page });
+    page.dispatchEvent(new Event("pagehide"));
+    expect(localStorage.getItem("test.layout")).toBeNull();
+
+    store.getState().setViewMode("canvas");
+    vi.advanceTimersByTime(120);
+    localStorage.removeItem("test.layout");
+    page.dispatchEvent(new Event("pagehide"));
+    expect(localStorage.getItem("test.layout")).toBeNull();
+  });
+
+  it("still saves a temporary layout as what it replaced when the page goes away", () => {
+    const page = new EventTarget();
+    const store = createLayoutStore({ storageKey: "test.layout", persistDelayMs: 100, page });
+    store.getState().setViewMode("patches");
+    store.getState().showTemporary({ viewMode: "split", split: 0.8 });
+    page.dispatchEvent(new Event("pagehide"));
+    expect(JSON.parse(localStorage.getItem("test.layout")!)).toMatchObject({ viewMode: "patches", split: DEFAULT_LAYOUT.split });
+  });
+
   it("survives corrupt storage", () => {
     localStorage.setItem("test.layout", "{not json");
     expect(createLayoutStore({ storageKey: "test.layout" }).getState().sizes).toEqual(DEFAULT_LAYOUT.sizes);

@@ -2,6 +2,7 @@ import { FileBox } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
 import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
+import { DialogBoundary } from "../ui/ErrorBoundary.tsx";
 import { SearchList } from "../ui/SearchList.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { FuzzyKey } from "../ui/lib/fuzzy.ts";
@@ -14,15 +15,21 @@ export function AppDialogs({ store = appDialogs }: { store?: AppDialogStore }) {
   const request = useAppDialogs((s) => s.queue[0] ?? null, store);
   if (!request) return null;
   const settle = (value: string | null | "save" | "discard" | "cancel") => store.getState().settle(request.id, value);
-  switch (request.kind) {
-    case "promptName":
-      return <NameDialog key={request.id} request={request} onSettle={settle} />;
-    case "pickProject":
-      return <PickDialog key={request.id} request={request} onSettle={settle} />;
-    case "confirmDiscard":
-      return <DiscardDialog key={request.id} request={request} onSettle={settle} />;
-  }
+  // A dialog that can't be drawn answers as Cancel does, so whoever asked isn't left waiting and the next request shows.
+  return (
+    <DialogBoundary name={DIALOG_NAMES[request.kind]} resetKey={request.id} onFailed={() => settle(request.kind === "confirmDiscard" ? "cancel" : null)}>
+      {request.kind === "promptName" ? (
+        <NameDialog key={request.id} request={request} onSettle={settle} />
+      ) : request.kind === "pickProject" ? (
+        <PickDialog key={request.id} request={request} onSettle={settle} />
+      ) : (
+        <DiscardDialog key={request.id} request={request} onSettle={settle} />
+      )}
+    </DialogBoundary>
+  );
 }
+
+const DIALOG_NAMES: Record<AppDialogRequest["kind"], string> = { promptName: "The Save dialog", pickProject: "The Open dialog", confirmDiscard: "The unsaved changes dialog" };
 
 type Settle = (value: string | null | "save" | "discard" | "cancel") => void;
 

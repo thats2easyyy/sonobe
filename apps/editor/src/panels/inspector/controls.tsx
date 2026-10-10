@@ -58,6 +58,7 @@ import { decimalsOf } from "../../ui/lib/scrubMath.ts";
 import { layerSceneKey, pickCopy, useWatchedScope } from "../patch-editor/api.ts";
 import { acceptAttribute, assetKindsFor, importAssetForField, KIND_NOUNS, type FieldImportResult } from "./assetImport.ts";
 import { formatCopies, formatLiveValue, literalValue, sameInputValue, updateVectorComponent, type FieldUpdate, type InspectorField } from "./model.ts";
+import { useSubjectState } from "./subject.ts";
 
 /** What a control can do to its field. */
 export interface FieldActions {
@@ -499,11 +500,14 @@ export interface AssetFieldImport {
 /** Import files into an asset field (the picker's Import File… and files dropped on the row). */
 export function useAssetFieldImport(field: InspectorField, actions: FieldActions): AssetFieldImport {
   const session = useEditorSession();
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting] = useSubjectState(false);
   const latest = useLatest({ field, actions });
+  const started = useRef(0);
   const importFile = useCallback(
     async (file: File): Promise<FieldImportResult> => {
-      const { field: current } = latest.current;
+      // The field and its actions as they are now: the row may show another selection by the time the file is in.
+      const { field: current, actions: begun } = latest.current;
+      const run = ++started.current;
       setImporting(true);
       // Importing the file and setting the field undo together.
       const coalesceKey = `inspector-import:${current.key}:${Date.now()}`;
@@ -513,12 +517,12 @@ export function useAssetFieldImport(field: InspectorField, actions: FieldActions
       } catch (err) {
         result = { ok: false, error: `Couldn't import “${file.name}”: ${err instanceof Error ? err.message : String(err)}` };
       }
-      setImporting(false);
-      if (result.ok) latest.current.actions.set({ asset: result.assetId }, { coalesceKey });
+      if (started.current === run) setImporting(false);
+      if (result.ok) begun.set({ asset: result.assetId }, { coalesceKey });
       else toast({ id: "inspector-import", title: result.error, tone: "warn" });
       return result;
     },
-    [session, latest],
+    [session, latest, setImporting],
   );
   return { importing, importFile };
 }

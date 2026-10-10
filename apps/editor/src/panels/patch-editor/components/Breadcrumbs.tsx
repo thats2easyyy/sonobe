@@ -4,12 +4,11 @@
  */
 
 import { ChevronRight, Ellipsis } from "lucide-react";
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { Menu } from "../../../ui/Menu.tsx";
 import { Tooltip } from "../../../ui/Tooltip.tsx";
 import { useEditorSession } from "../../../state/EditorProvider.tsx";
-import { selectBreadcrumbs } from "../../../state/selection.ts";
 import type { EditorSession } from "../../../state/session.ts";
 
 export interface PatchEditorBreadcrumbsProps {
@@ -51,8 +50,13 @@ export function PatchEditorBreadcrumbs({ session: provided, className }: PatchEd
   const fallback = useEditorSession();
   const session = provided ?? fallback;
   const path = useStore(session.selection, (s) => s.componentPath);
-  const components = useStore(session.document, (s) => s.doc.components);
-  const crumbs = selectBreadcrumbs({ componentPath: path }, { components } as never);
+  // Only the names on the path, as one string: an edit inside a component makes a new `components`, and the crumbs don't show it.
+  const names = useStore(session.document, (s) => JSON.stringify(path.map((id) => s.doc.components[id]?.name ?? null)));
+  const crumbs = useMemo(() => {
+    const list = JSON.parse(names) as (string | null)[];
+    // Missing components are skipped, as selectBreadcrumbs does.
+    return path.flatMap((_, i) => (typeof list[i] === "string" ? [{ name: list[i]!, path: path.slice(0, i + 1) }] : []));
+  }, [names, path]);
   const goTo = (target: string[]) => session.selection.getState().setComponentPath(target);
   const folded = crumbs.length >= 3 ? crumbs.slice(1, -1) : [];
   const shown = folded.length ? [crumbs[0]!, crumbs.at(-1)!] : crumbs;

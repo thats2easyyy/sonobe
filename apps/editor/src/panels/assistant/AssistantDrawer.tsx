@@ -6,6 +6,7 @@ import { appPanels } from "../../app/appPanels.ts";
 import { Badge } from "../../ui/Badge.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
+import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select, type SelectOption } from "../../ui/Select.tsx";
@@ -380,7 +381,8 @@ export function AssistantDrawer({ onClose, onConnectClaude, onImportDesign, host
             </p>
           </Tooltip>
         ) : null}
-        {body}
+        {/* A message that can't be drawn leaves the header, so New chat and Close still work. */}
+        <ErrorBoundary name="The chat">{body}</ErrorBoundary>
       </div>
     </section>
   );

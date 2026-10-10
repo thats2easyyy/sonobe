@@ -1,9 +1,10 @@
 /** Collapsible inspector section with a "More" disclosure for advanced rows. Open state persists per section id. */
 
 import { ChevronRight } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { readJSON, writeJSON } from "../../ui/lib/storage.ts";
+import { useSubjectState } from "./subject.ts";
 
 export const SECTION_STORAGE_KEY = "sonobe.inspector.sections";
 
@@ -39,8 +40,9 @@ export interface InspectorSectionProps {
 
 export function InspectorSection({ id, title, children, more, moreCount = 0, moreNames, changed = 0, actions, defaultOpen = true, forceOpen = false }: InspectorSectionProps) {
   const bodyId = useId();
-  const [open, setOpen] = useState(() => readOpen(id, defaultOpen));
-  const [showMore, setShowMore] = useState(false);
+  // Read again for each subject: a section nobody has opened or closed follows the new selection's default, and More shuts.
+  const [open, setOpen] = useSubjectState(() => readOpen(id, defaultOpen));
+  const [showMore, setShowMore] = useSubjectState(false);
   const shown = open || forceOpen;
   const toggle = () => {
     setOpen((current) => {

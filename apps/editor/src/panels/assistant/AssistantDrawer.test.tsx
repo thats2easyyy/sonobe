@@ -204,6 +204,23 @@ describe("AssistantDrawer", () => {
     expect(buttonByLabel("Send")).not.toBeNull();
   });
 
+  it("keeps its header when a message can't be drawn, and draws the chat again on Try again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const onClose = vi.fn();
+    // A reply the transcript can't draw, standing in for a bug in drawing one.
+    const store = await mount(fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" }), { onClose, seed: (s) => s.setState({ items: [{ kind: "assistant", id: "a1", runId: "r1", turn: 1, text: "Done.", thinking: "", tools: null as never }] }) });
+    expect(container.querySelector(".sb-surface-problem")?.textContent).toContain("The chat hit a problem");
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(buttonByLabel("Close Assistant")).toBeTruthy();
+    expect(buttonByLabel("New chat")).toBeTruthy();
+
+    act(() => store.setState({ items: [] }));
+    await click(buttonByText("Try again"));
+    expect(container.querySelector(".sb-surface-problem")).toBeNull();
+    expect(container.querySelector("textarea")).toBeTruthy();
+    vi.restoreAllMocks();
+  });
+
   it("keeps an unsent message through the setup and a closed sheet, and drops it on New chat", async () => {
     const host = fakeAssistantHost({ key: "sk-ant-api03-abcdefgh1234" });
     const store = await mount(host);

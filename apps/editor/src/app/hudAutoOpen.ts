@@ -1,7 +1,7 @@
 /**
  * The console starts collapsed to a tab strip. The first time an error shows up in a session (a
- * console error from the prototype or a runtime error), it opens on the tab that has the error.
- * After that it stays wherever the person put it.
+ * console error from the prototype, one of the editor's own (`errorReports.ts`), or a runtime
+ * error), it opens on the tab that has the error. After that it stays wherever the person put it.
  */
 
 import { useEffect } from "react";

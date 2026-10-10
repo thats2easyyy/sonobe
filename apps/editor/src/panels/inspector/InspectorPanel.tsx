@@ -7,6 +7,7 @@ import { layoutStore, useLayout, type InspectorTab } from "../../shell/layoutSto
 import { Panel } from "../../shell/Panel.tsx";
 import { useCurrentComponent, useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
+import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { PortGlyph, VALUE_TYPE_LABELS } from "../../ui/PortGlyph.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -19,6 +20,7 @@ import { LayerInspector } from "./LayerInspector.tsx";
 import { countLabel, sameInputValue, summarizeField, type FieldPort } from "./model.ts";
 import { PatchInspector } from "./PatchInspector.tsx";
 import { InspectorSection } from "./Section.tsx";
+import { subjectKey, SubjectProvider } from "./subject.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 import "./Inspector.css";
 
@@ -40,6 +42,10 @@ const TABS_ID = "sb-insp-tabs";
  * patches get docs, options, spring presets with a curve and handoff code, inputs, and live
  * outputs. Nothing selected shows the component's summary and notes. The Knobs tab shows the
  * project's knobs and presets, and stays put as the selection changes.
+ *
+ * Selecting other layers keeps the layer inspector mounted: its rows and sections are the same
+ * elements for the next layer, and what belonged to the last one is let go on purpose (subject.ts).
+ * A patch inspector is still built anew for each selection.
  */
 export function InspectorPanel({ onCollapse, onLearnMore, className }: InspectorPanelProps) {
   const session = useEditorSession();
@@ -74,7 +80,9 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
     >
       {tab === "knobs" ? (
         <TabPanel idBase={TABS_ID} value="knobs" active className="sb-insp sb-scroll">
-          <KnobsPanel />
+          <ErrorBoundary name="The Knobs tab">
+            <KnobsPanel />
+          </ErrorBoundary>
         </TabPanel>
       ) : (
         <div className="sb-insp sb-scroll" role="tabpanel" id={`${TABS_ID}-panel-properties`} aria-labelledby={`${TABS_ID}-tab-properties`} onFocusCapture={() => session.selection.getState().setFocusedPanel("inspector")}>
@@ -93,9 +101,14 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
               />
             </div>
           )}
-          {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
-          {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
-          {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+          {/* A failure here usually belongs to what's selected: the tabs stay, and selecting something else clears it. */}
+          <ErrorBoundary name="The Properties tab" resetKey={`${mode}:${layers.join(",")}:${patches.join(",")}`}>
+            <SubjectProvider value={mode === "layers" ? subjectKey("layers", layers) : mode === "patches" ? subjectKey("patches", patches) : subjectKey("none")}>
+              {mode === "layers" && <LayerInspector layerIds={layers} />}
+              {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
+              {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+            </SubjectProvider>
+          </ErrorBoundary>
         </div>
       )}
     </Panel>

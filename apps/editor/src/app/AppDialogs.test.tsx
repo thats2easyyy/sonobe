@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { failRender } from "../ui/ErrorBoundary.tsx";
 import { AppDialogs } from "./AppDialogs.tsx";
 import { createAppDialogStore, type AppDialogStore } from "./dialogs.ts";
 
@@ -33,6 +34,29 @@ const setInputValue = (input: HTMLInputElement, value: string) => {
 const buttonNamed = (text: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
 describe("AppDialogs", () => {
+  it("answers as Cancel does when a dialog can't be drawn, and shows the next request", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let name!: Promise<string | null>;
+    let discard!: Promise<string>;
+    let next!: Promise<string | null>;
+    act(() => failRender("The Save dialog"));
+    act(() => failRender("The unsaved changes dialog"));
+    act(() => {
+      name = store.promptName("Photo Zoom");
+      discard = store.confirmDiscard({ name: "Photo Zoom", action: "open" });
+      next = store.pickProject(["Checkout Flow"]);
+    });
+    await expect(name).resolves.toBeNull();
+    await expect(discard).resolves.toBe("cancel");
+    // Nobody is left waiting, and the queue moved on to a dialog that can be drawn.
+    const item = [...document.querySelectorAll(".sb-appdialog__item-name")].find((el) => el.textContent === "Checkout Flow") as HTMLElement;
+    act(() => item.click());
+    await expect(next).resolves.toBe("Checkout Flow");
+    failRender("The Save dialog", false);
+    failRender("The unsaved changes dialog", false);
+    vi.restoreAllMocks();
+  });
+
   it("asks for a name and resolves on submit", async () => {
     let result!: Promise<string | null>;
     act(() => {

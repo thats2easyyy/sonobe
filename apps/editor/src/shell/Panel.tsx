@@ -1,5 +1,6 @@
 import { PanelLeftOpen, PanelRightOpen } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
+import { ErrorBoundary, SurfaceProblem } from "../ui/ErrorBoundary.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { useOptionalCommands } from "../ui/commands/CommandProvider.tsx";
 import type { ShortcutScope } from "../ui/commands/shortcutManager.ts";
@@ -64,6 +65,31 @@ export function Panel({
       <div className={cx("sb-panel__body", bodyClassName)}>{children}</div>
       {footer && <footer className="sb-panel__footer">{footer}</footer>}
     </section>
+  );
+}
+
+export interface PanelBoundaryProps extends Pick<PanelProps, "title" | "scope" | "surface"> {
+  /** What the panel is called when it fails, as a sentence starts: "The Inspector". */
+  name: string;
+  children: ReactNode;
+}
+
+/**
+ * Contains a shell panel (ARCHITECTURE §9, Error containment): when it throws while drawing, a panel
+ * with the same title says so, with Try again, and the panels beside it keep working.
+ */
+export function PanelBoundary({ name, children, ...panel }: PanelBoundaryProps) {
+  return (
+    <ErrorBoundary
+      name={name}
+      fallback={({ retry }) => (
+        <Panel {...panel}>
+          <SurfaceProblem name={name} kind="render" onRetry={retry} />
+        </Panel>
+      )}
+    >
+      {children}
+    </ErrorBoundary>
   );
 }
 

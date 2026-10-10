@@ -34,7 +34,8 @@ export function Root() {
   return (
     <ThemeProvider>
       <CommandProvider>
-        {route === "gallery" ? <Gallery /> : <EditorApp />}
+        {/* A page, not a dialog: with a fallback (nothing, while it loads) it says a problem in place. */}
+        {route === "gallery" ? <Gallery fallback={null} /> : <EditorApp />}
         <DrawerAwareToaster />
       </CommandProvider>
     </ThemeProvider>

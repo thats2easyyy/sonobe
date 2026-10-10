@@ -1,7 +1,8 @@
 /**
  * Shell layout state: panel sizes, collapsed panels, view mode, split direction, drawers, the HUD
- * tab, and the Inspector tab. Persisted to localStorage (debounced; storage failures are ignored).
- * A temporary layout is saved as what it replaced, so a reload never keeps it.
+ * tab, and the Inspector tab. Persisted to localStorage (debounced, and written at once when the
+ * page goes away, so a change made just before a reload or a quit is kept; storage failures are
+ * ignored). A temporary layout is saved as what it replaced, so a reload never keeps it.
  */
 
 import { useStore } from "zustand";
@@ -182,6 +183,8 @@ export interface LayoutStoreOptions {
   /** null disables persistence. */
   storageKey?: string | null;
   persistDelayMs?: number;
+  /** What says the page is going away (`pagehide`). Default: the window, when there is one. null: never. */
+  page?: Pick<EventTarget, "addEventListener"> | null;
 }
 
 export function createLayoutStore(options: LayoutStoreOptions = {}): StoreApi<LayoutStore> {
@@ -222,9 +225,20 @@ export function createLayoutStore(options: LayoutStoreOptions = {}): StoreApi<La
   }));
   if (key) {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    store.subscribe((state) => {
+    const write = () => {
+      timer = undefined;
+      writeJSON(key, savedLayout(store.getState()));
+    };
+    store.subscribe(() => {
       clearTimeout(timer);
-      timer = setTimeout(() => writeJSON(key, savedLayout(state)), options.persistDelayMs ?? 200);
+      timer = setTimeout(write, options.persistDelayMs ?? 200);
+    });
+    // A reload, a closed window or a quit inside the delay would otherwise bring back the layout from before the change.
+    const page = options.page === undefined ? (typeof window === "undefined" ? null : window) : options.page;
+    page?.addEventListener("pagehide", () => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      write();
     });
   }
   return store;

@@ -15,6 +15,41 @@ import { LayersPanel } from "./LayersPanel.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// What rendered, for the tests that count: each layer icon by its type, each tooltip by what it wraps, and the tree.
+const renders = vi.hoisted(() => ({ icons: [] as string[], tooltips: [] as string[], trees: 0 }));
+vi.mock("../../shell/icons.tsx", async (importOriginal) => {
+  const { createElement } = await import("react");
+  const original = await importOriginal<typeof import("../../shell/icons.tsx")>();
+  const LayerTypeIcon: typeof original.LayerTypeIcon = (props) => {
+    renders.icons.push(props.type);
+    return createElement(original.LayerTypeIcon, props);
+  };
+  return { ...original, LayerTypeIcon };
+});
+vi.mock("../../ui/Tooltip.tsx", async (importOriginal) => {
+  const { createElement } = await import("react");
+  const original = await importOriginal<typeof import("../../ui/Tooltip.tsx")>();
+  const Tooltip: typeof original.Tooltip = (props) => {
+    renders.tooltips.push((props.children as { props?: { className?: string } } | null)?.props?.className ?? "");
+    return createElement(original.Tooltip, props);
+  };
+  return { ...original, Tooltip };
+});
+vi.mock("../../ui/TreeView.tsx", async (importOriginal) => {
+  const { createElement } = await import("react");
+  const original = await importOriginal<typeof import("../../ui/TreeView.tsx")>();
+  const TreeView = (props: never) => {
+    renders.trees++;
+    return createElement(original.TreeView as never, props);
+  };
+  return { ...original, TreeView };
+});
+const forgetRenders = () => {
+  renders.icons.length = 0;
+  renders.tooltips.length = 0;
+  renders.trees = 0;
+};
+
 const registry = getRegistry();
 let container: HTMLDivElement;
 let root: Root;
@@ -285,6 +320,103 @@ describe("LayersPanel", () => {
     expect(labels()).toEqual(["Title", "Group", "B", "A"]);
     act(() => s.selection.getState().select({ layers: ["g1"] }));
     expect(labels()).toContain("Inner One");
+  });
+
+  it("scrolls to a layer selected elsewhere inside a collapsed group, opening the group, in one render of the tree", () => {
+    const bulk = Array.from({ length: 200 }, (_, i): Op => ({ op: "addLayer", layer: { id: `bulk_${i}`, type: "rectangle", name: `Bulk ${i}` } }));
+    const s = mount(build([...bulk, { op: "addLayer", layer: { id: "box", type: "group", name: "Box", children: [{ id: "deep", type: "oval", name: "Deep" }] } }]));
+    const tree = container.querySelector<HTMLElement>(".sb-tree")!;
+    const collapseBox = () =>
+      act(() => {
+        (rowNamed("Box").querySelector(".sb-tree__chevron") as HTMLElement).click();
+      });
+    // Box is the front-most layer, at the top; the last Bulk row is far below it.
+    collapseBox();
+    expect(labels()).not.toContain("Deep");
+    act(() => s.selection.getState().select({ layers: ["bulk_0"] }));
+    const bottom = tree.scrollTop;
+    expect(bottom).toBeGreaterThan(0);
+
+    forgetRenders();
+    act(() => s.selection.getState().select({ layers: ["deep"] }));
+    expect(labels()).toContain("Deep");
+    expect(tree.scrollTop).toBeLessThan(bottom);
+    expect(renders.trees).toBe(1);
+
+    // Collapsing the group again sticks: only a selection change opens it.
+    collapseBox();
+    expect(labels()).not.toContain("Deep");
+
+    // A reveal request opens it and scrolls too.
+    act(() => s.selection.getState().select({ layers: ["bulk_0"] }));
+    expect(tree.scrollTop).toBe(bottom);
+    act(() => s.selection.getState().requestReveal("main", ["deep"]));
+    expect(labels()).toContain("Deep");
+    expect(tree.scrollTop).toBeLessThan(bottom);
+
+    // Clearing the selection scrolls nowhere: the reveal from before isn't answered again.
+    act(() => s.selection.getState().select({ layers: ["bulk_1"] }));
+    const lower = tree.scrollTop;
+    expect(lower).toBeGreaterThan(1000);
+    act(() => s.selection.getState().clear());
+    expect(tree.scrollTop).toBe(lower);
+  });
+
+  it("renders the tree once for a selection made elsewhere", () => {
+    const s = mount(fixture());
+    forgetRenders();
+    act(() => s.selection.getState().select({ layers: ["b"] }));
+    expect(renders.trees).toBe(1);
+    expect(rowNamed("B").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("doesn't render for its own rows' hovers, which it only reports", () => {
+    const s = mount(fixture());
+    forgetRenders();
+    for (const name of ["A", "B", "Title"]) {
+      act(() => {
+        rowNamed(name).dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      });
+    }
+    expect(s.selection.getState().hovered).toMatchObject({ kind: "layer", id: "c", source: "layers" });
+    expect(renders).toEqual({ icons: [], tooltips: [], trees: 0 });
+    // A hover from another panel still marks its row, and going away unmarks it.
+    act(() => s.selection.getState().setHovered({ kind: "layer", id: "b", component: "main", source: "canvas" }));
+    expect(rowNamed("B").querySelector(".sb-layerspanel__hover")).not.toBeNull();
+    act(() => s.selection.getState().setHovered(null));
+    expect(container.querySelector(".sb-layerspanel__hover")).toBeNull();
+  });
+
+  it("draws again only what an edit changed: no icon or name for a property, one name for a rename, one layer's badges", () => {
+    const s = mount(
+      build([
+        { op: "addLayer", layer: { id: "a", type: "rectangle", name: "A", props: { zPosition: 2 } } },
+        { op: "addLayer", layer: { id: "b", type: "rectangle", name: "B", props: { zPosition: 3 } } },
+        { op: "addLayer", layer: { id: "c", type: "text", name: "Title", props: { zPosition: 4 } } },
+      ]),
+    );
+    const apply = (ops: Op[]) => act(() => void s.document.getState().apply(ops, { label: "Test change" }));
+    const drawn = (className: string) => renders.tooltips.filter((name) => name.includes(className)).length;
+    expect(container.querySelectorAll('.sb-layerspanel__badge[data-kind="z"]')).toHaveLength(3);
+
+    forgetRenders();
+    apply([{ op: "updateLayer", component: "main", id: "a", props: { opacity: 0.5 } }]);
+    expect(renders.trees).toBe(1);
+    expect(renders.icons).toEqual([]);
+    expect(drawn("sb-tree__label")).toBe(0);
+    expect(drawn("sb-layerspanel__badge")).toBe(1);
+
+    forgetRenders();
+    apply([{ op: "rename", component: "main", id: "b", name: "Backdrop" }]);
+    expect(labels()).toContain("Backdrop");
+    expect(renders.icons).toEqual([]);
+    expect(drawn("sb-tree__label")).toBe(1);
+    expect(drawn("sb-layerspanel__badge")).toBe(1);
+
+    forgetRenders();
+    apply([{ op: "updateLayer", component: "main", id: "c", props: { zPosition: 9 } }]);
+    expect(rowNamed("Title").querySelector('.sb-layerspanel__badge[data-kind="z"]')!.textContent).toBe("z9");
+    expect(drawn("sb-layerspanel__badge")).toBe(1);
   });
 
   it("offers friendly first steps when the component is empty", () => {

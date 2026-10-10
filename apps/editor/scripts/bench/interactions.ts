@@ -259,6 +259,45 @@ async function selectLayers(page: Page): Promise<Gesture> {
   };
 }
 
+/**
+ * Select two items of one type in turn 120 times, 30 a second, each with a frame to itself. Nothing
+ * here waits on input, so the row reads what a selection itself costs: its ms per second over 30 is
+ * the ms for one. Clicking through Layers is paced by the clicks and moves little when a selection
+ * gets a millisecond cheaper. The pace is the same on a 60 Hz display and on one that is asleep,
+ * where headless Chromium draws 30 frames a second.
+ */
+async function reselect(page: Page, kind: "layers" | "patches"): Promise<Gesture> {
+  const pair = await page.evaluate((kind) => {
+    const s = (window as any).__sonobe;
+    const main = s.doc().components[s.doc().project.root];
+    const items: { id: string; type: string }[] = [];
+    const walk = (layers: { id: string; type: string; children?: unknown[] }[]) => layers.forEach((l) => (items.push(l), walk((l.children ?? []) as never)));
+    if (kind === "layers") walk(main.layers);
+    else for (const [id, patch] of Object.entries(main.patches)) items.push({ id, type: (patch as { type: string }).type });
+    // The first two of the commonest type, so both builds pick the same pair.
+    const byType = new Map<string, string[]>();
+    for (const item of items) byType.set(item.type, [...(byType.get(item.type) ?? []), item.id]);
+    const most = [...byType.values()].sort((a, b) => b.length - a.length)[0];
+    return most && most.length >= 2 ? [most[0]!, most[1]!] : null;
+  }, kind);
+  if (!pair) throw new Error(`The document has no two ${kind} of one type to select in turn.`);
+  return () =>
+    page.evaluate(
+      async ({ kind, pair }) => {
+        const selection = (window as any).__sonobe.session.selection.getState();
+        const raf = (window as any).__perf.raf as typeof requestAnimationFrame;
+        for (let i = 0; i < 120; i++) {
+          selection.select({ [kind]: [pair[i % 2]] });
+          // The first frame at least 30 ms on: the second at 60 Hz, the next at 30 Hz.
+          const due = performance.now() + 30;
+          do await new Promise((resolve) => raf(resolve));
+          while (performance.now() < due);
+        }
+      },
+      { kind, pair },
+    );
+}
+
 /** Open the patch picker and type "transition", 40 ms a key. */
 async function typeInPicker(page: Page): Promise<Gesture> {
   return async () => {
@@ -363,6 +402,8 @@ export async function runScenario(browser: Browser, base: string, name: Document
     await sleep(300);
     await run("inspector.scrub", (i) => scrub(page, side(i)));
     await run("layers.selectQuickly", () => selectLayers(page));
+    await run("inspector.reselectLayers", () => reselect(page, "layers"));
+    await run("inspector.reselectPatches", () => reselect(page, "patches"));
     await page.evaluate(() => (window as any).__sonobe.session.selection.getState().clear());
     await run("picker.type", () => typeInPicker(page), 400);
     if (problems.length) throw new Error(`The editor at ${base} logged errors during the ${name} interactions:\n${problems.join("\n")}`);

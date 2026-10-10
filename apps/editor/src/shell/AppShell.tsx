@@ -1,15 +1,18 @@
 import { DEFAULT_DEVICE } from "@sonobe/core";
-import { Layers, SlidersHorizontal, Smartphone } from "lucide-react";
+import { Layers, SlidersHorizontal, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAssistant } from "../panels/assistant/assistantStore.ts";
+import { Button } from "../ui/Button.tsx";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
+import { DialogBoundary, ErrorBoundary, type BoundaryProblem } from "../ui/ErrorBoundary.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Splitter } from "../ui/Splitter.tsx";
 import { getFocusable } from "../ui/lib/focus.ts";
 import { observeResize } from "../ui/lib/observeResize.ts";
 import { useElementSize } from "../ui/lib/useElementSize.ts";
 import { DrawerHost } from "./drawers/DrawerHost.tsx";
 import { DEFAULT_LAYOUT, MIN_CENTER_WIDTH, SIZE_LIMITS, SPLIT_LIMITS, drawerOverhang, fitPanelWidths, layoutStore, useLayout, useLiveDrawerWidth } from "./layoutStore.ts";
-import { PanelRail } from "./Panel.tsx";
+import { PanelBoundary, PanelRail, type PanelBoundaryProps } from "./Panel.tsx";
 import { Toolbar, type ToolbarProps } from "./Toolbar.tsx";
 import { useShellCommands } from "./useShellCommands.tsx";
 import "./AppShell.css";
@@ -50,6 +53,27 @@ export interface AppShellProps {
 
 const noop = () => undefined;
 
+// The two parts with no room for a SurfaceProblem say it in the room they have, and can be tried again: a notice that
+// stayed hidden could be the one that says the project changed on disk.
+const noticeProblem = ({ retry }: BoundaryProblem) => (
+  <div className="sb-shell__notice-problem" role="alert">
+    <span>A notice couldn’t be shown here. The rest of Sonobe still works.</span>
+    <Button size="sm" variant="ghost" onClick={retry}>
+      Try again
+    </Button>
+  </div>
+);
+const claudeProblem = ({ retry }: BoundaryProblem) => <IconButton icon={<TriangleAlert size={16} strokeWidth={1.75} />} label="The Claude button hit a problem. Try again" onClick={retry} />;
+
+/** What each panel slot is called when it fails, and the panel that says so. Every slot is contained here, whatever fills it. */
+const SLOT_PANELS = {
+  layers: { name: "Layers", title: "Layers", scope: "layers" },
+  viewer: { name: "The Viewer", title: "Viewer", scope: "viewer", surface: "sunken" },
+  canvas: { name: "The canvas", title: "Canvas", scope: "canvas", surface: "sunken" },
+  patchEditor: { name: "The Patches panel", title: "Patches", scope: "patchEditor", surface: "sunken" },
+  inspector: { name: "The Inspector", title: "Inspector", scope: "inspector" },
+} as const satisfies Record<string, Omit<PanelBoundaryProps, "children">>;
+
 const SIDE_PANELS = ["layers", "viewer", "inspector"] as const;
 type SidePanel = (typeof SIDE_PANELS)[number];
 
@@ -62,7 +86,8 @@ interface FocusIntent {
 /**
  * The editor frame: toolbar; Layers | Viewer | Canvas / Patch Editor | Inspector; bottom HUD; and the
  * Learn drawer. Panels resize (sizes are written to CSS variables while dragging and committed on
- * release), collapse to rails, and persist their layout. Content comes through slots.
+ * release), collapse to rails, and persist their layout. Content comes through slots, each contained:
+ * a slot that throws while drawing says so in its own place (ARCHITECTURE §9, Error containment).
  */
 export function AppShell({
   documentTitle = "Untitled",
@@ -190,6 +215,7 @@ export function AppShell({
   );
 
   const splitDimension = splitDirection === "rows" ? center.height : center.width;
+  const contained = (slot: keyof typeof SLOT_PANELS) => <PanelBoundary {...SLOT_PANELS[slot]}>{slots[slot]}</PanelBoundary>;
 
   return (
     <div ref={rootRef} className="sb-app sb-shell" style={style}>
@@ -204,10 +230,16 @@ export function AppShell({
         onTogglePlay={onTogglePlay}
         onRestart={onRestart}
         onOpenPalette={() => setPaletteOpen(true)}
-        claude={slots.claude}
+        claude={
+          <ErrorBoundary name="The Claude button" fallback={claudeProblem}>
+            {slots.claude}
+          </ErrorBoundary>
+        }
       />
       <div ref={bannersRef} className="sb-shell__banners">
-        {slots.banner}
+        <ErrorBoundary name="The notice bar" fallback={noticeProblem}>
+          {slots.banner}
+        </ErrorBoundary>
       </div>
       <main className="sb-shell__main" data-drawer-docked={docked || undefined} data-drawer-over={floating || undefined}>
         <div ref={rowRef} className="sb-shell__row">
@@ -216,7 +248,7 @@ export function AppShell({
           ) : (
             <>
               <div id="sb-layers" className="sb-shell__slot sb-shell__layers">
-                {slots.layers}
+                {contained("layers")}
               </div>
               {sideSplitter("layers", "Resize layers", "sb-layers")}
             </>
@@ -227,14 +259,14 @@ export function AppShell({
           ) : (
             <>
               <div id="sb-viewer" className="sb-shell__slot sb-shell__viewer">
-                {slots.viewer}
+                {contained("viewer")}
               </div>
               {sideSplitter("viewer", "Resize viewer", "sb-viewer")}
             </>
           )}
 
           <div ref={centerRef} className="sb-shell__center" data-direction={splitDirection} data-mode={viewMode}>
-            {viewMode !== "patches" && <div className="sb-shell__canvas">{slots.canvas}</div>}
+            {viewMode !== "patches" && <div className="sb-shell__canvas">{contained("canvas")}</div>}
             {viewMode === "split" && (
               <Splitter
                 orientation={splitDirection === "rows" ? "horizontal" : "vertical"}
@@ -251,7 +283,7 @@ export function AppShell({
                 }}
               />
             )}
-            {viewMode !== "canvas" && <div className="sb-shell__patches">{slots.patchEditor}</div>}
+            {viewMode !== "canvas" && <div className="sb-shell__patches">{contained("patchEditor")}</div>}
           </div>
 
           {collapsed.inspector ? (
@@ -260,7 +292,7 @@ export function AppShell({
             <>
               {sideSplitter("inspector", "Resize inspector", "sb-inspector", true)}
               <div id="sb-inspector" className="sb-shell__slot sb-shell__inspector">
-                {slots.inspector}
+                {contained("inspector")}
               </div>
             </>
           )}
@@ -282,13 +314,16 @@ export function AppShell({
           />
         )}
         <div id="sb-hud" className="sb-shell__hud" data-collapsed={collapsed.hud || undefined}>
-          {slots.hud}
+          <ErrorBoundary name="The bottom panel">{slots.hud}</ErrorBoundary>
         </div>
 
         <DrawerHost learn={slots.learn} docked={drawerDocked} />
       </main>
 
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      {/* The palette stays mounted while closed, so opening it is what clears a problem. */}
+      <DialogBoundary name="The command palette" resetKey={paletteOpen} onFailed={() => setPaletteOpen(false)}>
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      </DialogBoundary>
     </div>
   );
 }

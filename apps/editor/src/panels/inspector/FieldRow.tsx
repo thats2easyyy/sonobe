@@ -6,7 +6,7 @@
 
 import { findLayer, getKnob, type Id, type ValueType } from "@sonobe/core";
 import { Cable, Copy, Link2, Link2Off, RotateCcw, ScanSearch } from "lucide-react";
-import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
 import { currentComponentId } from "../../state/selection.ts";
@@ -15,19 +15,26 @@ import { ContextMenu, type MenuEntry } from "../../ui/Menu.tsx";
 import { PortGlyph } from "../../ui/PortGlyph.tsx";
 import { toast } from "../../ui/Toast.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
-import { useLatest } from "../../ui/lib/hooks.ts";
 import { fieldKnobId, KnobField, knobFieldEntries } from "../knobs/KnobField.tsx";
 import { MakeKnobPopover } from "../knobs/MakeKnobPopover.tsx";
 import { layerPropDropAttributes, startLinkToLayerProp, useWatchedScope, type LayerPropTarget } from "../patch-editor/api.ts";
 import { controlKind, LiveReadout, STACKED_CONTROLS, useAssetFieldImport, ValueControl, type FieldActions } from "./controls.tsx";
 import { editLabel, linkSourceItem, planFieldDisconnect, planFieldReset, planFieldSet, type InspectorField } from "./model.ts";
+import { useSubjectKey, useSubjectState } from "./subject.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
 /** Session-bound edits for a field, labeled for undo ("Set Opacity on Card"). */
 export function useFieldActions(field: InspectorField, subject: string): FieldActions {
   const session = useEditorSession();
   const edit = useInspectorEdit();
-  const latest = useLatest(field);
+  const subjectKey = useSubjectKey();
+  // The latest field, held per subject: the row stays for the next selection, and actions handed out
+  // for the last one (an import still running, an open menu's entries) must keep editing what they began with.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const latest = useMemo(() => ({ current: field }), [subjectKey]);
+  useLayoutEffect(() => {
+    latest.current = field;
+  });
   return useMemo(() => {
     const component = () => session.document.getState().doc.components[session.currentComponentId()];
     const gesture = () => `${latest.current.key}:${latest.current.targets.map((t) => t.address).join(",")}`;
@@ -119,14 +126,15 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
   const component = useDocument((s) => s.doc.components[componentId]);
   const actions = useFieldActions(field, subject);
   const { importing, importFile } = useAssetFieldImport(field, actions);
-  const [fileOver, setFileOver] = useState(false);
-  const [nameClipped, setNameClipped] = useState(false);
-  const [clippedValue, setClippedValue] = useState<string | null>(null);
+  const subjectKey = useSubjectKey();
+  const [fileOver, setFileOver] = useSubjectState(false);
+  const [nameClipped, setNameClipped] = useSubjectState(false);
+  const [clippedValue, setClippedValue] = useSubjectState<string | null>(null);
   const linked = field.linkedCount > 0;
   const kind = controlKind(field);
   // A knob-driven field shows the knob's chip and control under the label.
   const knobId = fieldKnobId(field);
-  const [makingKnob, setMakingKnob] = useState(false);
+  const [makingKnob, setMakingKnob] = useSubjectState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const stacked = (!linked && STACKED_CONTROLS.has(kind)) || knobId !== undefined;
   const takesFiles = !linked && kind === "asset";
@@ -241,7 +249,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
   const dropHint = cable?.accept && cable.hover ? `Drive ${name} from ${cable.source}` : fileOver ? `Drop to set ${name}` : importing ? "Importing…" : null;
 
   return (
-    <ContextMenu entries={entries}>
+    <ContextMenu entries={entries} dismissKey={subjectKey}>
       <div
         ref={rowRef}
         className="sb-insp-row"
@@ -279,7 +287,7 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
             onBlur={() => setClippedValue(null)}
           >
             {knobId !== undefined ? (
-              <KnobField field={field} knobId={knobId} label={name} />
+              <KnobField key={subjectKey} field={field} knobId={knobId} label={name} />
             ) : linked ? (
               <div className="sb-insp-linked" data-live={(field.link && liveAddress) || undefined}>
                 <Tooltip content={field.link ? `Driven by ${sourceName ?? chipText(field.link)}. Click to show it in the patch editor.` : `${field.linkedCount} of ${field.targets.length} selected are connected to patches.`}>
@@ -301,7 +309,8 @@ export function FieldRow({ field, subject, liveAddress, excludeLayers, drive, ca
                 </div>
               </div>
             ) : (
-              <ValueControl field={field} actions={actions} label={name} {...(excludeLayers ? { excludeLayers } : {})} />
+              // Keyed by the subject: a typed draft, a scrub under way and an open picker belong to the layers they were for.
+              <ValueControl key={subjectKey} field={field} actions={actions} label={name} {...(excludeLayers ? { excludeLayers } : {})} />
             )}
           </div>
         </Tooltip>

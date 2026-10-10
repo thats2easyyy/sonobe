@@ -23,6 +23,7 @@ import { ColorPicker } from "../ui/ColorPicker.tsx";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
 import { DIALOG_WIDTH, Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { SurfaceProblem } from "../ui/ErrorBoundary.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Kbd } from "../ui/Kbd.tsx";
 import { ContextMenu, Menu, MenuList, type MenuEntry } from "../ui/Menu.tsx";
@@ -693,6 +694,16 @@ function Feedback() {
       <Demo label="Empty state · inline with an action">
         <div className="sb-gallery__box">
           <EmptyState variant="inline" title="No knobs yet" description="Knobs tune a prototype while it runs." actions={<Button size="sm">New knob</Button>} />
+        </div>
+      </Demo>
+      <Demo label="A part that failed · threw while drawing">
+        <div className="sb-gallery__box">
+          <SurfaceProblem name="The Inspector" kind="render" onRetry={() => toast({ title: "It draws again" })} />
+        </div>
+      </Demo>
+      <Demo label="A part that failed · its code didn't load">
+        <div className="sb-gallery__box">
+          <SurfaceProblem name="The patch editor" kind="load" />
         </div>
       </Demo>
     </Section>

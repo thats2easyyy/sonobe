@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, type ComponentType } from "react";
+import { act, useState, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadable } from "./loadable.tsx";
@@ -115,25 +115,35 @@ describe("loadable", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("says so in place when a panel's code can't load", async () => {
+  it("says so in place when a panel's code can't load, and raises the failure on the window once", async () => {
+    const raised = vi.fn();
+    vi.stubGlobal("reportError", raised);
     const { load, calls } = deferredImport();
     const Surface = loadable(load, { name: "The patch editor" });
     act(() => root.render(<Surface title="Patches" fallback={loading} />));
-    calls[0]!.reject(new Error("offline"));
+    const offline = new Error("offline");
+    calls[0]!.reject(offline);
     await settle();
 
     expect(text(".sb-empty__title")).toBe("The patch editor didn't load");
     expect(text(".sb-empty__description")).toBe("Restart Sonobe to try again.");
     expect(document.querySelector(".loading")).toBeNull();
+    // What the editor's error reporting hears: which surface, and why.
+    await Surface.preload();
+    expect(raised).toHaveBeenCalledTimes(1);
+    const problem = raised.mock.calls[0]![0] as Error;
+    expect(problem.message).toBe("The patch editor didn't load. offline");
+    expect(problem.cause).toBe(offline);
+    vi.unstubAllGlobals();
   });
 
   it("tells a dialog's caller each time it opens that its code can't load, with a toast", async () => {
     const { load, calls } = deferredImport();
     const Surface = loadable(load, { name: "Settings" });
-    const onLoadError = vi.fn();
+    const onFailed = vi.fn();
     const App = ({ open }: { open: boolean }) => (
       <>
-        {open && <Surface title="Motion" onLoadError={onLoadError} />}
+        {open && <Surface title="Motion" onFailed={onFailed} />}
         <Toaster />
       </>
     );
@@ -142,15 +152,73 @@ describe("loadable", () => {
     calls[0]!.reject(new Error("offline"));
     await settle();
 
-    expect(onLoadError).toHaveBeenCalledTimes(1);
+    expect(onFailed).toHaveBeenCalledTimes(1);
     expect(toasts()).toEqual(["Settings didn't load"]);
     expect(document.querySelector(".settings")).toBeNull();
 
     act(() => root.render(<App open={false} />));
     act(() => root.render(<App open />));
     await settle();
-    expect(onLoadError).toHaveBeenCalledTimes(2);
+    expect(onFailed).toHaveBeenCalledTimes(2);
     expect(toasts()).toEqual(["Settings didn't load"]);
     expect(calls).toHaveLength(1);
+  });
+
+  it("says so in place when a loaded panel throws while it draws, and draws it again on Try again", async () => {
+    let broken = true;
+    const Patches = ({ title }: { title: string }) => {
+      if (broken) throw new Error("no such port");
+      return <div className="settings">{title}</div>;
+    };
+    const Surface = loadable(async () => Patches, { name: "The patch editor" });
+    await Surface.preload();
+    act(() =>
+      root.render(
+        <>
+          <Surface title="Patches" fallback={loading} />
+          <aside className="inspector">Inspector</aside>
+        </>,
+      ),
+    );
+    const inspector = document.querySelector(".inspector");
+
+    expect(document.querySelector(".sb-surface-problem")?.getAttribute("role")).toBe("alert");
+    expect(text(".sb-empty__title")).toBe("The patch editor hit a problem");
+    expect(text(".sb-empty__description")).toBe("The rest of Sonobe still works.");
+    expect(document.querySelector(".inspector")).toBe(inspector);
+
+    broken = false;
+    act(() => document.querySelector<HTMLButtonElement>(".sb-surface-problem button")!.click());
+    expect(text(".settings")).toBe("Patches");
+    expect(document.querySelector(".sb-surface-problem")).toBeNull();
+  });
+
+  it("closes a loaded dialog that throws while it draws, with a toast, and mounts it again on the next open", async () => {
+    let broken = true;
+    const Dialog = ({ title }: { title: string }) => {
+      if (broken) throw new Error("no such setting");
+      return <div className="settings">{title}</div>;
+    };
+    const Surface = loadable(async () => Dialog, { name: "Settings" });
+    await Surface.preload();
+    const App = () => {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button className="open" onClick={() => setOpen(true)} />
+          {open && <Surface title="Motion" onFailed={() => setOpen(false)} />}
+          <Toaster />
+        </>
+      );
+    };
+    act(() => root.render(<App />));
+
+    expect(document.querySelector(".settings")).toBeNull();
+    expect(document.querySelector(".sb-surface-problem")).toBeNull();
+    expect([...document.querySelectorAll(".sb-toast__title")].map((el) => el.textContent)).toEqual(["Settings hit a problem"]);
+
+    broken = false;
+    act(() => document.querySelector<HTMLButtonElement>(".open")!.click());
+    expect(text(".settings")).toBe("Motion");
   });
 });

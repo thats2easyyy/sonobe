@@ -49,7 +49,7 @@ import {
   type ArrangeDirection,
 } from "../../state/editActions.ts";
 import { useDocument, useEditorSession, useLiveValues, useSelection } from "../../state/EditorProvider.tsx";
-import { hasSelection, selectBreadcrumbs } from "../../state/selection.ts";
+import { hasSelection, selectBreadcrumbs, type HoveredItem } from "../../state/selection.ts";
 import { Button } from "../../ui/Button.tsx";
 import { useOptionalCommands } from "../../ui/commands/CommandProvider.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
@@ -112,12 +112,30 @@ function LiveCopies({ layerId }: { layerId: Id }) {
 
 const zText = (z: unknown) => (typeof z === "number" ? `${Math.round(z * 100) / 100}` : "");
 
+/** The copies are worked out anew for each document: the badges draw again only when the layer or what they say changed. */
+function sameBadges(a: { node: LayerNode; copies: LayerCopies }, b: { node: LayerNode; copies: LayerCopies }): boolean {
+  const count = (copies: LayerCopies) => (copies.kind === "repeat" || copies.kind === "auto" ? copies.count : undefined);
+  return a.node === b.node && a.copies.kind === b.copies.kind && count(a.copies) === count(b.copies);
+}
+
+/**
+ * The layer another panel points at (the canvas, the Viewer, the patch editor, an Inspector row),
+ * which its row marks. The panel's own hovers aren't drawn here, so they give null.
+ */
+function highlightedLayer(hovered: HoveredItem | null, componentId: Id): Id | null {
+  if (!hovered || hovered.component !== componentId || hovered.source === "layers") return null;
+  return hovered.kind === "layer" || (hovered.kind === "port" && hovered.address?.startsWith("@")) ? hovered.id : null;
+}
+
+/** Scroll requests are told apart by a number that only goes up, whichever kind asked. */
+let scrollRequests = 0;
+
 /**
  * A row's copy and stacking badges: ×N on a layer that makes copies of itself (with a repeat icon
  * when its Repeat decides how many), and z on a layer with a Z Position, which orders it among its
  * siblings before the layer list does.
  */
-function LayerBadges({ node, copies }: { node: LayerNode; copies: LayerCopies }) {
+const LayerBadges = memo(function LayerBadges({ node, copies }: { node: LayerNode; copies: LayerCopies }) {
   const z = node.props.zPosition;
   const zLinked = isLinkInput(z);
   const showZ = zLinked || (typeof z === "number" && z !== 0);
@@ -153,7 +171,16 @@ function LayerBadges({ node, copies }: { node: LayerNode; copies: LayerCopies })
       )}
     </span>
   );
-}
+}, sameBadges);
+
+/** A row's type icon, which carries the layer's id for hit tests (rowLayerId). */
+const LayerRowIcon = memo(function LayerRowIcon({ id, type }: { id: Id; type: string }) {
+  return (
+    <span className="sb-layerspanel__icon" data-layer-id={id} data-kind={type === COMPONENT_INSTANCE_LAYER_TYPE ? "component" : undefined}>
+      <LayerTypeIcon type={type} size={14} />
+    </span>
+  );
+});
 
 /**
  * A row's Touch, hide and lock buttons. They show on hover, but every row has them, and the panel
@@ -221,20 +248,22 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const doc = useDocument((s) => s.doc);
   const componentPath = useSelection((s) => s.componentPath);
   const selectedLayers = useSelection((s) => s.layers);
-  const hovered = useSelection((s) => s.hovered);
   const reveal = useSelection((s) => s.reveal);
   const componentId = componentPath.at(-1) ?? doc.project.root;
+  // Only the id: pointing at rows here sets the hover for the other panels, and must not render this one.
+  const highlighted = useSelection((s) => highlightedLayer(s.hovered, componentId));
   const component = doc.components[componentId];
   const layers = component?.layers ?? EMPTY_LAYERS;
   /** A patch component is never drawn, so it can't hold layers (core refuses them too). */
   const canHoldLayers = component?.kind !== "patchComponent";
   const menu = useContextMenu();
   const renameNonce = useRef(0);
-  const scrollNonce = useRef(0);
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<ReadonlySet<string>>(() => new Set());
   const [renameRequest, setRenameRequest] = useState<{ id: Id; nonce: number }>();
-  const [scrollTo, setScrollTo] = useState<{ id: Id; nonce: number }>();
+  const [revealScroll, setRevealScroll] = useState<{ id: Id; nonce: number }>();
+  /** The selection the panel last opened groups and scrolled for, and that scroll request's number. */
+  const [followed, setFollowed] = useState<{ layers: readonly Id[] | null; nonce: number }>({ layers: null, nonce: 0 });
   const [collapsedByComponent, setCollapsedByComponent] = useState<Readonly<Record<Id, ReadonlySet<Id>>>>({});
   const [fileDrop, setFileDrop] = useState<{ layerId: Id | null; label: string } | null>(null);
   const drag = useCableDrag(session);
@@ -271,20 +300,24 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     [componentId, layers],
   );
 
-  useEffect(() => {
-    if (selectedLayers.length === 0) return;
+  // A selection opens the groups its layers are in and scrolls to the last one. Both are worked out
+  // while rendering, so the tree draws once per selection, with the row there to scroll to. Only a
+  // selection change expands: collapsing a selected layer's parent must stick.
+  if (followed.layers !== selectedLayers) {
+    setFollowed({ layers: selectedLayers, nonce: ++scrollRequests });
     expandTo(selectedLayers);
-    setScrollTo({ id: selectedLayers.at(-1)!, nonce: ++scrollNonce.current });
-    // Only a selection change should expand; collapsing a selected layer's parent must stick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayers]);
+  }
+  const selectionScroll = { id: selectedLayers.at(-1), nonce: followed.nonce };
+  // The newer of the two requests. An emptied selection is a request too, for no row: an older reveal must not come back.
+  const scrollRequest = revealScroll && revealScroll.nonce > selectionScroll.nonce ? revealScroll : selectionScroll;
+  const scrollTo = scrollRequest.id === undefined ? undefined : { id: scrollRequest.id, nonce: scrollRequest.nonce };
 
   useEffect(() => {
     if (!reveal || reveal.component !== componentId) return;
     const revealed = reveal.ids.filter((id) => findLayer(layers, id));
     if (revealed.length === 0) return;
     expandTo(revealed);
-    setScrollTo({ id: revealed[0]!, nonce: ++scrollNonce.current });
+    setRevealScroll({ id: revealed[0]!, nonce: ++scrollRequests });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal?.nonce]);
 
@@ -524,9 +557,6 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
     ];
   };
 
-  const highlighted =
-    hovered && hovered.component === componentId && hovered.source !== "layers" && (hovered.kind === "layer" || (hovered.kind === "port" && hovered.address?.startsWith("@"))) ? hovered.id : null;
-
   const onPointerOver = (event: PointerEvent<HTMLDivElement>) => {
     const row = (event.target as Element).closest?.(".sb-tree__row");
     const id = row?.querySelector("[data-layer-id]")?.getAttribute("data-layer-id") ?? null;
@@ -749,11 +779,7 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
             isDimmed={isHidden}
             // A cable released anywhere on a row lists that layer's properties (the patch editor looks for these attributes).
             getRowProps={accepting ? (node) => layerDropAttributes(node.id) : undefined}
-            renderIcon={(node) => (
-              <span className="sb-layerspanel__icon" data-layer-id={node.id} data-kind={node.type === COMPONENT_INSTANCE_LAYER_TYPE ? "component" : undefined}>
-                <LayerTypeIcon type={node.type} size={14} />
-              </span>
-            )}
+            renderIcon={(node) => <LayerRowIcon id={node.id} type={node.type} />}
             renderTrailing={(node) => {
               const accepts = accepting?.has(node.id) ?? false;
               const cableOver = accepts && cableHover === layerHoverKey(node.id);

@@ -11,10 +11,12 @@ export interface EmptyStateProps {
   size?: "sm" | "md";
   /** tile: a centered block with an icon tile. inline: a left-aligned line of text with its action after it. */
   variant?: "tile" | "inline";
+  /** "alert" when it reports a problem that just happened, so a screen reader says it. */
+  role?: "alert" | "status";
   className?: string;
 }
 
-export function EmptyState({ icon, title, description, actions, size = "md", variant = "tile", className }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, actions, size = "md", variant = "tile", role, className }: EmptyStateProps) {
   const inline = variant === "inline";
   const mark = icon && (
     <span className="sb-empty__icon" aria-hidden>
@@ -22,7 +24,7 @@ export function EmptyState({ icon, title, description, actions, size = "md", var
     </span>
   );
   return (
-    <div className={cx("sb-empty", className)} data-size={size} data-variant={variant}>
+    <div className={cx("sb-empty", className)} data-size={size} data-variant={variant} role={role}>
       {!inline && mark}
       <div className="sb-empty__title">
         {inline && mark}

@@ -11,6 +11,7 @@ import type { ImportOutcome } from "../panels/import/importDesign.ts";
 import type { SelectionState } from "../state/selection.ts";
 import type { EditorSession } from "../state/session.ts";
 import { layoutStore, type LayoutStore } from "../shell/layoutStore.ts";
+import { failRender } from "../ui/ErrorBoundary.tsx";
 
 export interface SonobeTestHook {
   readonly session: EditorSession;
@@ -29,6 +30,12 @@ export interface SonobeTestHook {
   importHtml(html: string, options?: { name?: string; replace?: string }): Promise<ImportOutcome>;
   /** Show an MCP client's preview_design update on the canvas, as the desktop's design.preview RPC does (the same checks). */
   previewDesign(update: DesignPreviewUpdate): { applied: boolean };
+  /**
+   * Make the part of the editor whose boundary has this name throw on its next render ("The Inspector",
+   * "Layers"; "Sonobe" is the whole editor, which shows the recovery screen and takes this hook away with it).
+   * With `on` false it stops failing, and the panel's Try again brings it back.
+   */
+  failRender(name: string, on?: boolean): void;
 }
 
 declare global {
@@ -65,6 +72,7 @@ export function installTestHook(session: EditorSession, target: Window = window)
     // Imported on use: a static import would put the whole design-import pipeline in the startup chunk.
     importHtml: async (html, options = {}) => (await import("../panels/import/importDesign.ts")).importDesign(session, { html, ...options }, { desktop: null }),
     previewDesign: (update) => handleDesignPreview(session, update),
+    failRender,
   };
   target.__sonobe = hook;
   return () => {

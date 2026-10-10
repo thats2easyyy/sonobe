@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { CommandProvider } from "../../ui/commands/CommandProvider.tsx";
+import { failRender } from "../../ui/ErrorBoundary.tsx";
 import { Hud, type HudProps } from "./Hud.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -112,6 +113,26 @@ describe("Hud", () => {
     expect(section.querySelector("h3")?.textContent).toBe("Slowest patches");
     expect([...section.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["spring0.40 ms", "flip0.10 ms"]);
     expect(container.querySelector(".sb-perfx__stats")?.textContent).not.toContain("Slowest patches");
+  });
+
+  it("says a problem in the tab that threw, and leaves the bar and the Console readable", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    session.console.getState().push("error", "Something broke");
+    session.console.getState().flush();
+    render({ defaultTab: "performance" });
+    const bar = container.querySelector(".sb-hudx__bar");
+    act(() => failRender("The Performance tab"));
+    expect(container.querySelector(".sb-surface-problem .sb-empty__title")?.textContent).toBe("The Performance tab hit a problem");
+    expect(container.querySelector(".sb-hudx__bar")).toBe(bar);
+
+    act(() => tab("Console").click());
+    expect(container.querySelector(".sb-logrow")?.textContent).toContain("Something broke");
+
+    failRender("The Performance tab", false);
+    act(() => tab("Performance").click());
+    act(() => container.querySelector<HTMLButtonElement>(".sb-surface-problem button")!.click());
+    expect(container.querySelector(".sb-surface-problem")).toBeNull();
+    vi.restoreAllMocks();
   });
 
   it("keeps the Diagnostics severity filter across tab switches", () => {

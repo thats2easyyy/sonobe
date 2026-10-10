@@ -1,0 +1,82 @@
+/* The recovery screen and the last resort (errorReports.ts): a window-sized page in the shell's own tones. */
+.sb-recovery {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-window);
+  color: var(--text-primary);
+}
+
+.sb-recovery__drag {
+  flex: none;
+  height: var(--toolbar-h);
+  -webkit-app-region: drag;
+}
+
+.sb-recovery__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 560px;
+  min-height: 0;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+  overflow: auto;
+}
+
+.sb-recovery__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sb-recovery__text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  text-wrap: pretty;
+}
+
+.sb-recovery__draft {
+  color: var(--text-primary);
+}
+
+.sb-recovery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.sb-recovery__more {
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-recovery__more > summary {
+  width: fit-content;
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+.sb-recovery__more > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.sb-recovery__details {
+  max-height: 240px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
