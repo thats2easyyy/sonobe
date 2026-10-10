@@ -315,20 +315,28 @@ describe("AppShell containment", () => {
     expect(container.querySelector(`.body-${slot}`)?.textContent).toBe(slot);
   });
 
-  it("drops a notice that can't be drawn, tells the root which part failed, and keeps the panels", () => {
+  it("says in one line that a notice can't be drawn, tells the root which part failed, and shows the notice on Try again", () => {
     const onCaughtError = vi.fn();
     act(() => root.unmount());
     root = createRoot(container, { onCaughtError });
     renderShell({ slots: { ...slots, banner: <p className="notice">Changed on disk</p> } });
-    expect(container.querySelector(".sb-shell__banners .notice")).not.toBeNull();
+    const bar = container.querySelector(".sb-shell__banners")!;
+    expect(bar.querySelector(".notice")).not.toBeNull();
 
     act(() => failRender("The notice bar"));
-    expect(container.querySelector(".sb-shell__banners")!.childElementCount).toBe(0);
+    expect(bar.querySelector(".notice")).toBeNull();
+    expect(bar.querySelector('[role="alert"]')!.textContent).toBe("A notice couldn’t be shown here. The rest of Sonobe still works.Try again");
     expect(problem()).toBeNull();
     expect(bodies().every((body) => body !== null)).toBe(true);
-    // No sign on screen, so the report is what says it: the root's handler hears it with the boundary's name (errorReports.ts logs it).
+    // The root's handler hears it with the boundary's name (errorReports.ts logs it).
     expect(onCaughtError).toHaveBeenCalledTimes(1);
     expect((onCaughtError.mock.calls[0]![1] as { errorBoundary: { props: { name: string } } }).errorBoundary.props.name).toBe("The notice bar");
+
+    // A notice that arrives later isn't lost for the session: Try again draws the bar again.
+    failRender("The notice bar", false);
+    act(() => bar.querySelector<HTMLButtonElement>("button")!.click());
+    expect(bar.querySelector(".notice")!.textContent).toBe("Changed on disk");
+    expect(bar.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("closes a command palette that can't be drawn, with a toast, and opens it again once it can", () => {
@@ -344,12 +352,16 @@ describe("AppShell containment", () => {
     expect(document.querySelector('[role="dialog"] input, .sb-palette input')).not.toBeNull();
   });
 
-  it("leaves the toolbar when its Claude button can't be drawn", () => {
+  it("leaves the toolbar when its Claude button can't be drawn, with a button that brings it back", () => {
     renderShell({ slots: { ...slots, claude: <button className="claude">Connect Claude</button> } });
     expect(container.querySelector(".sb-toolbar .claude")).not.toBeNull();
     act(() => failRender("The Claude button"));
     expect(container.querySelector(".sb-toolbar .claude")).toBeNull();
     expect(container.querySelector(".sb-toolbar__search")).not.toBeNull();
     expect(bodies().every((body) => body !== null)).toBe(true);
+
+    failRender("The Claude button", false);
+    act(() => container.querySelector<HTMLButtonElement>('.sb-toolbar button[aria-label="The Claude button hit a problem. Try again"]')!.click());
+    expect(container.querySelector(".sb-toolbar .claude")!.textContent).toBe("Connect Claude");
   });
 });

@@ -1,9 +1,11 @@
 import { DEFAULT_DEVICE } from "@sonobe/core";
-import { Layers, SlidersHorizontal, Smartphone } from "lucide-react";
+import { Layers, SlidersHorizontal, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAssistant } from "../panels/assistant/assistantStore.ts";
+import { Button } from "../ui/Button.tsx";
 import { CommandPalette } from "../ui/CommandPalette.tsx";
-import { DialogBoundary, ErrorBoundary } from "../ui/ErrorBoundary.tsx";
+import { DialogBoundary, ErrorBoundary, type BoundaryProblem } from "../ui/ErrorBoundary.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { Splitter } from "../ui/Splitter.tsx";
 import { getFocusable } from "../ui/lib/focus.ts";
 import { observeResize } from "../ui/lib/observeResize.ts";
@@ -50,7 +52,18 @@ export interface AppShellProps {
 }
 
 const noop = () => undefined;
-const nothing = () => null;
+
+// The two parts with no room for a SurfaceProblem say it in the room they have, and can be tried again: a notice that
+// stayed hidden could be the one that says the project changed on disk.
+const noticeProblem = ({ retry }: BoundaryProblem) => (
+  <div className="sb-shell__notice-problem" role="alert">
+    <span>A notice couldn’t be shown here. The rest of Sonobe still works.</span>
+    <Button size="sm" variant="ghost" onClick={retry}>
+      Try again
+    </Button>
+  </div>
+);
+const claudeProblem = ({ retry }: BoundaryProblem) => <IconButton icon={<TriangleAlert size={16} strokeWidth={1.75} />} label="The Claude button hit a problem. Try again" onClick={retry} />;
 
 /** What each panel slot is called when it fails, and the panel that says so. Every slot is contained here, whatever fills it. */
 const SLOT_PANELS = {
@@ -218,14 +231,13 @@ export function AppShell({
         onRestart={onRestart}
         onOpenPalette={() => setPaletteOpen(true)}
         claude={
-          <ErrorBoundary name="The Claude button" fallback={nothing}>
+          <ErrorBoundary name="The Claude button" fallback={claudeProblem}>
             {slots.claude}
           </ErrorBoundary>
         }
       />
       <div ref={bannersRef} className="sb-shell__banners">
-        {/* A notice that can't be drawn takes no room; the console still gets the error. */}
-        <ErrorBoundary name="The notice bar" fallback={nothing}>
+        <ErrorBoundary name="The notice bar" fallback={noticeProblem}>
           {slots.banner}
         </ErrorBoundary>
       </div>

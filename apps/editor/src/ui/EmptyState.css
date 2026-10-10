@@ -103,3 +103,8 @@
 .sb-empty[data-variant="inline"] .sb-empty__actions {
   margin: 0;
 }
+
+/* A failed part's message (SurfaceProblem) can sit in a box taller than its text, such as a drawer or the bottom panel: its lines stay together at the top. */
+.sb-surface-problem {
+  align-content: flex-start;
+}

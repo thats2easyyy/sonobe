@@ -255,6 +255,24 @@
   flex: none;
 }
 
+/* The notice bar when its notices can't be drawn: one line, the height of a notice. */
+.sb-shell__notice-problem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--warn-soft);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.sb-shell__notice-problem > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Main layout */
 .sb-shell__main {
   position: relative;
