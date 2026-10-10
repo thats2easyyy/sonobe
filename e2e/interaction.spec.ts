@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, newIds, openEditor, patchIds, patchesOfType, runCommand, screenshot, storedInput, touchLayer, waitForPrototype } from "./helpers.ts";
 
 test.describe("building an interaction in the UI", () => {
@@ -377,5 +377,71 @@ test.describe("patch editor chrome and graph states", () => {
     await crumbs.getByRole("button", { name: "1 more level" }).click();
     await page.getByRole("menuitem", { name: "Swipe to dismiss card with rubber banding" }).click();
     await expect(crumbs.locator("[aria-current]")).toHaveText("Swipe to dismiss card with rubber banding");
+  });
+});
+
+test.describe("the Inspector across selections", () => {
+  /** Two rectangles, so selecting one after the other keeps every Inspector row. */
+  async function twoLayers(page: Page) {
+    await openEditor(page);
+    const applied = await hook(page, (s) => {
+      const result = s.apply(
+        [
+          { op: "addLayer", layer: { id: "insp_a", type: "rectangle", name: "Insp A", props: { opacity: 0.5, rotation: 10 } } },
+          { op: "addLayer", layer: { id: "insp_b", type: "rectangle", name: "Insp B", props: { opacity: 0.25, rotation: 20 } } },
+        ],
+        "Two layers",
+      );
+      s.session.selection.getState().select({ layers: ["insp_a"] });
+      return result.ok;
+    });
+    expect(applied).toBe(true);
+  }
+  const opacityOf = (page: Page, id: string) => hook(page, (s, id) => s.doc().components[s.doc().project.root]!.layers.find((l) => l.id === id)!.props.opacity, id);
+  const selectByHook = (page: Page, id: string) => hook(page, (s, id) => s.session.selection.getState().select({ layers: [id] }), id);
+
+  test("a number typed for one layer is never written to the layer selected next", async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+    await twoLayers(page);
+    const opacity = page.locator('.sb-insp input[aria-label="Opacity"]');
+    await expect(opacity).toHaveValue("50");
+    await opacity.click();
+    await page.keyboard.type("33");
+    // Pressing a Layers row takes focus first, which commits the number to the layer it was typed for.
+    await page.locator(".sb-layerspanel").getByRole("treeitem", { name: "Insp B" }).click();
+    await expect(opacity).toHaveValue("25");
+    expect(await opacityOf(page, "insp_a")).toBe(0.33);
+    expect(await opacityOf(page, "insp_b")).toBe(0.25);
+
+    // With no blur before the selection changes (Claude selects, undo brings a selection back), the draft is dropped.
+    await opacity.click();
+    await page.keyboard.type("44");
+    await selectByHook(page, "insp_a");
+    await expect(opacity).toHaveValue("33");
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await page.locator(".sb-layerspanel").getByRole("treeitem", { name: "Insp B" }).click();
+    await expect(opacity).toHaveValue("25");
+    expect(await opacityOf(page, "insp_a")).toBe(0.33);
+    expect(await opacityOf(page, "insp_b")).toBe(0.25);
+    expect(problems).toEqual([]);
+  });
+
+  test("its rows stay for the next layer, scrolled where they were, and focus leaves them", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 700 });
+    await twoLayers(page);
+    const scroller = page.locator(".sb-insp.sb-scroll");
+    const row = page.locator(".sb-insp-row", { has: page.locator('input[aria-label="Opacity"]') });
+    await row.evaluate((el) => void ((el as HTMLElement & { kept?: boolean }).kept = true));
+    await scroller.evaluate((el) => void (el.scrollTop = 150));
+    const fill = page.locator(".sb-insp-section__toggle", { hasText: "Fill" });
+    await fill.focus();
+    await expect(fill).toBeFocused();
+
+    await selectByHook(page, "insp_b");
+    await expect(page.locator('.sb-insp input[aria-label="Name"]')).toHaveValue("Insp B");
+    expect(await row.evaluate((el) => (el as HTMLElement & { kept?: boolean }).kept === true)).toBe(true);
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBe(150);
+    // A button that stays is another layer's now: focus leaves it, as it left the Inspector that was rebuilt before.
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   });
 });

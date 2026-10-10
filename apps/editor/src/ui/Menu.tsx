@@ -360,11 +360,15 @@ export interface ContextMenuProps {
   entries: readonly MenuEntry[] | (() => readonly MenuEntry[]);
   children: ReactElement;
   disabled?: boolean;
+  /** Closes an open menu when it changes: its entries were made for what the target showed when it opened. */
+  dismissKey?: unknown;
 }
 
 /** Right-click (or Shift+F10 / the Menu key) opens a menu at the pointer. */
-export function ContextMenu({ entries, children, disabled = false }: ContextMenuProps) {
+export function ContextMenu({ entries, children, disabled = false, dismissKey }: ContextMenuProps) {
   const menu = useContextMenu();
+  const { close } = menu;
+  useEffect(() => close(), [close, dismissKey]);
   const child = Children.only(children) as ReactElement<ContextTargetProps>;
   const resolve = () => (typeof entries === "function" ? entries() : entries);
   const target = cloneElement(child, {

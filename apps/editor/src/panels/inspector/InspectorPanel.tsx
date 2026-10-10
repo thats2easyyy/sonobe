@@ -20,6 +20,7 @@ import { LayerInspector } from "./LayerInspector.tsx";
 import { countLabel, sameInputValue, summarizeField, type FieldPort } from "./model.ts";
 import { PatchInspector } from "./PatchInspector.tsx";
 import { InspectorSection } from "./Section.tsx";
+import { subjectKey, SubjectProvider } from "./subject.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 import "./Inspector.css";
 
@@ -41,6 +42,10 @@ const TABS_ID = "sb-insp-tabs";
  * patches get docs, options, spring presets with a curve and handoff code, inputs, and live
  * outputs. Nothing selected shows the component's summary and notes. The Knobs tab shows the
  * project's knobs and presets, and stays put as the selection changes.
+ *
+ * Selecting other layers keeps the layer inspector mounted: its rows and sections are the same
+ * elements for the next layer, and what belonged to the last one is let go on purpose (subject.ts).
+ * A patch inspector is still built anew for each selection.
  */
 export function InspectorPanel({ onCollapse, onLearnMore, className }: InspectorPanelProps) {
   const session = useEditorSession();
@@ -98,9 +103,11 @@ export function InspectorPanel({ onCollapse, onLearnMore, className }: Inspector
           )}
           {/* A failure here usually belongs to what's selected: the tabs stay, and selecting something else clears it. */}
           <ErrorBoundary name="The Properties tab" resetKey={`${mode}:${layers.join(",")}:${patches.join(",")}`}>
-            {mode === "layers" && <LayerInspector key={layers.join(",")} layerIds={layers} />}
-            {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
-            {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+            <SubjectProvider value={mode === "layers" ? subjectKey("layers", layers) : mode === "patches" ? subjectKey("patches", patches) : subjectKey("none")}>
+              {mode === "layers" && <LayerInspector layerIds={layers} />}
+              {mode === "patches" && <PatchInspector key={patches.join(",")} patchIds={patches} {...(onLearnMore ? { onLearnMore } : {})} />}
+              {mode === "none" && <EmptyInspector commentCount={comments.length} />}
+            </SubjectProvider>
           </ErrorBoundary>
         </div>
       )}

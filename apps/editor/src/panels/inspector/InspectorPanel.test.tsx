@@ -923,3 +923,278 @@ describe("InspectorPanel: rows, sections and controls", () => {
     expect(chip.querySelector(".sb-insp-chip__tail")?.textContent).toBe(".output");
   });
 });
+
+/**
+ * The layer inspector stays mounted when the selection changes, so each thing that belonged to the
+ * last selection is let go, or carried, on purpose. One case each.
+ */
+describe("InspectorPanel: selecting other layers while it stays mounted", () => {
+  const sectionOf = (title: string) => [...container.querySelectorAll<HTMLElement>("section")].find((el) => el.getAttribute("aria-label") === title)!;
+  const toggleOf = (title: string) => sectionOf(title).querySelector<HTMLButtonElement>(".sb-insp-section__toggle")!;
+  const textarea = (label: string) => container.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)!;
+  const prop = (s: EditorSession, id: string, key: string) => findLayer(main(s).layers, id)!.layer.props[key];
+  const menuItems = () => document.querySelectorAll('[role="menuitem"]');
+  const contextMenu = (row: Element) =>
+    act(() => {
+      row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+    });
+
+  /** Two layers of each type, so a selection change keeps every row. */
+  const pairs = () =>
+    build([
+      { op: "addLayer", layer: { id: "card", type: "rectangle", name: "Card", props: { opacity: 0.5, size: [100, 80], rotation: 10, strokeWidth: 2 } } },
+      { op: "addLayer", layer: { id: "tile", type: "rectangle", name: "Tile", props: { opacity: 0.25, size: [40, 40], rotation: 20 } } },
+      { op: "addLayer", layer: { id: "title", type: "text", name: "Title", props: { text: "Hello" } } },
+      { op: "addLayer", layer: { id: "note", type: "text", name: "Note", props: { text: "World" } } },
+      { op: "addLayer", layer: { id: "hero", type: "image", name: "Hero" } },
+      { op: "addLayer", layer: { id: "cover", type: "image", name: "Cover" } },
+      { op: "addLayer", layer: { id: "glow", type: "shader", name: "Glow" } },
+      { op: "addLayer", layer: { id: "haze", type: "shader", name: "Haze" } },
+      { op: "addLayer", layer: { id: "dawn", type: "gradient", name: "Dawn" } },
+      { op: "addLayer", layer: { id: "dusk", type: "gradient", name: "Dusk" } },
+    ]);
+
+  it("keeps its sections and rows, showing the next layer's values", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    const row = rowNamed("Opacity");
+    const section = sectionOf("Basics");
+    const shown = input("Opacity").value;
+    select(s, { layers: ["tile"] });
+    expect(rowNamed("Opacity")).toBe(row);
+    expect(sectionOf("Basics")).toBe(section);
+    expect(input("Name").value).toBe("Tile");
+    expect(input("Opacity").value).not.toBe(shown);
+    // Another type keeps what the two share, too.
+    select(s, { layers: ["title"] });
+    expect(rowNamed("Opacity")).toBe(row);
+  });
+
+  it("drops a number being typed: it is on neither layer, and a later blur writes nothing", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    const opacity = input("Opacity");
+    act(() => opacity.focus());
+    type(opacity, "75");
+    select(s, { layers: ["tile"] });
+    expect(opacity.isConnected).toBe(false);
+    const next = input("Opacity");
+    act(() => {
+      next.focus();
+      next.blur();
+    });
+    expect(prop(s, "card", "opacity")).toBe(0.5);
+    expect(prop(s, "tile", "opacity")).toBe(0.25);
+    expect(s.document.getState().historyEntries()).toHaveLength(0);
+  });
+
+  it("ends a scrub under way as one undo step on the layer it began on", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    const field = input("Rotation").closest(".sb-scrub")!;
+    const fire = (type: string, clientX: number) =>
+      act(() => {
+        field.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX, clientY: 0, pointerId: 7, button: 0 }));
+      });
+    fire("pointerdown", 100);
+    for (const x of [106, 112, 118]) fire("pointermove", x);
+    expect(s.document.getState().gesture).not.toBeNull();
+    const scrubbed = prop(s, "card", "rotation");
+    expect(scrubbed).not.toBe(10);
+
+    select(s, { layers: ["tile"] });
+    expect(s.document.getState().gesture).toBeNull();
+    expect(document.documentElement.hasAttribute("data-scrubbing")).toBe(false);
+    // The pointer still down moves on: nothing listens.
+    fire("pointermove", 140);
+    fire("pointerup", 140);
+    expect(prop(s, "card", "rotation")).toBe(scrubbed);
+    expect(prop(s, "tile", "rotation")).toBe(20);
+    expect(s.document.getState().historyEntries().map((e) => e.label)).toEqual(["Set Rotation on Card"]);
+  });
+
+  it("drops a text being typed and a JSON draft", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["title"] });
+    type(textarea("Text"), "Half a thou");
+    select(s, { layers: ["note"] });
+    expect(textarea("Text").value).toBe("World");
+    act(() => textarea("Text").blur());
+    expect(prop(s, "title", "text")).toBe("Hello");
+    expect(prop(s, "note", "text")).toBe("World");
+
+    select(s, { layers: ["glow"] });
+    click(buttonWithText("More (1)", sectionOf("Content")));
+    type(textarea("Uniforms"), '{"uStrength": 0.5');
+    select(s, { layers: ["haze"] });
+    click(buttonWithText("More (1)", sectionOf("Content")));
+    expect(textarea("Uniforms").value).toBe("");
+    expect(container.querySelector('.sb-insp-hint[data-tone="danger"]')).toBeNull();
+    expect(prop(s, "glow", "uniforms")).toBeUndefined();
+    expect(s.document.getState().historyEntries()).toHaveLength(0);
+  });
+
+  it("drops a name being typed in the header", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    const name = input("Name");
+    act(() => name.focus());
+    type(name, "Renamed");
+    select(s, { layers: ["tile"] });
+    expect(name.isConnected).toBe(false);
+    expect(input("Name").value).toBe("Tile");
+    act(() => {
+      input("Name").focus();
+      input("Name").blur();
+    });
+    expect(findLayer(main(s).layers, "card")!.layer.name).toBe("Card");
+    expect(findLayer(main(s).layers, "tile")!.layer.name).toBe("Tile");
+  });
+
+  it("closes an open color picker, an open choice list, a row's menu and the Layer options menu", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    click(container.querySelector('button[aria-label^="Color: "]'));
+    expect(document.querySelector(".sb-colorpicker-popover")).not.toBeNull();
+    select(s, { layers: ["tile"] });
+    expect(document.querySelector(".sb-colorpicker-popover")).toBeNull();
+
+    contextMenu(rowNamed("Opacity"));
+    expect(menuItem("Reset to Default")).toBeDefined();
+    select(s, { layers: ["card"] });
+    expect(menuItems()).toHaveLength(0);
+
+    click(button("Layer options"));
+    expect(menuItem("Copy Layer Id")).toBeDefined();
+    select(s, { layers: ["tile"] });
+    expect(menuItems()).toHaveLength(0);
+
+    select(s, { layers: ["hero"] });
+    click(container.querySelector('button[aria-label^="Image: "]'));
+    expect(option("Import File…")).toBeDefined();
+    select(s, { layers: ["cover"] });
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+  });
+
+  it("closes the Make Knob popover", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    contextMenu(rowNamed("Opacity"));
+    click(menuItem("Make Knob…"));
+    expect(document.querySelector(".sb-knob-popover")).not.toBeNull();
+    select(s, { layers: ["tile"] });
+    expect(document.querySelector(".sb-knob-popover")).toBeNull();
+    expect(s.document.getState().doc.knobs?.knobs ?? []).toHaveLength(0);
+  });
+
+  it("keeps a section closed by hand closed, opens or shuts an untouched one by the next layer, and shuts More", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    // Card has a stroke, so Stroke starts open; nobody has touched it.
+    expect(toggleOf("Stroke").getAttribute("aria-expanded")).toBe("true");
+    click(toggleOf("Basics"));
+    click(buttonWithText("More (4)", sectionOf("Transform")));
+    expect(input("Z Position")).not.toBeNull();
+
+    select(s, { layers: ["tile"] });
+    expect(toggleOf("Stroke").getAttribute("aria-expanded")).toBe("false");
+    expect(toggleOf("Basics").getAttribute("aria-expanded")).toBe("false");
+    expect(input("Z Position")).toBeNull();
+    expect(buttonWithText("More (4)", sectionOf("Transform"))).toBeDefined();
+
+    select(s, { layers: ["card"] });
+    expect(toggleOf("Stroke").getAttribute("aria-expanded")).toBe("true");
+    expect(toggleOf("Basics").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("puts an import that was still running on the layer it was started for, from the picker and from a drop", async () => {
+    const s = mount(pairs());
+    const service = createAssetService({ document: s.document, host: null, probe: async () => ({ width: 64, height: 48 }) });
+    let release = () => {};
+    vi.spyOn(s.assets, "importFile").mockImplementation(async (file, options) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return service.importFile(file, options);
+    });
+
+    select(s, { layers: ["hero"] });
+    const picker = container.querySelector<HTMLInputElement>('input[type="file"][aria-label="Import a file for Image"]')!;
+    Object.defineProperty(picker, "files", { configurable: true, value: [png(1, "Hero Shot.png")] });
+    await act(async () => {
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    select(s, { layers: ["cover"] });
+    expect(container.textContent).not.toContain("Importing…");
+    await act(async () => release());
+    await eventually(() => expect(prop(s, "hero", "image")).toMatchObject({ asset: expect.any(String) }));
+    expect(prop(s, "cover", "image")).toBeUndefined();
+
+    await act(async () => {
+      rowNamed("Image").dispatchEvent(dragEvent("drop", fileTransfer([png(2, "sky.png")])));
+    });
+    select(s, { layers: ["hero"] });
+    await act(async () => release());
+    await eventually(() => expect(prop(s, "cover", "image")).toMatchObject({ asset: "sky" }));
+    expect(prop(s, "hero", "image")).not.toMatchObject({ asset: "sky" });
+  });
+
+  it("starts the size lock and the gradient's chosen stop over", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    click(button("Link proportions"));
+    expect(button("Unlink proportions")).not.toBeNull();
+    select(s, { layers: ["tile"] });
+    expect(button("Unlink proportions")).toBeNull();
+    expect(button("Link proportions")).not.toBeNull();
+
+    select(s, { layers: ["dawn"] });
+    const stop = (n: number) => container.querySelector<HTMLElement>(`[role="slider"][aria-label="Gradient stop ${n}"]`)!;
+    act(() => {
+      stop(2).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, clientX: 10, clientY: 0, pointerId: 4, button: 0 }));
+      stop(2).dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, clientX: 10, clientY: 0, pointerId: 4, button: 0 }));
+    });
+    expect(stop(2).hasAttribute("data-active")).toBe(true);
+    select(s, { layers: ["dusk"] });
+    expect(stop(1).hasAttribute("data-active")).toBe(true);
+    expect(stop(2).hasAttribute("data-active")).toBe(false);
+  });
+
+  it("lets go of the port a row under the pointer lit elsewhere", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    act(() => {
+      rowNamed("Opacity").dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    expect(s.selection.getState().hovered).toMatchObject({ kind: "port", address: "@card.opacity", source: "inspector" });
+    select(s, { layers: ["tile"] });
+    expect(s.selection.getState().hovered).toBeNull();
+  });
+
+  it("takes focus off a button that stays for the next layer, as a rebuilt Inspector did", () => {
+    const s = mount(pairs());
+    select(s, { layers: ["card"] });
+    const toggle = toggleOf("Fill");
+    act(() => toggle.focus());
+    expect(document.activeElement).toBe(toggle);
+    select(s, { layers: ["tile"] });
+    expect(toggleOf("Fill")).toBe(toggle);
+    expect(document.activeElement).toBe(document.body);
+    // Focus elsewhere is left alone.
+    const outside = document.body.appendChild(document.createElement("button"));
+    act(() => outside.focus());
+    select(s, { layers: ["card"] });
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("builds a patch inspector anew: the port-change card and the open docs don't follow to the next patch", () => {
+    const s = mount(fixture());
+    select(s, { patches: ["grow"] });
+    click(buttonWithText("Learn more"));
+    click(button("Value type: Number"));
+    click(option("Color"));
+    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    select(s, { patches: ["pop"] });
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(container.querySelector(".sb-insp-docs")).toBeNull();
+    expect(main(s).patches.grow!.typeParam).toBe("number");
+  });
+});
