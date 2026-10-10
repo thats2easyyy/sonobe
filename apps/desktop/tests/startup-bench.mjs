@@ -9,8 +9,13 @@
  *   viewer's first frame are in the page), patch editor nodes
  *
  * and the intervals a change to launch moves: the main bundle's compile and evaluation, ready to the first
- * window, the window to the committed navigation, and that to the first React commit (with a project: to the
- * opened document, and from the window being shown to it).
+ * window, the window to the committed navigation, and that to the first React commit.
+ *
+ * With a project there are two more rows, and they are different moments. "Opened document in the page" is when
+ * the toolbar has its name and the viewer has its elements: the DOM, which nobody sees until a frame is drawn.
+ * "Opened document on screen" is the first moment a person can see it: the latest of that, the page's first
+ * contentful paint and the window being shown. A build that starts the editor on the project has the document in
+ * the page before the first paint; one that shows the demo first has it there after. Compare the on-screen rows.
  *
  *   npm run package -w @sonobe/desktop                    the app to time
  *   npm run bench:startup -w @sonobe/desktop              release/mac-<arch>/Sonobe.app
@@ -21,9 +26,12 @@
  *   --dev                     the checkout instead of a package (electron apps/desktop; build the editor and the
  *                             shell first)
  *   --scenarios noarg,project,fresh   noarg: no argument, one profile kept across runs. project: opens a copy of
- *                             examples/02-like-toggle, and adds "opened document on screen" and every document
- *                             name the toolbar showed. fresh: a new profile every run, which is a first launch
- *                             (the welcome dialog, and no compile cache yet). Default: all three.
+ *                             examples/02-like-toggle, and adds the opened document's two rows and every
+ *                             document name the toolbar showed. fresh: a new profile every run, which is a first
+ *                             launch (the welcome dialog, and no compile cache yet). Default: all three.
+ *   --project <folder>        the prototype the project scenario opens a copy of, instead of the example: a
+ *                             larger one takes longer to read, and the first frame waits for it. Never one that
+ *                             uses the Camera or Microphone patch: a launch is muted, not blind.
  *   --runs 7                  timed launches per scenario and app, after one that isn't counted
  *   --cli                     also the bundled CLI: `sonobe --version`, and `sonobe mcp` against the running app
  *                             (time to its first answer, and its resident memory then)
@@ -63,6 +71,7 @@ const { values } = parseArgs({
     baseline: { type: "string" },
     dev: { type: "boolean", default: false },
     scenarios: { type: "string", default: "noarg,project,fresh" },
+    project: { type: "string" },
     runs: { type: "string", default: "7" },
     cli: { type: "boolean", default: false },
     "base-port": { type: "string" },
@@ -87,6 +96,15 @@ if (!Number.isInteger(runs) || runs < 1) fail(`--runs must be a whole number of 
 const basePort = values["base-port"] === undefined ? null : Number(values["base-port"]);
 if (basePort !== null && !(Number.isInteger(basePort) && basePort > 0 && basePort < 65436)) fail(`--base-port must be a port with 100 free above it (got ${values["base-port"]}).`);
 if (process.platform !== "darwin") fail("The startup benchmark runs on macOS only: it copies and re-signs a Sonobe.app.");
+/** The prototype the project scenario opens a copy of, and the name its toolbar shows. */
+const projectSource = path.resolve(values.project ?? path.join(repo, "examples", "02-like-toggle"));
+let projectName;
+try {
+  projectName = JSON.parse(readFileSync(path.join(projectSource, "project.json"), "utf8")).name;
+} catch {
+  projectName = undefined;
+}
+if (scenarios.includes("project") && (typeof projectName !== "string" || !projectName)) fail(`${projectSource} isn't a Sonobe prototype: it has no project.json with a name.`, "Pass --project <a prototype's folder>, or leave it out for examples/02-like-toggle.");
 
 const defaultApp = path.join(root, "release", `mac-${process.arch}`, "Sonobe.app");
 const appPath = path.resolve(values.app ?? defaultApp);
@@ -218,9 +236,12 @@ async function launch(target, { profile, project, welcome }) {
     "first contentful paint": page(raw.page?.paint["first-contentful-paint"]),
     "editor usable": page(raw.page?.marks.usable),
     "patch editor nodes": page(raw.page?.marks.patchNodes),
-    ...(project ? { "opened document on screen": page(raw.page?.marks.opened) } : {}),
+    ...(project ? { "opened document in the page": page(raw.page?.marks.opened) } : {}),
     ...(welcome ? { "welcome dialog": page(raw.page?.marks.welcome) } : {}),
   };
+  // In the page is not on screen: a person sees the document with the first frame drawn after it, in a window that is showing.
+  const seen = [at["opened document in the page"], at["first contentful paint"], at["window shown"]];
+  if (project) at["opened document on screen"] = seen.every((time) => time !== undefined) ? Math.max(...seen) : undefined;
   const intervals = {
     "main bundle: compile and evaluate": between(main("mainCompileStart"), main("mainEvaluated")),
     "ready → window created": between(main("ready"), main("windowCreated")),
@@ -228,9 +249,8 @@ async function launch(target, { profile, project, welcome }) {
     "navigation committed → first React commit": between(main("navigated"), at["first React commit"]),
     ...(project
       ? {
-          "navigation committed → opened document": between(main("navigated"), at["opened document on screen"]),
-          // Negative when the document was in the page before the window was on screen.
-          "window shown → opened document": between(at["window shown"], at["opened document on screen"]),
+          "navigation committed → opened document in the page": between(main("navigated"), at["opened document in the page"]),
+          "window shown → opened document on screen": between(at["window shown"], at["opened document on screen"]),
         }
       : {}),
   };
@@ -251,7 +271,7 @@ const difference = (s) => (s ? `${signed(s.median)} [${signed(s.min)} to ${signe
 /** One table: a row per name, a column per app, and with two apps the difference of each pair of runs. */
 function table(title, names, byTarget, targets) {
   const out = {};
-  const widths = [44, 20, 20, 24];
+  const widths = [54, 20, 20, 24];
   const line = (cells) => console.log(cells.map((text, i) => String(text).padEnd(widths[i])).join("").trimEnd());
   console.log(`\n${title}`);
   line(["", ...targets.map((t) => t.name), ...(targets.length === 2 ? ["difference, by pair"] : [])]);
@@ -284,8 +304,8 @@ try {
   for (const target of targets) if (target.packaged) await launch(target, { profile: path.join(temp, `first-${target.name}`) });
 
   for (const scenario of scenarios) {
-    const project = scenario === "project" ? path.join(temp, "Like Toggle.sonobe") : null;
-    if (project && !existsSync(project)) cpSync(path.join(repo, "examples", "02-like-toggle"), project, { recursive: true });
+    const project = scenario === "project" ? path.join(temp, `${projectName}.sonobe`) : null;
+    if (project && !existsSync(project)) cpSync(projectSource, project, { recursive: true });
     const welcome = scenario === "fresh";
     const results = Object.fromEntries(targets.map((t) => [t.name, []]));
     for (let i = 0; i <= runs; i++) {
@@ -320,7 +340,7 @@ try {
       if (all.some((run) => run.compileCache)) notes.push(`compile cache warm in ${all.filter((run) => run.cached).length} of ${all.length}`);
       if (project) {
         const shown = [...new Set(all.map((run) => run.titles.join(" → ")))];
-        notes.push(`documents shown: ${shown.join("; ") || "none"}${all.some((run) => run.titles.length > 1 || (run.titles[0] && !run.titles[0].includes("Like Toggle"))) ? " (another document was on screen first)" : ""}`);
+        notes.push(`documents shown: ${shown.join("; ") || "none"}${all.some((run) => run.titles.length > 1 || (run.titles[0] && !run.titles[0].includes(projectName))) ? " (another document was on screen first)" : ""}`);
       }
       const errors = [...new Set(all.flatMap((run) => run.errors))];
       if (errors.length) notes.push(`console errors: ${errors.slice(0, 3).join(" | ")}`);

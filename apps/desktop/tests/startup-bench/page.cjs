@@ -44,7 +44,8 @@
     if (q(".sb-welcome[role=dialog]")) mark("welcome");
     if (q(".sb-pe .react-flow__node")) mark("patchNodes");
     if (marks.shell !== undefined && marks.layers !== undefined && marks.viewer !== undefined) mark("usable");
-    // The opened document counts once its name is up and the viewer has drawn it.
+    // The opened document is in the page once the toolbar has its name and the viewer its elements. That is the DOM:
+    // the benchmark adds the first paint and the window being shown to say when it was on screen.
     if (expectDoc && title.includes(expectDoc) && frame) mark("opened");
     const waiting = marks.usable === undefined || (expectDoc && marks.opened === undefined) || (expectWelcome && marks.welcome === undefined);
     if (!waiting && !settle) settle = setTimeout(report, 1000);
