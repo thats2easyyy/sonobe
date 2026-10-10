@@ -1205,8 +1205,8 @@ function main(): void {
 
   // A quit that came before `ready` (a `kill` in the app's first moments): Electron fires will-quit and quit and then `ready`
   // all the same, and from there app.quit() and app.exit() do nothing, because it has already shut down. Launch went on to
-  // create a window after the quit, and about one such launch in five never ended: no window, and the single-instance lock
-  // held until a force quit. will-quit has run with nothing to stop, so the process ends here. `process.exit` is app.exit in
+  // create a window after the quit, and some of those launches never ended: no window, and the single-instance lock held
+  // until a force quit. will-quit has run with nothing to stop, so the process ends here. `process.exit` is app.exit in
   // Electron's main process, hence Node's own exit underneath it.
   app.once("ready", () => {
     if (quitting) (process as unknown as { reallyExit(code: number): never }).reallyExit(0);
