@@ -54,16 +54,20 @@ describe("the launchers", () => {
     chmodSync(file, 0o755);
   };
 
-  /** The launcher where a packaged app has it, beside stand-ins for the app's binary and its SF Symbols helper. `under` puts the app in a subfolder. */
-  function layout(options: { app?: boolean; under?: string } = {}) {
+  /**
+   * The launcher where a packaged app has it, beside stand-ins for the app's binary and its SF Symbols helper. `under` puts the
+   * app in a subfolder, and `linux` lays it out as on Linux: the binary and `resources` side by side in that folder.
+   */
+  function layout(options: { app?: boolean; under?: string; linux?: boolean } = {}) {
     const root = realpathSync(mkdtempSync(path.join(tmpdir(), "sonobe-launcher-")));
     temps.push(root);
-    const contents = path.join(root, options.under ?? "", "Sonobe.app", "Contents");
-    const cli = path.join(contents, "Resources", "cli");
+    const contents = options.linux ? path.join(root, options.under ?? "") : path.join(root, options.under ?? "", "Sonobe.app", "Contents");
+    const resources = path.join(contents, options.linux ? "resources" : "Resources");
+    const cli = path.join(resources, "cli");
     mkdirSync(cli, { recursive: true });
     writeFileSync(path.join(cli, "sonobe"), posixLauncher("0.4.2"));
-    if (options.app !== false) fakeRuntime(path.join(contents, "MacOS", "Sonobe"), "app");
-    fakeRuntime(path.join(contents, "Resources", "bin", "sfsymbol"), "sfsymbol");
+    if (options.app !== false) fakeRuntime(options.linux ? path.join(contents, "sonobe") : path.join(contents, "MacOS", "Sonobe"), "app");
+    fakeRuntime(path.join(resources, "bin", "sfsymbol"), "sfsymbol");
     fakeRuntime(path.join(root, "bin", "node"), "node");
     fakeRuntime(path.join(root, "other-node"), "SONOBE_NODE");
     const run = (args: string[], env: Record<string, string> = {}) => {
@@ -94,7 +98,7 @@ describe("the launchers", () => {
     expect(run(["--version"], { HOME: "" })).toMatchObject({ runtime: "app", cache: "" });
   });
 
-  it.skipIf(process.platform === "win32")("sets no cache with another runtime, from a checkout, or under App Translocation", () => {
+  it.skipIf(process.platform === "win32")("sets no cache with another runtime, from a checkout, under App Translocation, or in an AppImage", () => {
     const { root, run } = layout();
     expect(run(["--version"], { SONOBE_NODE: path.join(root, "other-node") })).toMatchObject({ runtime: "SONOBE_NODE", cache: "", node_mode: "" });
     // No app around the launcher (apps/desktop/dist/cli in a checkout): `node` from PATH.
@@ -103,6 +107,10 @@ describe("the launchers", () => {
     const translocated = layout({ under: "AppTranslocation/9F1C/d" });
     expect(translocated.run(["--version"])).toMatchObject({ runtime: "app", cache: "" });
     expect(translocated.run(["mcp"]).args).toBe(`${path.join(translocated.cli, "relay.mjs")} mcp`);
+    // An AppImage is mounted at a new .mount_<random> folder each time it starts, and the same app installed in a folder isn't.
+    expect(layout({ linux: true, under: "opt/Sonobe" }).run(["--version"])).toMatchObject({ runtime: "app", cache: expect.stringMatching(/compile-cache\/cli-0\.4\.2$/) });
+    const mounted = layout({ linux: true, under: ".mount_SonobeX4kQ2b" });
+    expect(mounted.run(["--version"])).toMatchObject({ runtime: "app", args: `${path.join(mounted.cli, "sonobe.mjs")} --version`, cache: "" });
   });
 
   it.skipIf(process.platform === "win32")("still points headless imports at the app's SF Symbols helper", () => {

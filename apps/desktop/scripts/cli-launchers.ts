@@ -35,11 +35,11 @@ fi
 for APP_EXE in "$DIR/../../MacOS/Sonobe" "$DIR/../../sonobe"; do
   if [ -x "$APP_EXE" ] && [ ! -d "$APP_EXE" ]; then
     # Node's compile cache for the CLI's 9 MB, per version, in the person's Sonobe folder. The relay is too
-    # small to need one, and under App Translocation this path is new on every launch, so each run would
-    # miss and leave another entry.
+    # small to need one. Under App Translocation and in an AppImage (mounted at .mount_<random>) this path is
+    # new on every launch, so each run would miss and leave another entry.
     CACHE_HOME="\${SONOBE_HOME:-\${HOME:+$HOME/.sonobe}}"
     case "$DIR" in
-      */AppTranslocation/*) CACHE_HOME= ;;
+      */AppTranslocation/* | */.mount_*) CACHE_HOME= ;;
     esac
     if [ -z "$NODE_COMPILE_CACHE" ] && [ -n "$CACHE_HOME" ] && [ "$ENTRY" = sonobe.mjs ]; then
       NODE_COMPILE_CACHE="$CACHE_HOME/compile-cache/${cliCompileCacheKey(version)}"
