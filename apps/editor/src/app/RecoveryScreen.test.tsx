@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostAdapter } from "../host/types.ts";
 import type { DraftKeeper } from "../state/drafts.ts";
 import type { EditorSession } from "../state/session.ts";
+import { EDITOR_VERSION } from "./about.ts";
 import { clearEditorErrors } from "./errorReports.ts";
 import { RecoveryScreen } from "./RecoveryScreen.tsx";
 
@@ -202,7 +203,7 @@ describe("RecoveryScreen", () => {
     expect(text).toContain("TypeError: layer is undefined");
     expect(text).toContain(error.stack!.split("\n")[1]!.trim());
     expect(text).toContain("at Inspector");
-    expect(text).toMatch(/Sonobe 0\.1\.0 · browser · darwin · TestBrowser\/1\.0$/);
+    expect(text.endsWith(`Sonobe ${EDITOR_VERSION} · browser · darwin · TestBrowser/1.0`)).toBe(true);
     expect(button("Copied")).toBeTruthy();
   });
 

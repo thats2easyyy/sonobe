@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../state/session.ts";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
+import { EDITOR_VERSION } from "./about.ts";
 import { clearEditorErrors, errorDetails, installErrorReporting, lastEditorErrorText, recentEditorErrors, reportEditorError, rootErrorOptions, showLastResort } from "./errorReports.ts";
 
 const app = vi.hoisted(() => ({ session: null as EditorSession | null }));
@@ -127,7 +128,8 @@ describe("editor error reports", () => {
     expect(details).toContain(error.stack!.split("\n")[1]!.trim());
     expect(details).toContain("Component stack\nat Row\n    at Inspector");
     expect(details).toMatch(/Earlier editor errors\n\d\d:\d\d:\d\d RangeError: too many rows/);
-    expect(details).toMatch(/\nSonobe 0\.1\.0 · browser · \w+ · .+$/);
+    expect(details.split("\n").at(-1)).toMatch(/^Sonobe \S+ · browser · \w+ · .+$/);
+    expect(details.split("\n").at(-1)).toContain(`Sonobe ${EDITOR_VERSION} · `);
   });
 
   it("hands Report an Issue the latest error with its stack and where it was thrown, and nothing when there was none", () => {

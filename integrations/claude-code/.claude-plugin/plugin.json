@@ -1,6 +1,6 @@
 {
   "name": "sonobe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Build, simulate and explain interaction prototypes in Sonobe with Claude: layers, patches, springs, gestures, verified in simulation.",
   "author": { "name": "Sonobe contributors" },
   "license": "MIT",

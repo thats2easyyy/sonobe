@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "name": "Stories",
-  "generator": "Sonobe 0.1.0",
+  "generator": "Sonobe 0.2.0",
   "root": "main",
   "device": { "preset": "iphone-17-pro" },
   "background": "#000000FF",

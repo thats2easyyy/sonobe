@@ -4,8 +4,12 @@
  * the way a broken component inside it would.
  */
 
+import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, skipWelcome, waitForPrototype } from "./helpers.ts";
+
+/** The version the details and the issue carry: the one scripts/set-version.ts writes everywhere. */
+const VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 test.describe("when the editor can't draw", () => {
   test("shows the recovery screen, keeps the draft, and brings it back after Reload", async ({ page, context }) => {
@@ -47,7 +51,8 @@ test.describe("when the editor can't draw", () => {
     const details = await page.evaluate(() => navigator.clipboard.readText());
     expect(details).toContain("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
     expect(details).toMatch(/\n\s+at /);
-    expect(details).toMatch(/Sonobe 0\.1\.0 · browser · \w+ · Mozilla/);
+    expect(details).toMatch(/Sonobe \S+ · browser · \w+ · Mozilla/);
+    expect(details).toContain(`Sonobe ${VERSION} · browser`);
 
     // The draft is in, so the page leaves without the browser's unsaved-changes prompt.
     await recovery.getByRole("button", { name: "Reload Sonobe" }).click();
@@ -78,7 +83,7 @@ test.describe("when the editor can't draw", () => {
     const url = decodeURIComponent(issue.url());
     expect(url).toContain("github.com/thats2easyyy/sonobe/issues/new");
     expect(url).toContain("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
-    expect(url).toMatch(/Sonobe 0\.1\.0 · browser/);
+    expect(url).toContain(`Sonobe ${VERSION} · browser`);
   });
 });
 
