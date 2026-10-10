@@ -262,7 +262,8 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   const [types, setTypes] = useState<ReadonlySet<string>>(() => new Set());
   const [renameRequest, setRenameRequest] = useState<{ id: Id; nonce: number }>();
   const [revealScroll, setRevealScroll] = useState<{ id: Id; nonce: number }>();
-  const [expandedFor, setExpandedFor] = useState<readonly Id[] | null>(null);
+  /** The selection the panel last opened groups and scrolled for, and that scroll request's number. */
+  const [followed, setFollowed] = useState<{ layers: readonly Id[] | null; nonce: number }>({ layers: null, nonce: 0 });
   const [collapsedByComponent, setCollapsedByComponent] = useState<Readonly<Record<Id, ReadonlySet<Id>>>>({});
   const [fileDrop, setFileDrop] = useState<{ layerId: Id | null; label: string } | null>(null);
   const drag = useCableDrag(session);
@@ -302,11 +303,11 @@ export function LayersPanel({ onCollapse, className }: LayersPanelProps) {
   // A selection opens the groups its layers are in and scrolls to the last one. Both are worked out
   // while rendering, so the tree draws once per selection, with the row there to scroll to. Only a
   // selection change expands: collapsing a selected layer's parent must stick.
-  if (expandedFor !== selectedLayers) {
-    setExpandedFor(selectedLayers);
+  if (followed.layers !== selectedLayers) {
+    setFollowed({ layers: selectedLayers, nonce: ++scrollRequests });
     expandTo(selectedLayers);
   }
-  const selectionScroll = useMemo(() => ({ id: selectedLayers.at(-1), nonce: ++scrollRequests }), [selectedLayers]);
+  const selectionScroll = { id: selectedLayers.at(-1), nonce: followed.nonce };
   // The newer of the two requests. An emptied selection is a request too, for no row: an older reveal must not come back.
   const scrollRequest = revealScroll && revealScroll.nonce > selectionScroll.nonce ? revealScroll : selectionScroll;
   const scrollTo = scrollRequest.id === undefined ? undefined : { id: scrollRequest.id, nonce: scrollRequest.nonce };
