@@ -1,3 +1,6 @@
+/** The app's name, which also names its data folder (Electron's userData is this under the system's application data folder). */
+export const APP_NAME = "Sonobe";
+
 /** Environment switches read by the desktop main process. */
 export interface DesktopEnv {
   /** Dev server URL for the editor (SONOBE_DEV_URL), http(s) only. */

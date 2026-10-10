@@ -1,4 +1,4 @@
-import { COMPONENT_INSTANCE_LAYER_TYPE, createEmptyDocument } from "@sonobe/core";
+import { COMPONENT_INSTANCE_LAYER_TYPE, createEmptyDocument, serializeDocument } from "@sonobe/core";
 import { buildDoc, defineMock, MOCK_DEFINITIONS, port } from "@sonobe/engine/testing";
 import { createPatchRegistry } from "@sonobe/patches";
 import type { MuteState } from "@sonobe/renderer";
@@ -156,6 +156,61 @@ describe("editor session", () => {
     dialogs.getState().settle(dialogs.getState().queue[0]!.id, "trust");
     expect(await asking).toBe(true);
     expect(other.scriptTrust.getState().trusted).toBe(true);
+  });
+
+  it("takes what the window was opened for first, then the projects the host opens, one at a time in the order asked", async () => {
+    const project = (name: string) => ({ files: serializeDocument(createEmptyDocument({ name })), binaries: {} });
+    // Each read answers when the test lets it: a big project and a small one would otherwise finish in either order.
+    const reads = new Map<string, () => void>();
+    const asked: string[] = [];
+    let hostOpens!: (dir: string) => void;
+    const api = fakeApi({
+      readProject: (dir) => {
+        asked.push(dir);
+        return new Promise((resolve) => reads.set(dir, () => resolve(project(dir.slice(1)))));
+      },
+      onOpenProject: (cb) => {
+        hostOpens = cb;
+        return () => undefined;
+      },
+    });
+    const session = track(createEditorSession({ host: createDesktopHost(api), dialogStore: createDialogStore(), document: createEmptyDocument(), launch: async (s) => void (await s.openProject("/First")), ...headless() }));
+    let launched = false;
+    void session.launched.then(() => (launched = true));
+    // A second and a third prototype arrive while the first is still being read.
+    hostOpens("/Second");
+    hostOpens("/Third");
+    await vi.waitFor(() => expect(asked).toEqual(["/First"]));
+    expect(launched).toBe(false);
+    reads.get("/First")!();
+    await vi.waitFor(() => expect(asked).toEqual(["/First", "/Second"]));
+    expect(launched).toBe(true);
+    expect(session.document.getState()).toMatchObject({ projectPath: "/First" });
+    reads.get("/Second")!();
+    await vi.waitFor(() => expect(asked).toEqual(["/First", "/Second", "/Third"]));
+    reads.get("/Third")!();
+    await vi.waitFor(() => expect(session.document.getState().projectPath).toBe("/Third"));
+    expect(session.document.getState().doc.project.name).toBe("Third");
+  });
+
+  it("has nothing to wait for without a launch, and says when a project the host opened didn't open", async () => {
+    let hostOpens!: (dir: string) => void;
+    const failures: unknown[] = [];
+    const api = fakeApi({
+      readProject: async (dir) => {
+        throw new Error(`Project folder not found: ${dir}`);
+      },
+      onOpenProject: (cb) => {
+        hostOpens = cb;
+        return () => undefined;
+      },
+    });
+    const session = track(createEditorSession({ host: createDesktopHost(api), dialogStore: createDialogStore(), document: createEmptyDocument({ name: "Mine" }), onOpenFailed: (path, result) => failures.push([path, result.ok, result.error]), ...headless() }));
+    await session.launched;
+    hostOpens("/Gone.sonobe");
+    await vi.waitFor(() => expect(failures).toEqual([["/Gone.sonobe", false, "Project folder not found: /Gone.sonobe"]]));
+    expect(session.document.getState()).toMatchObject({ projectPath: null, dirty: false });
+    expect(session.document.getState().doc.project.name).toBe("Mine");
   });
 
   it("points live values at the component being edited", () => {

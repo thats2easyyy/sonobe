@@ -2,8 +2,8 @@
  * EditorSession: one open prototype and everything around it. The document, selection, presence,
  * console, and dialog stores, the bounds registry, asset import, the shared registry, the host
  * adapter, and the live runtime, wired together (selection pruning, agent activity, window title and
- * edited marker, projects opened by the OS, revision pushes to the desktop, script trust, and live
- * values following the component being edited).
+ * edited marker, what the app opened the window for and projects opened by the OS, revision pushes to
+ * the desktop, script trust, and live values following the component being edited).
  */
 
 import { applyOps, createEmptyDocument, DEVICE_PRESETS, seenIdsFromJSON, type Id, type SonobeDocument } from "@sonobe/core";
@@ -72,6 +72,13 @@ export interface EditorSessionOptions {
   mute?: MuteStore;
   /** Draft keeper timing, or false to keep no drafts. Default: drafts whenever the host keeps them. */
   drafts?: Pick<DraftKeeperOptions, "debounceMs" | "maxWaitMs" | "onError"> | false;
+  /**
+   * Puts what the app opened the window for into the session (app/launch.ts). It runs as soon as the session exists, and the
+   * projects the host opens wait for it. Default: nothing, and `document` is what the session starts on.
+   */
+  launch?: (session: EditorSession) => Promise<void>;
+  /** A project the host opened (Finder, Open Recent, a second one named at launch) didn't open. Not called when the person cancelled at the unsaved-changes prompt. */
+  onOpenFailed?: (path: string, result: FileResult) => void;
 }
 
 /** What restoring a draft did. */
@@ -118,6 +125,8 @@ export interface EditorSession {
   restoreDraft(id: string): Promise<RestoreDraftResult>;
   /** Delete a draft nobody has open. */
   discardDraft(id: string): Promise<void>;
+  /** Settles once the session shows what it was started on (EditorSessionOptions.launch). It never rejects, and a session without a launch has it settled. */
+  readonly launched: Promise<void>;
   dispose(): void;
 }
 
@@ -292,6 +301,9 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     if (s.viewers !== previous.viewers) syncLayerBounds(s.viewers);
   });
 
+  let finishLaunch = () => undefined as void;
+  const launched = options.launch ? new Promise<void>((resolve) => (finishLaunch = resolve)) : Promise.resolve();
+
   const session: EditorSession = {
     registry,
     host,
@@ -385,6 +397,8 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
       await host?.drafts?.remove(id);
     },
 
+    launched,
+
     dispose() {
       unsubscribeRevision();
       unsubscribeScope();
@@ -403,9 +417,18 @@ export function createEditorSession(options: EditorSessionOptions = {}): EditorS
     },
   };
 
+  // Projects the host opens are taken one at a time, in the order asked and after what the window was opened for, so
+  // the last one asked for is the one that shows however long each takes to read.
+  let opening: Promise<unknown> = launched;
   const unsubscribeOpen = host?.onOpenProject((path) => {
-    void session.openProject(path);
+    opening = opening
+      .then(async () => {
+        const result = await session.openProject(path);
+        if (!result.ok && !result.cancelled) options.onOpenFailed?.(path, result);
+      })
+      .catch(() => undefined);
   });
+  void options.launch?.(session).catch(() => undefined).then(finishLaunch);
 
   return session;
 }

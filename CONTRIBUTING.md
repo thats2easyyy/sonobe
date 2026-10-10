@@ -112,6 +112,19 @@ The interactions are synthetic: 60 awaited mouse steps per drag, with the protot
 
 What one frame costs without a browser is in two test files, which print it per case and hold it to a budget (about three times the case's cost on a quiet laptop, so read the printed figure for anything smaller): `packages/engine/src/runtime/benchmark.test.ts` (the engine's step) and `packages/renderer/src/perf.test.ts` (the draw, with its style writes counted). Run them with `npx vitest run <file> --reporter=default` before and after a change to the scene build, layout or the renderer, and add a case when yours needs one.
 
+## Measuring startup
+
+`npm run bench:startup -w @sonobe/desktop` times the packaged app's launch: main bundle evaluated, app ready, window created, first React commit, first contentful paint, editor usable, and with a project the opened document in the page and on screen. It runs by hand, like the smoke test, and isn't part of `npm test` or CI.
+
+1. Before you change anything launch runs through (the main process's entry and `whenReady`, the preload, the editor's boot), package the tree as it is and copy the app out: `npm run package -w @sonobe/desktop`, then `ditto apps/desktop/release/mac-arm64/Sonobe.app /tmp/before/Sonobe.app`.
+2. Make the change, package again, and run `npm run bench:startup -w @sonobe/desktop -- --baseline /tmp/before/Sonobe.app`. The two apps launch in turns and the last column is the difference of each pair. Numbers from two sessions can't be compared: this Mac doing something else moves every row by more than most changes do.
+3. Read the intervals first (the main bundle's compile and evaluation, ready to the window, and so on). They move by 2 or 3 ms between two runs of the same build, the times from spawn by about 10, so a change that moves a row by less than that didn't show. Put the numbers in the commit message, and leave out a change that doesn't show.
+4. With a project, compare "opened document on screen": the latest of the document being in the page, first contentful paint and the window being shown, which is when a person can see it. "Opened document in the page" is the DOM alone, and a build that starts the editor on the project has it there before anything is painted.
+
+`--runs 15` takes more launches, `--scenarios noarg` only the plain launch (`project` opens a copy of `examples/02-like-toggle`, or of the prototype `--project <folder>` names, lists every document name the toolbar showed, and fails when the window showed another one first; `fresh` is a first launch on a new profile), `--cli` adds `sonobe --version` and the `sonobe mcp` relay's first answer and memory, and `--dev` times the checkout instead of a package. The first launch of each scenario isn't counted: it fills the profile and the compile cache.
+
+It doesn't edit a tracked file to instrument the app. It launches a copy whose entry loads `tests/startup-bench/hook.cjs` first, re-signed ad hoc without the hardened runtime, so what it times is not the signed build (`npm run package:verify` checks that one). Every launch is muted, with its own data folder and `SONOBE_HOME`, and afterwards it kills what it started, unregisters the copies from LaunchServices and removes its temp folder.
+
 ## Releasing
 
 A release is built by `.github/workflows/release.yml` from a version tag: the macOS app for Apple silicon and Intel, signed with a Developer ID certificate and notarized. The workflow stops at a draft GitHub release. Publishing the draft is yours to do.

@@ -5,6 +5,7 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | Path | What's there |
 | --- | --- |
 | `electron/main.ts` | Lifecycle, windows, IPC, the MCP endpoint, phone preview, pop-out viewer, simulation frames |
+| `electron/boot.ts`, `electron/compile-cache.ts` | The app's entry: it turns on Node's compile cache in the data folder, then loads the main bundle |
 | `electron/preload.ts`, `electron/host-api.d.ts` | `window.sonobeHost`, the API the editor uses |
 | `electron/app-host.ts` | The `SonobeHost` MCP tools run against, bridged to the editor's RPC handlers |
 | `electron/rpc.ts` | Main's calls into the editor page. Calls a reloading or crashed page hadn't answered fail at once (`page_gone`, MCP `editor_reloaded`), and new calls wait for the next page's handlers |
@@ -13,10 +14,11 @@ The Electron shell around the editor: windows, native menus, project files, the 
 | `electron/secrets.ts` | Keychain-backed secrets (Electron `safeStorage`) |
 | `electron/design-capture.ts`, `electron/symbols.ts` | Design import's hidden capture window, and the SF Symbols it draws on macOS |
 | `electron/drafts.ts` | Drafts of unsaved work in `userData/Drafts`, their IPC, and quitting on SIGTERM, SIGINT or SIGHUP |
+| `electron/launch.ts` | What a new window starts on when the app opened it for something: a prototype it was asked to open, or what a restart closed |
 | `native/sfsymbol/` | `sfsymbol`, a small Swift program that draws SF Symbols as SVG for design imports |
 | `player/` | The web player for phones and the pop-out viewer: the editor viewer's platform services, the phone's device info, the three-finger menu and the Sonobe Viewer bridge |
 | `scene/` | A hidden page that draws simulation frames for `get_screenshot({ simId })` |
-| `scripts/` | `build.mjs`, `sfsymbol.ts`, `notices.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
+| `scripts/` | `build.mjs`, `cli-launchers.ts`, `sfsymbol.ts`, `notices.ts`, `icons.mjs`, `package.mjs`, `signing.ts`, `verify-package.mjs` |
 
 ## Scripts
 
@@ -24,13 +26,14 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 
 | Command | Does |
 | --- | --- |
-| `npm run build` | Bundles main, preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
+| `npm run build` | Bundles main and its entry (`boot.cjs`, package.json's `main`, which turns on Node's compile cache and loads `main.cjs`), preload, the updater (`updater.cjs`, loaded on the first update check), player, scene renderer and the `sonobe` CLI with its relay (`cli/sonobe.mjs`, `cli/relay.mjs` and the launchers) into `dist/`, and on macOS compiles `dist/bin/sfsymbol` (needs Xcode's command line tools; cached after the first build; `--arch arm64`, `x64` or `universal` picks its architecture) |
 | `npm run start` | Builds and launches against `apps/editor/dist` (or `SONOBE_DEV_URL`) |
 | `npm test` | Unit and integration tests (`electron/**/*.test.ts`) |
 | `npm run smoke` | Muted end-to-end Electron run: host API, MCP loop, phone preview, pop-out viewer |
 | `npm run smoke:import` | Muted design import run against a local dev server: `import_design` by URL and HTML, the Import dialog bridge, and pasting a capture (build the editor and shell first) |
-| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save; then Restart to Update with a stand-in updater: Cancel, Keep Draft, and the launch that reopens the work; then Quit with an unsaved change: Cancel, and Don't Save, which ends the app (build the editor and shell first) |
+| `npm run smoke:drafts` | Muted run that kills the app with SIGTERM and SIGKILL, crashes its renderer, and recovers the unsaved work each time (once by opening the draft's folder, as Finder would); then `save_document({ path })` and Don't Save; then Restart to Update with a stand-in updater: Cancel, Keep Draft, and the launch that reopens the work; then Quit with an unsaved change: Cancel, and Don't Save, which ends the app; then a launch with the project's path, a renderer crash after it, and the project opened with no window open; then SIGTERM at sixteen moments of a launch, each of which must end on its own and leave no `mcp.json` (build the editor and shell first) |
 | `npm run rehearse:update -- --identity "<name>"` | An update between two real builds of this version and the next, signed with that keychain certificate, from a local feed: the check, the download, Restart to Update with unsaved work and a connected Claude session, install on quit, notify, and a download macOS refuses. By hand, before a release (CONTRIBUTING.md, "Rehearse an update") |
+| `npm run bench:startup` | Times the packaged app's launch, by hand: several isolated, muted launches per scenario (no argument, with a project, a first launch) of a copy whose entry loads a recording hook first, and the timeline as median [min-max] from the spawn. `--baseline <Sonobe.app>` launches an earlier build in turns with it and prints the difference of each pair; `--cli` adds `sonobe --version` and the `sonobe mcp` relay; `--dev` times the checkout (CONTRIBUTING.md, "Measuring startup") |
 | `npm run icons` | Rasterizes `assets/brand/sonobe-mark.svg` into `build/icon.icns`, `icon.ico`, `icons/` |
 | `npm run package` | A local build: editor, bundles, icons, then electron-builder into `release/`, ad-hoc signed on macOS. `--identity` and `--release` build signed ones (see Packaging) |
 | `npm run package:verify` | Checks the packaged app: its files, signature and entitlements, then a muted launch that checks `/health`, the editor, and the CLI (`--dmg` checks the app inside the DMG; see Checking a package) |
@@ -47,7 +50,7 @@ Run these from the repository root with `-w @sonobe/desktop`, or from this folde
 - `drafts.write/remove/list/read/release/reveal`: drafts of unsaved work, one project folder each in `userData/Drafts`. A window claims the drafts it writes or reads, and `release` gives back one it read but couldn't use; `list` returns the ones nobody claims. Failures come back as `{ ok: false, code, message }` because the context bridge drops Error properties.
 - `readProjectIfExists(dir)`: `readProject`, but null for a folder that doesn't exist yet (a Save As target).
 - `updates.status/check/restart/setAutoCheck/moveToApplications/onStatus`: whether a newer version exists and what this copy can do about it (`UpdateStatus`: the mode, the state, the version, progress, an error with a hint). `status`, `check` and `setAutoCheck` wait until updates have started, a second after the first window is shown. `restart()` answers at once (false while nothing is ready): it closes every window through its unsaved-changes prompt before the updater quits the app, and resolves false when the person cancelled. While a window subscribes with `onStatus`, its notices answer Check for Updates…; otherwise the host shows a native dialog. In a checkout `status()` is `mode: "off"`.
-- `reopening`: true in the window that opens again what was open before a restart for an update.
+- `launching` and `launch()`: a window the app opened for something (a prototype named at launch or opened with no window open, or what a restart for an update closed) has `launching` true, and `launch()` resolves what it starts on: `{ reopening, open: a project folder or a draft, problems }`. The editor waits for it before its first render, so the first frame is that document and never the demo. It is answered once per window: a page that loads again gets null and starts as usual.
 
 ## Packaging
 
@@ -81,6 +84,9 @@ It reads the bundle first, then runs it:
 - **Update capability.** The packaged `package.json`'s `sonobe` field matches the real signature.
 - **A Developer ID build** must be notarized: Gatekeeper accepts it as "Notarized Developer ID" and the ticket is stapled. Without `--release` a build that isn't is reported as a rehearsal; with `--release` it fails, and so does any build without a Developer ID signature or without Apple's secure timestamp.
 - **Running it.** `sfsymbol` draws a symbol, the bundled CLI answers with the app's own runtime, and again from a copy outside the checkout (under `release/` it could load a package from the repository's `node_modules` that the bundle left out), and the app launches, shows the editor, answers `/health` and quits cleanly.
+- **The relay.** `Resources/cli/relay.mjs` is under 64 KB. `sonobe mcp` says how to start the app and exits 1 when none is running, and against the launched app it answers `initialize` and exits 0 when stdin closes. The CLI's own compile cache lands in `compile-cache/cli-<version>` under the launch's `SONOBE_HOME`.
+- **Compile cache.** The entry is `dist/boot.cjs`, the launch leaves `main.cjs`'s compiled code in `compile-cache/app-<version>` under the data folder, and `codesign --verify` still passes afterwards: nothing is written inside the app. A second launch with nowhere to keep a cache starts all the same.
+- **A prototype at launch.** Launched with the path of a copy of `examples/02-like-toggle`, the app tells the editor what the window was opened for and the editor shows that prototype.
 
 | Flag | Does |
 | --- | --- |
@@ -95,7 +101,7 @@ It reads the bundle first, then runs it:
 
 ### What's inside
 
-The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs `sonobe.mjs` with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
+The app ships the CLI in `Resources/cli`. `Resources/cli/sonobe` runs it with the app's own runtime in Node mode, so no separate Node install is needed. For example, `/Applications/Sonobe.app/Contents/Resources/cli/sonobe mcp` is the stdio relay Claude Desktop can launch. For exactly `sonobe mcp` the launcher runs `relay.mjs`, the relay alone in 17 KB, because every Claude session keeps one running; everything else runs `sonobe.mjs`, the whole CLI, with Node's compile cache in `~/.sonobe/compile-cache/cli-<version>` (`SONOBE_HOME` moves it, and a `NODE_COMPILE_CACHE` of your own is left alone). The app removes the caches of other versions when it launches. The build always bundles it from `packages/cli/src`, without the native headless screenshot renderer: `get_screenshot` on a `--headless` server started from the app's CLI says to open the project in the app.
 
 On macOS the app also ships `Resources/bin/sfsymbol`, outside app.asar so it can run. Design imports use it to draw `<svg data-sf-symbol>` placeholders as real SF Symbols (macOS 13 or later), and the bundled CLI points headless servers at it through `SONOBE_SFSYMBOL`. It is built for the architecture being packaged, and as one file with both slices when a run builds more than one. Try it by hand: `sfsymbol heart.fill --size 17 --weight semibold --color '#FF3B30'` prints the SVG, and `sfsymbol --list` prints every name.
 

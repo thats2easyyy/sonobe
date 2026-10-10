@@ -2,6 +2,7 @@
 
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { flushCompileCache, getCompileCacheDir } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,10 +22,12 @@ import { registerAssistant, type AssistantRegistration } from "./assistant/regis
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
 import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
-import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
-import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
+import { cliCompileCacheKey, compileCacheDir, compileCacheKey, pruneCompileCaches } from "./compile-cache.ts";
+import { APP_NAME, launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import type { LaunchInfo, McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
+import { planLaunch, showsLaunch, type LaunchPlan } from "./launch.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
 import { buildMenuSpec, toMenuTemplate, type NativeAction } from "./menu.ts";
 import { OwnWriteRegistry, ProjectAccess, readProject, resolveProjectSelection, writeProject, type WriteProjectInput } from "./project-io.ts";
@@ -38,7 +41,6 @@ import { createQuitResume, moveConflict, reopenPlan, restartConfirmation, restar
 import type { NativeUpdaterLike } from "./updater-driver.ts";
 import { createUpdateController, createUpdateSettings, installLocation, manualCheckDialog, updateMode, type UpdateController, type UpdateDriver, type UpdateModeResult } from "./updates.ts";
 
-const APP_NAME = "Sonobe";
 const VERSION = __SONOBE_VERSION__;
 const platform = toHostPlatform(process.platform);
 
@@ -99,6 +101,7 @@ function main(): void {
   const ownWrites = new OwnWriteRegistry();
   const pendingOpen: string[] = projectPathsFromArgv(process.argv.slice(1), process.cwd());
   let recents: RecentProjects | null = null;
+  let recentsLookedAt = 0;
   let rpc: RendererRpcHub | null = null;
   let mcp: McpServerHandle | null = null;
   let mcpHandler: NodeMcpHandler | null = null;
@@ -111,6 +114,11 @@ function main(): void {
   let previewStarting: Promise<void> | null = null;
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
+  /**
+   * will-quit has run: the app has stopped what it had and is on its way out. A logout or a `kill` can land anywhere in
+   * launch, so what launch does next looks here first: nothing starts after it, and no window is created.
+   */
+  let quitting = false;
   let secrets: SecretStore | null = null;
   /** Stopped on quit: it runs Claude's agent adapter as a child process when the subscription is on. */
   let assistant: AssistantRegistration | null = null;
@@ -155,8 +163,11 @@ function main(): void {
   let restartRunning: Promise<boolean> | null = null;
   /** Rejects the install step of a restart when the updater reports an error. */
   let restartFailed: ((err: Error) => void) | null = null;
-  /** The next editor window opens again what was open before a restart, so its editor skips the welcome screen. */
-  let reopenInNextWindow = false;
+  /**
+   * What the next editor window starts on (launch.ts): a prototype the app was asked to open, or what a restart closed. Its
+   * editor asks before its first render, so that is its first frame.
+   */
+  let nextLaunch: Promise<LaunchInfo> | null = null;
   /** Settles once a launch that reopens work has done so. MCP calls wait for it: one that got in first would land on the blank launch document. */
   let reopened: Promise<void> = Promise.resolve();
   /** A quit that stopped at a window's unsaved-changes prompt carries on once that window has closed (update-restart.ts). */
@@ -221,7 +232,7 @@ function main(): void {
         else if (id === "help.about" && windows.size === 0) app.showAboutPanel();
         else void ensureWindow().then((w) => w.sendCommand(id));
       },
-      openRecent: (dir) => void openProjects([dir]),
+      openRecent: (dir) => void openRecent(dir),
       action: (action: NativeAction) => void handleAction(action),
     });
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -247,6 +258,24 @@ function main(): void {
     await recents.add(dir);
     if (platform !== "linux") app.addRecentDocument(dir);
     rebuildMenu();
+  };
+
+  /** Looks which recent projects are there now (recent-projects.ts), and rebuilds the menu when that changed what it lists. */
+  const refreshRecents = async () => {
+    if (!recents) return;
+    const listed = recents.snapshot().join("\n");
+    recentsLookedAt = Date.now();
+    await recents.available();
+    if (recents.snapshot().join("\n") !== listed) rebuildMenu();
+  };
+
+  /** Open Recent. A folder that has gone since the menu last looked is said so, and leaves the menu until it's back. */
+  const openRecent = async (dir: string) => {
+    if (await resolveProjectSelection(dir)) return openProjects([dir]);
+    await refreshRecents();
+    const options = { type: "info" as const, message: `“${path.basename(dir).replace(/\.sonobe$/, "")}” isn't there right now.`, detail: "It may be on a drive or share that isn't connected. Sonobe lists it under Open Recent again when it's back." };
+    const parent = primaryWindow()?.win;
+    await (parent && !parent.isDestroyed() ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
   };
 
   const handleAction = async (action: NativeAction) => {
@@ -279,14 +308,15 @@ function main(): void {
   };
 
   const createWindow = (): Promise<AppWindow> => {
-    const reopening = reopenInNextWindow;
-    reopenInNextWindow = false;
+    const launch = nextLaunch;
+    nextLaunch = null;
     return createAppWindow({
       preloadPath: path.join(__dirname, "preload.cjs"),
       source: resolveContentSource(),
       statePath: path.join(app.getPath("userData"), "window-state.json"),
       mute: env.mute,
-      reopening,
+      quitting: () => quitting,
+      ...(launch ? { launch } : {}),
       rpc: rpc!,
       appName: APP_NAME,
       log,
@@ -327,6 +357,9 @@ function main(): void {
   };
 
   const ensureWindow = (): Promise<AppWindow> => {
+    // The app is quitting: a window created now crashes the process on its way out, or keeps it running with nothing to
+    // show. Whoever asked is left waiting for a process that is about to end.
+    if (quitting) return new Promise<AppWindow>(() => undefined);
     const existing = primaryWindow();
     if (existing) return Promise.resolve(existing);
     creating ??= createWindow().finally(() => {
@@ -367,10 +400,37 @@ function main(): void {
     }
   };
 
+  /** No editor window is open and none is opening: the next one is new, and can be started on something. */
+  const noWindow = () => !primaryWindow() && !creating;
+
+  /**
+   * The next window starts on the first of `paths` that is a prototype, else on a restart's first step, instead of the demo
+   * (launch.ts). The folder is approved for the editor before its page is answered. Resolves what's left to open the usual ways.
+   */
+  const startNextWindowOn = (paths: readonly string[], steps: readonly ReopenStep[] = []): Promise<LaunchPlan> => {
+    const plan = planLaunch({ paths, steps, resolve: resolveProjectSelection, exists: existsSync, draftAt }).then((planned) => {
+      const { open, problems } = planned.info;
+      for (const problem of problems) log("warn", `Not a Sonobe project: ${problem.path}`);
+      // A restart's draft opens its project underneath. Main wrote the record for a folder the person had open, so the
+      // editor may read it again, whatever its name and whether or not it's still among the recent ones.
+      const dir = open?.kind === "project" ? open.path : open?.project;
+      if (dir) access.approve(dir);
+      return planned;
+    });
+    nextLaunch = plan.then((planned) => planned.info);
+    return plan;
+  };
+
   const openProjects = async (paths: readonly string[]) => {
     if (!ready) {
       pendingOpen.push(...paths);
       return;
+    }
+    // With no window to open them in (macOS keeps the app running without one), the window that opens starts on the first.
+    if (noWindow()) {
+      const plan = startNextWindowOn(paths);
+      (await ensureWindow()).focus();
+      paths = (await plan).restPaths;
     }
     for (const candidate of paths) {
       const dir = await resolveProjectSelection(candidate);
@@ -513,12 +573,32 @@ function main(): void {
   const loadUpdateDriver = (): Promise<UpdateDriver> => {
     if (testUpdateDriver) return Promise.resolve(testUpdateDriver);
     return (updateDriver ??= Promise.resolve()
-      .then(() => (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) }))
+      .then(() => {
+        const driver = (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) });
+        // updater.cjs compiled just now: its entry joins the cache, so the next first check doesn't compile it again.
+        keepCompileCache();
+        return driver;
+      })
       .catch((err: unknown) => {
         updateDriver = null;
         throw err;
       }));
   };
+
+  /** Where boot.ts asked Node to keep this build's compile cache (compile-cache.ts). */
+  const compileCacheHome = () => compileCacheDir(app.getPath("userData"), compileCacheKey({ version: VERSION, packaged: app.isPackaged }));
+
+  /**
+   * Writes Node's compile cache now. Node writes it when the process exits, which a crash, a force quit and app.exit() all
+   * skip, and then a version's first launch would leave nothing for its second.
+   */
+  function keepCompileCache(): void {
+    try {
+      flushCompileCache();
+    } catch (err) {
+      log("warn", `Couldn't write the compile cache: ${errorMessage(err)}`);
+    }
+  }
 
   const requireUpdates = (): UpdateController => {
     if (!updates) throw new Error("Updates aren't ready yet.");
@@ -594,12 +674,12 @@ function main(): void {
     return BrowserWindow.getAllWindows().length === 0;
   };
 
-  /** The editor showing `dir` in `w`, or the wait running out: opening a project is asked of the editor, which answers later. */
-  const waitForProject = async (w: AppWindow, dir: string, timeoutMs = 15_000) => {
+  /** The editor in `w` showing a document `shows` accepts, or the wait running out: opening is asked of the editor, which answers later. */
+  const waitForDocument = async (w: AppWindow, shows: (info: { projectPath?: unknown; draft?: unknown } | null) => boolean, timeoutMs = 15_000) => {
     const started = Date.now();
     while (!w.webContents.isDestroyed() && rpc && Date.now() - started < timeoutMs) {
-      const info = await rpc.invoke<{ projectPath?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 2000 }).catch(() => null);
-      if (info?.projectPath === dir) return;
+      const info = await rpc.invoke<{ projectPath?: unknown; draft?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 2000 }).catch(() => null);
+      if (shows(info)) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   };
@@ -619,7 +699,7 @@ function main(): void {
       if (!dir) continue;
       await openProjects([dir]);
       const w = primaryWindow();
-      if (w) await waitForProject(w, dir);
+      if (w) await waitForDocument(w, (info) => info?.projectPath === dir);
     }
   };
 
@@ -628,7 +708,8 @@ function main(): void {
     // The record was for a launch that isn't coming.
     takeReopenRecord(reopenFile());
     const steps = await reopenSteps({ version: 1, windows: open });
-    reopenInNextWindow = steps.length > 0;
+    // The window shows no welcome screen over the work that's coming back, which is asked of its editor as before.
+    if (steps.length && noWindow()) nextLaunch = Promise.resolve({ reopening: true, open: null, problems: [] });
     await ensureWindow();
     await reopen(steps);
   };
@@ -1075,10 +1156,8 @@ function main(): void {
       pendingOpen.push(...paths);
       return;
     }
-    void ensureWindow().then((w) => {
-      w.focus();
-      if (paths.length) void openProjects(paths);
-    });
+    // Opening comes first: a window that has to open for it starts on the prototype (openProjects).
+    void (paths.length ? openProjects(paths) : Promise.resolve()).then(ensureWindow).then((w) => w.focus());
   });
 
   app.on("web-contents-created", (_event, contents) => {
@@ -1100,9 +1179,12 @@ function main(): void {
   // The players show the document in front, so switching editor windows may change what they show.
   app.on("browser-window-focus", (_event, win) => {
     if (windows.has(win.webContents.id)) pokePlayers();
+    // Coming back to Sonobe is when a drive may have been plugged in: a recent project that wasn't there is looked for again.
+    if (recents?.hasMissing() && Date.now() - recentsLookedAt > 10_000) void refreshRecents();
   });
 
   app.on("will-quit", () => {
+    quitting = true;
     updates?.stop();
     abortCaptures();
     for (const { watcher } of watchers.values()) watcher.close();
@@ -1120,6 +1202,15 @@ function main(): void {
     }
   });
   process.on("exit", () => mcp?.removeTokenFile());
+
+  // A quit that came before `ready` (a `kill` in the app's first moments): Electron fires will-quit and quit and then `ready`
+  // all the same, and from there app.quit() and app.exit() do nothing, because it has already shut down. Launch went on to
+  // create a window after the quit, and some of those launches never ended: no window, and the single-instance lock held
+  // until a force quit. will-quit has run with nothing to stop, so the process ends here. `process.exit` is app.exit in
+  // Electron's main process, hence Node's own exit underneath it.
+  app.once("ready", () => {
+    if (quitting) (process as unknown as { reallyExit(code: number): never }).reallyExit(0);
+  });
 
   const registerIpc = () => {
     ipcMain.handle(IPC.dialogOpenProject, async (event) => {
@@ -1236,9 +1327,11 @@ function main(): void {
       if (typeof target === "string" && path.isAbsolute(target)) shell.showItemInFolder(target);
     });
 
+    // The welcome screen's list: the recent projects that are there now.
     ipcMain.handle(IPC.recentProjects, async (event) => {
       requireWindow(event);
-      return recents ? recents.list() : [];
+      await refreshRecents();
+      return recents?.snapshot() ?? [];
     });
 
     ipcMain.handle(IPC.mcpStatus, (event): McpStatus => {
@@ -1417,6 +1510,8 @@ function main(): void {
       if (typeof count === "number") trustedWindow(event)?.setCommandListeners(count);
     });
     ipcMain.on(IPC.openProjectReady, (event) => trustedWindow(event)?.markOpenReady());
+    // What the window was opened for (launch.ts). Its page asks as it loads and is answered once.
+    ipcMain.handle(IPC.launch, (event) => requireWindow(event).takeLaunch());
     ipcMain.on(IPC.setDocumentEdited, (event, edited: unknown) => trustedWindow(event)?.setDocumentEdited(edited === true));
     ipcMain.on(IPC.setTitle, (event, title: unknown) => {
       if (typeof title === "string") trustedWindow(event)?.setTitle(title.slice(0, 512));
@@ -1529,12 +1624,16 @@ function main(): void {
       onDocumentChange,
     });
 
+    // Every saved folder may be opened by the editor and is in the menu, without a look at any of them: whether a folder is
+    // there (it may be on a drive that isn't plugged in, or a share that's slow to answer) is looked at after the window is shown.
     recents = new RecentProjects(path.join(app.getPath("userData"), "recent-projects.json"));
     for (const dir of await recents.list()) {
       // A draft folder an older build opened as a project.
       if (await draftAt(dir)) await recents.remove(dir);
       else access.approve(dir);
     }
+    // A quit while the list was read: launch stops, and what a restart wrote down stays for the next one.
+    if (quitting) return;
     rebuildMenu();
 
     // A restart for an update wrote down what was open: it opens again, once. A project named on the command line or opened from
@@ -1543,7 +1642,6 @@ function main(): void {
     const reopening = record && !pendingOpen.length ? await reopenSteps(record) : [];
     let finishReopen = () => undefined as void;
     if (reopening.length) {
-      reopenInNextWindow = true;
       // MCP calls wait for the work to be back (the endpoint below listens before the window exists), 30 s at most.
       reopened = new Promise((resolve) => (finishReopen = resolve));
       setTimeout(finishReopen, 30_000).unref();
@@ -1568,10 +1666,46 @@ function main(): void {
       }
     }
 
+    // A quit during the awaits above: will-quit ran before the endpoint was up, so it closed nothing and mcp.json would stay
+    // behind for the next `sonobe mcp` to trust. The endpoint goes here, and launch stops.
+    if (quitting) {
+      mcp?.removeTokenFile();
+      void mcp?.close().catch(() => undefined);
+      return;
+    }
+
+    // The window comes after the work above on purpose. `new BrowserWindow` returns about 60 ms after `ready` however early
+    // it is called (creating it first, with that work moved behind it, brought it 2 ms forward and delayed the page's
+    // navigation by as much), so the work above runs in time the window would spend waiting anyway.
+    //
+    // It starts on what the app was asked to open before now (the command line, a double-click in Finder), else on what the
+    // restart closed: its editor asks before its first render, so the first frame is that document and not the demo.
+    //
+    // The menu is live since rebuildMenu() above, and a command from it opens a window on nothing. If one did during the
+    // awaits since, that window is the first, and what was asked for is asked of its editor, as it is in any open window.
+    const asked = pendingOpen.splice(0);
+    const launching = (asked.length || reopening.length) && noWindow() ? startNextWindowOn(asked, reopening) : null;
+    if (!launching) pendingOpen.unshift(...asked);
     const first = await ensureWindow();
     ready = true;
+    const reopenFailed = (err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`);
+    if (launching) {
+      const { info, restPaths, restSteps } = await launching;
+      const { open } = info;
+      if (info.reopening && open) {
+        // The editor registers its methods with its first render, which waits for the document it was started on. Main still
+        // looks that it's the one showing: an editor that gave up waiting renders first, and MCP calls must not land before the work.
+        await waitForEditor(first);
+        await waitForDocument(first, (shown) => showsLaunch(open, shown));
+        await reopen(restSteps).catch(reopenFailed);
+      }
+      pendingOpen.unshift(...restPaths);
+    } else if (!asked.length && reopening.length) {
+      await reopen(reopening).catch(reopenFailed);
+    }
+    // The other prototypes named at launch, then whatever was asked for while the window was coming up (open-file and a
+    // second instance queue until `ready`): the editor takes them one at a time after its launch document, so the last one shows.
     if (pendingOpen.length) await openProjects(pendingOpen.splice(0));
-    else if (reopening.length) await reopen(reopening).catch((err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`));
     finishReopen();
     if (env.lan) void startPreview();
 
@@ -1588,6 +1722,21 @@ function main(): void {
     void first.shown.then(() => setTimeout(beginUpdates, UPDATES_START_MS).unref());
     // A window that never shows (closed at once) doesn't hold updates back for good.
     setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
+
+    // The compile cache is written once launch is over, and an update's old folders go then too: the app's, and the bundled
+    // CLI's, which its launcher keeps under the Sonobe home. Only a packaged app removes any, and only other versions of
+    // itself: a checkout shares both folders with an installed app, whose caches aren't its to delete.
+    void first.shown.then(() =>
+      setTimeout(() => {
+        keepCompileCache();
+        if (app.isPackaged) {
+          void pruneCompileCaches(path.dirname(compileCacheHome()), path.basename(compileCacheHome()), "app-");
+          void pruneCompileCaches(path.join(env.home ?? defaultSonobeHome(), "compile-cache"), cliCompileCacheKey(VERSION), "cli-");
+        }
+        // Recent projects whose folders aren't there (an unplugged drive, a share that isn't mounted) leave the menu until they're back.
+        void refreshRecents();
+      }, UPDATES_START_MS).unref(),
+    );
 
     if (env.testHooks) {
       (globalThis as Record<string, unknown>).__sonobeTest = {
@@ -1615,6 +1764,8 @@ function main(): void {
         popOutViewer: (options?: { alwaysOnTop?: boolean }) => popOutViewer(options),
         closeViewerWindow: () => closeViewerWindow(),
         secretsStatus: () => secrets?.status() ?? null,
+        /** Where Node keeps the compile cache in this run (null without one), and where this build's belongs. */
+        compileCache: () => ({ dir: getCompileCacheDir() ?? null, home: compileCacheHome() }),
         /** MCP notifications published so far (outline/diagnostics updates and list changes). */
         notifications: () => {
           if (resourceTimer) {

@@ -2,6 +2,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import { LAUNCH_QUERY } from "./ipc.ts";
 import { placeholderHtml, toDataUrl } from "./placeholder.ts";
 import { isAppUrl, isExternalUrl } from "./security.ts";
 
@@ -67,6 +68,8 @@ describe("isAppUrl", () => {
     const content = { kind: "file" as const, root };
     expect(isAppUrl(pathToFileURL(path.join(root, "index.html")).href, content)).toBe(true);
     expect(isAppUrl(`${pathToFileURL(path.join(root, "index.html")).href}#/patch`, content)).toBe(true);
+    // The page a window is given something to start on (LAUNCH_QUERY): its preload's first call has to be trusted.
+    expect(isAppUrl(`${pathToFileURL(path.join(root, "index.html")).href}?${LAUNCH_QUERY}`, content)).toBe(true);
     expect(isAppUrl(pathToFileURL("/etc/passwd").href, content)).toBe(false);
     expect(isAppUrl(pathToFileURL(`${root}-evil/index.html`).href, content)).toBe(false);
     expect(isAppUrl("https://example.com", content)).toBe(false);

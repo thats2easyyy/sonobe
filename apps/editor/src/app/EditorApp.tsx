@@ -2,7 +2,8 @@
  * The real editor: one EditorSession wired into the shell. Layers, viewer, canvas, patch editor,
  * inspector, HUD, Learn, and Connect Claude; toolbar bound to the document and runtime; document
  * commands, menu routing, the welcome screen, Settings and About, and (inside the desktop app) the
- * MCP bridge handlers behind the agent-permission guard and the update notices.
+ * MCP bridge handlers behind the agent-permission guard and the update notices. In a window the desktop
+ * app opened for a prototype, the session already shows it (launch.ts), and no welcome screen covers it.
  *
  * The patch editor (React Flow and ELK), the Learn drawer (guides, examples, lessons, patch reference),
  * the welcome screen, the Assistant and the dialogs load on demand so the first paint stays small. Each
@@ -49,6 +50,7 @@ import { lastEditorErrorText } from "./errorReports.ts";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
+import { launchOutcome } from "./launch.ts";
 import { keepBoxClearOfDrawers, keepOneRightDrawer } from "./rightDrawers.ts";
 import { ServiceDialogs } from "./ServiceDialogs.tsx";
 import { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
@@ -198,7 +200,9 @@ function Workspace() {
   const lessonDocked = useLessonLayout((s) => s.active);
   const [patchTools, setPatchTools] = useState<HTMLDivElement | null>(null);
   const [titlebarInset] = useState(() => (getDesktopHostApi()?.platform === "darwin" ? 80 : 0));
-  const [reopening] = useState(() => getDesktopHostApi()?.reopening === true);
+  // What came of opening the window for something (launch.ts), as it stood at the first render.
+  const [launch] = useState(launchOutcome);
+  const openedForSomething = launch.reopening || launch.opened || launch.pending;
 
   // The in-app Assistant claims "ai.assistant" before useAppCommands, which skips ids already registered.
   useRegisterCommands(() => [assistantCommand(), explainCommand(session), ...designCommands(session)], [session]);
@@ -233,28 +237,29 @@ function Workspace() {
     };
   }, []);
 
-  // The welcome screen on the first launch (or every launch, when Settings asks for it), except in the window
-  // that opens again what was open before a restart for an update.
+  // The welcome screen on the first launch (or every launch, when Settings asks for it), except in a window that
+  // shows what it was opened for: a prototype the person asked for, or what was open before a restart for an update.
   useEffect(() => {
-    if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch, reopening)) welcomeStore.getState().show("launch");
-  }, [reopening]);
+    if (shouldShowWelcomeOnLaunch(hasSeenWelcome(), settingsStore.getState().showWelcomeOnLaunch, openedForSomething)) welcomeStore.getState().show("launch");
+  }, [openedForSomething]);
 
   // Unsaved work left by a crash or a quit: always offer it at launch (the welcome screen's Recovered section),
   // unless something already replaced or edited the launch document (a project opened from Finder), or the
-  // app is bringing the work back itself after an update.
+  // app is bringing the work back itself after an update. A window whose prototype couldn't be opened shows
+  // the demo like a plain launch, and offers it too.
   useEffect(() => {
-    if (reopening) return;
+    if (openedForSomething) return;
     let cancelled = false;
     void session
       .recoverableDrafts()
       .then((drafts) => {
-        if (!cancelled && drafts.length && !welcomeStore.getState().open && session.document.getState().lastChange === null) welcomeStore.getState().show("launch");
+        if (!cancelled && drafts.length && !welcomeStore.getState().open && session.document.getState().lastChange === launch.pristine) welcomeStore.getState().show("launch");
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [session, reopening]);
+  }, [session, openedForSomething, launch]);
 
   // A project opened from the OS, Open Recent, or Claude replaces whatever the welcome screen offered
   // (so does a draft Claude recovers, which has no project path yet).

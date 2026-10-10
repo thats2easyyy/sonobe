@@ -8,7 +8,7 @@
  * It also tells the app which session it is, so Connect Claude can list connected sessions: every
  * POST carries a per-process `sonobe-client` id, and /clients gets a hello with the client's name and
  * the session's folder, a heartbeat every 30 s, and a goodbye when stdin closes or `stop` aborts
- * (the CLI aborts it on SIGINT and SIGTERM).
+ * (runRelayCommand aborts it on SIGINT and SIGTERM).
  *
  * The app can restart under a running session (an update does): its port and token change. When a
  * request is refused or rejected, the relay reads mcp.json again, waits for the new launch to answer
@@ -17,6 +17,10 @@
  * relay can't know whether a cut-off one was applied, and a new launch may have another document in
  * front. When the wait finds nothing, Sonobe was quit rather than restarted: later requests look once
  * and fail at once, and the first one after Sonobe is opened again finds it. Node only.
+ *
+ * Every Claude session keeps one relay running, so this file imports nothing but Node's own modules and
+ * the client header from `@sonobe/mcp/clients`: relay-main.ts bundles it into a file of a few kilobytes,
+ * where the whole CLI is megabytes that a relay would load and never use.
  */
 
 import { randomUUID } from "node:crypto";
@@ -25,7 +29,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
-import { CLIENT_HEADER, type McpClientHello } from "@sonobe/mcp";
+import { CLIENT_HEADER, type McpClientHello } from "@sonobe/mcp/clients";
 
 export interface ConnectionFile {
   port: number;
@@ -37,6 +41,16 @@ export interface ConnectionFile {
 
 export interface TextSink {
   write(text: string): unknown;
+}
+
+/** The process's side of `sonobe mcp`: where it reads, writes and looks things up (the CLI's CliIo). */
+export interface RelayIo {
+  stdout: TextSink;
+  stderr: TextSink;
+  stdin: Readable;
+  env: Record<string, string | undefined>;
+  cwd: string;
+  fetch: typeof fetch;
 }
 
 export interface RelayOptions {
@@ -529,4 +543,47 @@ export async function runRelay(options: RelayOptions): Promise<number> {
       signal: AbortSignal.timeout(1000),
     }).catch(() => undefined);
   return 0;
+}
+
+/**
+ * SIGINT and SIGTERM stop the relay like stdin closing does. Claude Code ends stdio servers with
+ * SIGINT, and without this the relay died before its goodbye, so the session stayed listed for 75 s.
+ * A second signal still kills the process.
+ */
+function stopOnSignals(): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  for (const name of signals) process.once(name, stop);
+  return {
+    signal: controller.signal,
+    dispose() {
+      for (const name of signals) process.removeListener(name, stop);
+      // stdin is still open when a signal stopped the relay; let the process exit.
+      if (controller.signal.aborted) process.stdin.destroy();
+    },
+  };
+}
+
+/**
+ * `sonobe mcp` without --headless, for both of its entries: the full CLI (cli.ts) and the relay's own
+ * (relay-main.ts). Resolves to the exit code.
+ */
+export async function runRelayCommand(io: RelayIo, version: string): Promise<number> {
+  const signals = io.stdin === process.stdin ? stopOnSignals() : null;
+  try {
+    return await runRelay({
+      home: sonobeHome(io.env),
+      stdin: io.stdin,
+      stdout: io.stdout,
+      stderr: io.stderr,
+      fetch: io.fetch,
+      env: io.env,
+      cwd: io.cwd,
+      version,
+      ...(signals ? { stop: signals.signal } : {}),
+    });
+  } finally {
+    signals?.dispose();
+  }
 }

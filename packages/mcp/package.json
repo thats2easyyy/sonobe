@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./clients": "./src/clients.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",

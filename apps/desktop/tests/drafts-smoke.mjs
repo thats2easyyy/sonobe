@@ -26,6 +26,14 @@
  * 6. Quit with that unsaved change: Cancel in the prompt keeps the app and its window. Quit again and
  *    Don't Save: the app itself ends, not only its window (a quit that stopped to ask carries on once
  *    it's answered, which is what lets a downloaded update go in "the next time you quit").
+ * 7. The app launched with the project's path: the editor is told before it renders and starts on the
+ *    project, never on the demo. The renderer crashes with an unsaved change: the page that loads again
+ *    is told nothing, starts as usual and offers the draft. With every window closed and the app still
+ *    running, opening the project starts the new window on it too, with no welcome screen although a
+ *    draft is waiting.
+ * 8. SIGTERM during launch (a logout, or `kill`, in the app's first second), at sixteen moments from before
+ *    `ready` to after the first window, launched with two prototypes: every launch ends on its own, without
+ *    a crash, and leaves no mcp.json for the next `sonobe mcp` to trust.
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -36,7 +44,8 @@
 
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,9 +93,9 @@ const watchdog = setTimeout(() => {
   process.exit(1);
 }, 300_000);
 
-const launch = async () => {
+const launch = async (args = []) => {
   rmSync(tokenFile, { force: true });
-  const next = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir], cwd: appDir, env, timeout: 30_000 });
+  const next = await electron.launch({ executablePath: electronPath, args: ["--mute-audio", appDir, ...args], cwd: appDir, env, timeout: 30_000 });
   next.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
   if (process.env.SONOBE_SMOKE_VERBOSE === "1") next.process().stdout?.on("data", (d) => process.stdout.write(`[app] ${d}`));
   const page = await next.firstWindow();
@@ -373,7 +382,8 @@ try {
   assert(firstCall.text.includes("unsaved changes"), "the reopened document is still unsaved", firstCall.text);
   assert(!existsSync(recordFile), "the record is used once");
   page = await app.firstWindow();
-  assert((await page.evaluate(() => window.sonobeHost.reopening)) === true, "the editor is told this launch reopens work (sonobeHost.reopening)");
+  const told = await page.evaluate(async () => ({ launching: window.sonobeHost.launching, info: await window.sonobeHost.launch() }));
+  assert(told.launching === true && told.info?.reopening === true && told.info.open?.kind === "draft" && told.info.open.id === restartDraft && told.info.open.project === target, "the editor is told what this launch reopens before it renders (sonobeHost.launch())", told);
   // The work is on screen with no welcome screen over it. (That the editor never shows one in this window, not even for a moment, is welcomeStore's unit test.)
   await page.locator(".sb-shell").waitFor({ timeout: 10_000 });
   await new Promise((r) => setTimeout(r, 1500));
@@ -404,6 +414,108 @@ try {
   await app.close().catch(() => undefined);
   app = null;
   log("Quit with an unsaved change: Cancel kept the app, and Don't Save ended it");
+
+  // ---------------------------------------------------------------------------------------------
+  // 7. A window opened for a project starts on it: at launch, and in a running app with no window
+  // ---------------------------------------------------------------------------------------------
+
+  // Every title a window's editor sets is its document's name: the demo's would show here if it were ever built.
+  const recordTitles = () =>
+    app.evaluate(({ ipcMain }) => {
+      if (!globalThis.__titles) ipcMain.on("sonobe:window:set-title", (_event, title) => globalThis.__titles.push(String(title)));
+      globalThis.__titles = [];
+    });
+  const inPage = (script) => app.evaluate(({ BrowserWindow }, code) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(code, true), script);
+  const toldAtLaunch = "(async () => ({ launching: window.sonobeHost.launching, info: await window.sonobeHost.launch() }))()";
+  const documentInfo = () => app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.info"));
+
+  ({ app, page } = await launch([target]));
+  await recordTitles();
+  const atLaunch = await inPage(toldAtLaunch);
+  assert(atLaunch.launching === true && atLaunch.info?.reopening === false && atLaunch.info.open?.kind === "project" && atLaunch.info.open.path === target && atLaunch.info.problems.length === 0, "the editor is told which project it was launched with (sonobeHost.launch())", atLaunch);
+  const launched = await documentInfo();
+  assert(launched.projectPath === target && launched.name === "Placemark Deck" && launched.dirty === false, "the launch document is the project", launched);
+
+  mcp = await connectMcp();
+  const launchEdit = await mcp.call("add_layers", { label: "added a pin", layers: [{ type: "oval", name: "Unsaved after launch" }] });
+  assert(!launchEdit.isError, "add_layers on the launch document", launchEdit.text);
+  const launchDraft = await poll(() => Object.entries(draftsOnDisk()).find(([, d]) => d.projectPath === target)?.[0], { message: "a draft of the unsaved change" });
+  await mcp.close();
+  // The page that loads after a crash asks again and is told nothing: it starts as any launch does, and offers the draft.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer());
+  await poll(async () => (await app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply"))) === true && (await documentInfo().catch(() => null))?.projectPath === null, { timeout: 20_000, message: "the reloaded editor" });
+  const afterReload = await inPage(toldAtLaunch);
+  assert(afterReload.launching === true && afterReload.info === null, "a page that loads again is told nothing to start on", afterReload);
+  const reloadedInfo = await documentInfo();
+  assert(reloadedInfo.name === "Photo Zoom" && reloadedInfo.draft === null, "the reloaded editor starts as a plain launch does", reloadedInfo);
+  const offered = await poll(() => inPage("document.querySelector('.sb-welcome[role=dialog] .sb-welcome__draft')?.textContent ?? null"), { message: "the Recovered offer after the crash" });
+  assert(offered.includes("Placemark Deck"), "the welcome screen offers the draft the crash left", offered);
+  log("launched with a project: the editor started on it, and after a crash the reloaded page started as usual and offered the draft");
+
+  // Every window closed and the app still running (macOS): Finder or Open Recent opens the project in a new window.
+  await app.evaluate(() => globalThis.__sonobeTest.destroyWindows());
+  await poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length === 0), { message: "the window to go" });
+  await recordTitles();
+  await app.evaluate((_electron, dir) => globalThis.__sonobeTest.openProject(dir), target);
+  await poll(() => app.evaluate(() => globalThis.__sonobeTest.hasRendererMethod("document.apply") === true), { timeout: 20_000, message: "the new window's editor" });
+  const reopenedInfo = await documentInfo();
+  assert(reopenedInfo.projectPath === target && reopenedInfo.dirty === false, "the new window shows the project", reopenedInfo);
+  const titles = await app.evaluate(() => globalThis.__titles);
+  assert(titles.length > 0 && titles.at(-1).startsWith("Placemark Deck") && !titles.some((title) => title.includes("Photo Zoom")), "the new window's editor never built the demo", titles);
+  const toldNewWindow = await inPage(toldAtLaunch);
+  assert(toldNewWindow.launching === true && toldNewWindow.info?.open?.path === target, "the new window's editor was told what it was opened for", toldNewWindow);
+  await new Promise((r) => setTimeout(r, 1500));
+  assert(draftsOnDisk()[launchDraft] && (await inPage("document.querySelector('.sb-welcome') === null")), "no welcome screen is over the project, although a draft is waiting");
+  log("with no window open, opening the project started the new window on it");
+  await app.evaluate(() => globalThis.__sonobeTest.destroyWindows());
+  await app.close();
+  app = null;
+
+  // ---------------------------------------------------------------------------------------------
+  // 8. SIGTERM during launch
+  // ---------------------------------------------------------------------------------------------
+  // Spawned directly: Playwright would wait for a window that a launch cut short never opens.
+  const other = path.join(temp, "Projects", "Like Toggle.sonobe");
+  cpSync(path.join(repoDir, "examples", "02-like-toggle"), other, { recursive: true });
+  const quitHome = path.join(temp, "quit-home");
+  const quitToken = path.join(quitHome, "mcp.json");
+  /** One launch with both prototypes, SIGTERM `afterMs` after the spawn (never, when null): how it ended, and when mcp.json appeared. */
+  const launchAndQuit = (afterMs) =>
+    new Promise((resolve) => {
+      rmSync(quitHome, { recursive: true, force: true });
+      rmSync(path.join(temp, "quit-data"), { recursive: true, force: true });
+      const spawned = Date.now();
+      const child = spawn(electronPath, ["--mute-audio", appDir, target, other], { cwd: appDir, env: { ...env, SONOBE_HOME: quitHome, SONOBE_USER_DATA: path.join(temp, "quit-data") }, stdio: "ignore" });
+      let endpointAt = null;
+      const watch = setInterval(() => {
+        if (endpointAt === null && existsSync(quitToken)) endpointAt = Date.now() - spawned;
+        // The launch that is only timed: it ends once the endpoint is up.
+        if (afterMs === null && endpointAt !== null) child.kill("SIGTERM");
+      }, 5);
+      const term = afterMs === null ? null : setTimeout(() => child.kill("SIGTERM"), afterMs);
+      const giveUp = setTimeout(() => child.kill("SIGKILL"), afterMs === null ? 30_000 : afterMs + 6000);
+      child.once("exit", (code, signal) => {
+        clearInterval(watch);
+        clearTimeout(term ?? undefined);
+        clearTimeout(giveUp);
+        resolve({ code, signal, endpointAt, ms: Date.now() - spawned });
+      });
+    });
+  // The endpoint comes up between `ready` and the first window, so its time says where in the launch to aim.
+  const timed = await launchAndQuit(null);
+  assert(timed.endpointAt !== null, "a launch that isn't interrupted brings the MCP endpoint up", timed);
+  const endings = [];
+  for (let i = 0; i < 16; i++) {
+    const afterMs = Math.max(50, Math.round(timed.endpointAt - 200 + i * 30));
+    const outcome = await launchAndQuit(afterMs);
+    // Before Chromium has its handler the signal's default ends the process, which is a quit too.
+    const quit = (outcome.code === 0 && outcome.signal === null) || outcome.signal === "SIGTERM";
+    assert(quit, `SIGTERM ${afterMs} ms into launch ends the app on its own, without a crash or a hang`, outcome);
+    await new Promise((r) => setTimeout(r, 150));
+    assert(!existsSync(quitToken), `SIGTERM ${afterMs} ms into launch leaves no mcp.json behind`, outcome);
+    endings.push(outcome.signal === "SIGTERM" ? "early" : "quit");
+  }
+  log(`SIGTERM during launch, 16 moments around the endpoint coming up at ${timed.endpointAt} ms: ${endings.filter((how) => how === "quit").length} quit, ${endings.filter((how) => how === "early").length} ended before any handler; none hung, crashed or left mcp.json`);
   log("PASS");
 } catch (err) {
   failed = true;

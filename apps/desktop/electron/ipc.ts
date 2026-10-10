@@ -8,6 +8,8 @@ export const IPC = {
   openProject: "sonobe:open-project",
   /** renderer → main: an onOpenProject subscriber exists; flush queued paths. */
   openProjectReady: "sonobe:open-project:ready",
+  /** renderer → main: what this window starts on (electron/launch.ts). Answered once per window; a page that loads again gets null. */
+  launch: "sonobe:launch",
   dialogOpenProject: "sonobe:dialog:open-project",
   dialogSaveProject: "sonobe:dialog:save-project",
   readProject: "sonobe:project:read",
@@ -79,5 +81,10 @@ export type IpcChannel = (typeof IPC)[keyof typeof IPC];
 /** Added to an editor window's process.argv when the app runs muted (SONOBE_MUTE); the preload reads it into sonobeHost.muted. */
 export const MUTED_ARG = "--sonobe-muted";
 
-/** Added to the first editor window's process.argv when this launch reopens what was open before a restart; the preload reads it into sonobeHost.reopening. */
-export const REOPENING_ARG = "--sonobe-reopening";
+/**
+ * The query an editor window's page is loaded with when the app has something for it to start on (`index.html?launch`): the
+ * preload reads it into sonobeHost.launching and asks main what (IPC.launch). Only a flag, because main answers once and a
+ * page that loads again must start as usual. Not an argument like the one above: a window with one more of those starts
+ * its renderer a few milliseconds later.
+ */
+export const LAUNCH_QUERY = "launch";

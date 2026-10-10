@@ -11,9 +11,16 @@
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
  * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
  * - updates are off for this launch (SONOBE_UPDATES=off): the app says so, never loads the updater and asks no feed
+ * - the entry is dist/boot.cjs, and the launch leaves Node's compile cache for main.cjs in the data folder, under this
+ *   version's name, with the signature inside the bundle untouched; a second launch that has nowhere to keep one
+ *   starts all the same
+ * - launched with a prototype's path, the editor is told before its first render and starts on it, not on the demo
  * - the MCP endpoint answers /health with the token from mcp.json, and quitting removes mcp.json
- * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), and runs from a copy outside
- *   the checkout, where it has nothing but its own bundle to load
+ * - the bundled CLI runs with the app's own runtime (Resources/cli/sonobe --version), keeps Node's compile cache in
+ *   its own version's folder under SONOBE_HOME, and runs from a copy outside the checkout, where it has nothing but
+ *   its own bundle to load
+ * - `sonobe mcp` runs the relay's own small bundle (Resources/cli/relay.mjs): without the app it says how to start
+ *   it and exits 1, and against the launched app it answers initialize and exits 0 when stdin closes
  * - on macOS, the SF Symbols helper (Resources/bin/sfsymbol) has the app's architectures and draws a symbol
  *
  *   node scripts/verify-package.mjs                release/mac-<arch>/Sonobe.app, for this machine's architecture
@@ -31,7 +38,7 @@
  * opens .sonobe files.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -124,12 +131,12 @@ try {
   log(`checking ${appPath}`);
 
   // Bundle contents.
-  for (const file of ["app.asar", "editor/index.html", "cli/sonobe.mjs", "cli/sonobe", "cli/guides/start-here.md", "cli/examples/README.md", "cli/examples/16-placemark-deck/design/capture.json", "licenses/LICENSE.txt", "licenses/THIRD-PARTY-NOTICES.txt"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
+  for (const file of ["app.asar", "editor/index.html", "cli/sonobe.mjs", "cli/relay.mjs", "cli/sonobe", "cli/guides/start-here.md", "cli/examples/README.md", "cli/examples/16-placemark-deck/design/capture.json", "licenses/LICENSE.txt", "licenses/THIRD-PARTY-NOTICES.txt"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   // Electron's and Chromium's licenses sit beside the executable on Windows and Linux; a Mac app carries them here.
   if (mac) for (const file of ["icon.icns", "licenses/LICENSE.electron.txt", "licenses/LICENSES.chromium.html"]) assert(existsSync(path.join(resources, file)), `Resources/${file}`);
   const { listPackage, extractFile } = await import("@electron/asar");
   const asarFiles = listPackage(path.join(resources, "app.asar")).map((f) => f.replaceAll("\\", "/"));
-  for (const file of ["/package.json", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
+  for (const file of ["/package.json", "/dist/boot.cjs", "/dist/main.cjs", "/dist/preload.cjs", "/dist/updater.cjs", "/dist/player/index.html", "/dist/player/player.js", "/dist/scene/index.html", "/dist/scene/scene.js", "/dist/guides/start-here.md", "/dist/examples/README.md", "/dist/examples/16-placemark-deck/design/capture.json"]) assert(asarFiles.includes(file), `app.asar${file}`, asarFiles.slice(0, 20));
   assert(!asarFiles.some((f) => f.startsWith("/node_modules/") || f.endsWith(".map")), "no node_modules or source maps in app.asar", asarFiles.filter((f) => f.startsWith("/node_modules/")).slice(0, 5));
   const under = (dir) => readdirSync(path.join(resources, dir), { recursive: true }).map((f) => String(f).replaceAll("\\", "/"));
   const editorMaps = under("editor").filter((f) => f.endsWith(".map"));
@@ -138,6 +145,9 @@ try {
   // The CLI is one bundled file. A native module beside it would have to be built and signed per architecture.
   const cliExtras = under("cli").filter((f) => f.split("/").includes("node_modules") || f.endsWith(".node"));
   assert(cliExtras.length === 0, "no node_modules or native modules under Resources/cli", cliExtras.slice(0, 5));
+  // The relay is what every Claude session keeps running: it holds the relay alone, not the CLI.
+  const relaySize = statSync(path.join(resources, "cli", "relay.mjs")).size;
+  assert(relaySize < 64 * 1024, "Resources/cli/relay.mjs is the relay alone (under 64 KB)", relaySize);
   const notices = readFileSync(path.join(resources, "licenses", "THIRD-PARTY-NOTICES.txt"), "utf8");
   // ajv is in none of Sonobe's package.json files: the MCP SDK carries it inside its own published files.
   // electron-updater is bundled into dist/updater.cjs, and its notice comes from that bundle's own file list.
@@ -147,7 +157,10 @@ try {
   log(`app.asar holds ${asarFiles.length} entries; editor (no source maps), CLI, guides and licenses are in Resources`);
 
   // What this build can do with an update, as the app reads it (scripts/signing.ts).
-  const recorded = JSON.parse(extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8")).sonobe;
+  const packaged = JSON.parse(extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8"));
+  const recorded = packaged.sonobe;
+  // The entry turns on the compile cache and then loads main.cjs, which can't cache itself (electron/boot.ts).
+  assert(packaged.main === "dist/boot.cjs", "the packaged package.json's main is dist/boot.cjs", packaged.main);
   // Where a downloaded update waits (~/Library/Caches/sonobe-updater on a Mac). The first signed release freezes
   // the name. A --dir build has no app-update.yml, and never checks for updates.
   const updateConfig = path.join(resources, "app-update.yml");
@@ -229,15 +242,25 @@ try {
 
     // The bundled CLI with the app's own runtime, which its launcher finds from where it sits in the app.
     const launcher = process.platform === "win32" ? "sonobe.cmd" : "sonobe";
-    const cliVersion = execFileSync(path.join(resources, "cli", launcher), ["--version"], { encoding: "utf8", env: { ...process.env, SONOBE_NODE: "" } }).trim();
+    // Its compile cache goes under SONOBE_HOME, so this run leaves nothing in the person's ~/.sonobe.
+    const cliHome = path.join(temp, "cli-home");
+    const cliEnv = { ...process.env, SONOBE_NODE: "", SONOBE_HOME: cliHome };
+    for (const key of ["ELECTRON_RUN_AS_NODE", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]) delete cliEnv[key];
+    const cliVersion = execFileSync(path.join(resources, "cli", launcher), ["--version"], { encoding: "utf8", env: cliEnv }).trim();
     assert(cliVersion.includes(pkg.version), "bundled CLI --version", cliVersion);
+    const cliCache = path.join(cliHome, "compile-cache", `cli-${packaged.version}`);
+    const cliCached = process.platform === "win32" || !existsSync(cliCache) ? [] : readdirSync(cliCache, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    if (process.platform !== "win32") assert(cliCached.length > 0, "the launcher keeps the CLI's compile cache in <SONOBE_HOME>/compile-cache/cli-<version>", readdirSync(cliHome, { recursive: true }).slice(0, 10));
+    // `sonobe mcp` alone is the relay's own bundle. With no app running (nothing in this home) it says so and exits 1.
+    const noApp = spawnSync(path.join(resources, "cli", launcher), ["mcp"], { encoding: "utf8", env: cliEnv, input: "" });
+    assert(noApp.status === 1 && /the Sonobe app isn't running/.test(noApp.stderr) && /sonobe mcp --headless/.test(noApp.stderr), "sonobe mcp without the app says how to start it and exits 1", { status: noApp.status, stderr: noApp.stderr.slice(0, 300) });
     // Then from a copy outside the checkout. Under release/, Node looks for packages in the repository's
     // node_modules above Resources/cli, so a package the bundle left out would load here and on no one else's Mac.
     const cliCopy = path.join(temp, "cli");
     cpSync(path.join(resources, "cli"), cliCopy, { recursive: true });
     const described = execFileSync(path.join(cliCopy, launcher), ["describe", "switch"], { encoding: "utf8", cwd: temp, env: { ...process.env, SONOBE_NODE: executable, ELECTRON_RUN_AS_NODE: "1" } });
     assert(/switch/i.test(described), "bundled CLI describe, from a copy outside the checkout", described.slice(0, 200));
-    log(`bundled CLI runs with the app runtime (${cliVersion}), and from a copy with only its own bundle`);
+    log(`bundled CLI runs with the app runtime (${cliVersion}), keeps its compile cache under SONOBE_HOME, and runs from a copy with only its own bundle`);
 
     // Launch muted with isolated state. SONOBE_TEST=1 keeps secrets on the test cipher: the real one is the login
     // keychain, where a freshly built app raises a permission dialog on the person's screen. SONOBE_UPDATES=off:
@@ -245,7 +268,8 @@ try {
     const home = path.join(temp, "home");
     const userData = path.join(temp, "userData");
     const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: userData, SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
-    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED"]) delete env[key];
+    // NODE_COMPILE_CACHE would send the app's compile cache to the shell's folder, and NODE_DISABLE_COMPILE_CACHE turn it off.
+    for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]) delete env[key];
     if (values["mcp-port"]) env.SONOBE_MCP_PORT = values["mcp-port"];
     // macOS reads -AppleLanguages as the app's preferred languages, as a non-English system would set them.
     app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 });
@@ -304,10 +328,79 @@ try {
     assert(updaterLoaded === false && !existsSync(path.join(userData, ".updaterId")), "the updater was never loaded and left nothing in the user data folder", { updaterLoaded });
     log("updates are off for this launch: no check, and the updater was never loaded");
 
+    // The relay, as a Claude session starts it, against this app: it answers initialize with the app's own answer, and
+    // closing stdin ends it with exit 0.
+    const relayed = await new Promise((resolve, reject) => {
+      const child = spawn(path.join(resources, "cli", launcher), ["mcp"], { env: { ...cliEnv, SONOBE_HOME: home }, cwd: temp, stdio: ["pipe", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (stdout.includes("\n")) child.stdin.end();
+      });
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("error", reject);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr });
+      });
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "verify-package", version: pkg.version } } })}\n`);
+    });
+    const answer = (() => {
+      try {
+        return JSON.parse(relayed.stdout.split("\n")[0]);
+      } catch {
+        return null;
+      }
+    })();
+    assert(relayed.code === 0 && answer?.id === 1 && answer.result?.serverInfo?.name === "sonobe" && /relaying to Sonobe/.test(relayed.stderr), "sonobe mcp relays initialize to the running app and exits 0 when stdin closes", { code: relayed.code, stdout: relayed.stdout.slice(0, 300), stderr: relayed.stderr.slice(0, 300) });
+    log(`sonobe mcp (cli/relay.mjs, ${(relaySize / 1024).toFixed(1)} KB) relays to the running app (${answer.result.serverInfo.name} ${answer.result.serverInfo.version})`);
+
+    // The compile cache is on, in this version's folder under the data folder (electron/compile-cache.ts).
+    const cache = await app.evaluate(() => globalThis.__sonobeTest.compileCache());
+    const cacheHome = path.join(userData, "compile-cache", `app-${packaged.version}`);
+    assert(cache.home === cacheHome && cache.dir?.startsWith(cacheHome), "Node's compile cache is in <userData>/compile-cache/app-<version>", cache);
+
     await app.close();
     app = null;
     await poll(() => !existsSync(tokenFile), { timeout: 5000, message: "mcp.json removal" });
     log("quit cleanly (mcp.json removed)");
+
+    // What the launch left: main.cjs's compiled code (Node keeps it one folder down, named after the runtime), and nothing
+    // changed inside the bundle, whose signature still verifies.
+    const cached = readdirSync(cacheHome, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => statSync(path.join(entry.parentPath, entry.name)).size);
+    assert(Math.max(0, ...cached) >= 500 * 1024, "the launch left main.cjs's compile cache (a file of 500 KB or more) in the data folder", cached);
+    if (mac) execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "pipe" });
+    log(`compile cache: ${cached.length} file${cached.length === 1 ? "" : "s"}, ${(cached.reduce((sum, size) => sum + size, 0) / 1024 / 1024).toFixed(1)} MB in compile-cache/app-${packaged.version}${mac ? "; codesign --verify still passes" : ""}`);
+
+    // With nowhere to keep a cache (a file sits where its folder goes) the app starts all the same, without one.
+    const blocked = path.join(temp, "userData-no-cache");
+    mkdirSync(blocked);
+    writeFileSync(path.join(blocked, "compile-cache"), "");
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio"], env: { ...env, SONOBE_USER_DATA: blocked, SONOBE_HOME: path.join(temp, "home-no-cache") }, timeout: 60_000 });
+    const second = await app.firstWindow();
+    await poll(() => second.evaluate(() => (document.getElementById("root")?.childElementCount ?? 0) > 0), { timeout: 15_000, message: "the editor to mount in a launch without a compile cache" });
+    const uncached = await app.evaluate(() => globalThis.__sonobeTest.compileCache());
+    assert(uncached.dir === null, "a launch that can't make its cache folder runs without a compile cache", uncached);
+    await app.close();
+    app = null;
+    log("a launch with no folder for the compile cache starts and renders the editor");
+
+    // Launched with a prototype's path, the window is opened for it: its page asks what before the editor's first render
+    // (electron/launch.ts), and the document is the prototype, read by the preload on the way.
+    const project = path.join(temp, "Like Toggle.sonobe");
+    cpSync(path.resolve(root, "../../examples/02-like-toggle"), project, { recursive: true });
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", project], env: { ...env, SONOBE_USER_DATA: path.join(temp, "userData-project"), SONOBE_HOME: path.join(temp, "home-project") }, timeout: 60_000 });
+    const third = await app.firstWindow();
+    await poll(() => app.evaluate(() => globalThis.__sonobeTest?.hasRendererMethod("document.info") === true), { timeout: 15_000, message: "the editor of a launch with a prototype" });
+    const opened = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.info"));
+    const told = await third.evaluate(async () => ({ launching: window.sonobeHost.launching, info: await window.sonobeHost.launch(), toolbar: document.querySelector(".sb-toolbar__doc-title")?.textContent ?? null, url: location.href }));
+    assert(told.launching === true && told.info?.open?.kind === "project" && told.info.open.path === project && told.info.reopening === false, "a window opened for a prototype is told which (sonobeHost.launch())", told);
+    assert(opened.projectPath === project && opened.name === "Like Toggle" && opened.dirty === false && told.toolbar === "Like Toggle", "the editor starts on the prototype it was launched with", { name: opened.name, projectPath: opened.projectPath, toolbar: told.toolbar });
+    await app.close();
+    app = null;
+    log("launched with a prototype's path, the editor starts on it");
     log(`PASS (${verdict})`);
   }
 } catch (err) {
