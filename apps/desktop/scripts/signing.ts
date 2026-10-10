@@ -38,6 +38,11 @@ export interface SigningInput {
   env: Record<string, string | undefined>;
   /** Certificate names from `security find-identity -v -p codesigning` (readIdentities). */
   identities: readonly string[];
+  /**
+   * Where `identities` were read: this Mac's keychains, or the keychain package.mjs made from the
+   * certificate in CSC_LINK. Only the wording of a release's label and refusals depends on it.
+   */
+  certificateFrom?: "keychain" | "CSC_LINK";
   fileExists: (file: string) => boolean;
 }
 
@@ -56,10 +61,10 @@ export interface SigningPlan {
   /** One line for the build log. */
   label: string;
   /**
-   * electron-builder's `mac.identity`: "-" signs ad-hoc (macSigningOptions makes sure of it), a name
-   * picks that certificate, and undefined lets it search the temporary keychain it makes from CSC_LINK.
+   * electron-builder's `mac.identity`: "-" signs ad-hoc (macSigningOptions makes sure of it), and a name
+   * picks that certificate.
    */
-  identity: string | undefined;
+  identity: string;
   /** The keychain certificate's full name, when the plan chose one. */
   certificate: string | undefined;
   hardenedRuntime: boolean;
@@ -110,7 +115,8 @@ const APPLE_PREFIXES = [
 ];
 /**
  * What electron-builder reads when it signs. Outside a release they are removed: with CSC_LINK set
- * it imports that certificate into a temporary keychain even for an ad-hoc build.
+ * it imports that certificate into a temporary keychain even for an ad-hoc build. A release never lets
+ * it: package.mjs installs CSC_LINK's certificate itself (certificateSource).
  */
 const CERTIFICATE_ENV = [
   "CSC_LINK",
@@ -137,6 +143,36 @@ const sameName = (names: readonly string[]): boolean =>
   names.length > 1 && new Set(names).size === 1;
 const DELETE_ONE =
   "Delete the one you don't sign with in Keychain Access (the expiry dates tell them apart)";
+
+/**
+ * Where CSC_LINK's certificate is: a .p12 file (a path, or a file:// address) or the file's base64, which
+ * is what a repository secret holds. package.mjs installs it in a keychain of its own for a release.
+ * electron-builder's own import can't be used: it makes its keychain with a random password and then gives
+ * `security set-key-partition-list` the certificate's password, which current macOS checks and refuses.
+ */
+export function certificateSource(
+  link: string,
+  fileExists: (file: string) => boolean,
+): { file: string } | { base64: string } {
+  const value = link.trim();
+  const how = "Set CSC_LINK to the .p12 file's path, or to its base64 (`base64 -i DeveloperID.p12`).";
+  if (/^https?:\/\//i.test(value)) {
+    throw new SigningError(
+      "CSC_LINK is a web address, and a release reads its certificate from a file or from the file's base64.",
+      `Download the .p12 first. ${how}`,
+    );
+  }
+  if (/^file:\/\//i.test(value)) return { file: decodeURIComponent(new URL(value).pathname) };
+  if (fileExists(value)) return { file: value };
+  if (/^(\/|\.{1,2}\/|~)/.test(value) || /\.p12$/i.test(value)) {
+    throw new SigningError(`CSC_LINK names a file that isn't there: ${value}`, how);
+  }
+  const base64 = value.replace(/\s+/g, "");
+  if (base64.length < 64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new SigningError("CSC_LINK is neither a .p12 file nor a .p12 file's base64.", how);
+  }
+  return { base64 };
+}
 
 /**
  * Reads what `security find-identity -v -p codesigning` prints: each certificate's name. A
@@ -205,13 +241,9 @@ function notaryCredential(input: SigningInput): string {
   );
 }
 
-/** The Developer ID certificate a release signs with: `identity` is undefined when CSC_LINK supplies it. */
-function releaseCertificate(input: SigningInput): {
-  identity: string | undefined;
-  certificate: string | undefined;
-} {
-  // electron-builder then searches only the temporary keychain it makes from that certificate.
-  if (input.env.CSC_LINK) return { identity: undefined, certificate: undefined };
+/** The Developer ID certificate a release signs with, from this Mac's keychains or from CSC_LINK's. */
+function releaseCertificate(input: SigningInput): { identity: string; certificate: string } {
+  const fromLink = input.certificateFrom === "CSC_LINK";
   const wanted = input.env.CSC_NAME ? withoutPrefix(input.env.CSC_NAME.trim()) : "";
   const all = input.identities.filter((name) => name.startsWith(DEVELOPER_ID));
   const found = all.filter((name) => name.includes(wanted));
@@ -229,6 +261,12 @@ function releaseCertificate(input: SigningInput): {
     );
   }
   const others = input.identities.filter((name) => !name.startsWith(DEVELOPER_ID));
+  if (fromLink && !all.length) {
+    throw new SigningError(
+      `A release is signed with a "Developer ID Application" certificate, and CSC_LINK holds ${others.length ? `only ${list(others)}` : "no code signing certificate with its private key"}.`,
+      "Export the Developer ID Application certificate together with its private key from Keychain Access as a .p12, and set CSC_LINK to that file's path or its base64 and CSC_KEY_PASSWORD to its password.",
+    );
+  }
   const refused = all.length
     ? `CSC_NAME is "${input.env.CSC_NAME}", which matches none of this Mac's Developer ID certificates (${list(all)}).`
     : others.length
@@ -393,7 +431,7 @@ export function planSigning(input: SigningInput): SigningPlan {
   const { identity, certificate } = releaseCertificate(input);
   return {
     mode,
-    label: `release build: ${certificate ? `signed with "${certificate}"` : "signed with the Developer ID certificate in CSC_LINK"}, hardened runtime, notarized with ${credential}`,
+    label: `release build: signed with "${certificate}"${input.certificateFrom === "CSC_LINK" ? " from CSC_LINK" : ""}, hardened runtime, notarized with ${credential}`,
     identity,
     certificate,
     hardenedRuntime: true,
@@ -427,8 +465,7 @@ export function macSigningOptions(
     }
   }
   return {
-    // Left out when undefined, so electron-builder searches the keychain CSC_LINK makes.
-    ...(plan.identity === undefined ? {} : { identity: plan.identity }),
+    identity: plan.identity,
     hardenedRuntime: plan.hardenedRuntime,
     notarize: plan.notarize,
     entitlements: entitlements.app,

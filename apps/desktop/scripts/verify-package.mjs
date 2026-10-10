@@ -67,8 +67,14 @@ const log = (message) => console.log(`[verify +${((Date.now() - started) / 1000)
 function assert(condition, message, detail) {
   if (!condition) throw new Error(`Assertion failed: ${message}${detail === undefined ? "" : `\n  got: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
 }
+/**
+ * How many times longer to wait than on a Mac that runs the app natively. An Intel build on Apple silicon
+ * runs under Rosetta, which translates as it goes: on the release workflow's runner each launch takes about
+ * 40 seconds, where a native one takes two.
+ */
+let patience = 1;
 async function poll(fn, { timeout = 20_000, interval = 150, message = "condition" } = {}) {
-  const deadline = Date.now() + timeout;
+  const deadline = Date.now() + timeout * patience;
   let last;
   while (Date.now() < deadline) {
     last = await fn();
@@ -223,7 +229,8 @@ try {
     assert(appArchs.every((slice) => archs(helper).includes(slice)), `Resources/bin/sfsymbol is built for the app's architecture (${appArchs.join(" + ")})`, archs(helper));
     runnable = appArchs.includes(process.arch === "x64" ? "x86_64" : "arm64") || (appArchs.includes("x86_64") && run("arch", ["-x86_64", "/usr/bin/true"]).status === 0);
     assert(runnable || values.static, `this Mac can run the app's architecture (${appArchs.join(" + ")}). ${appArchs.includes("x86_64") ? "It's an Intel build and Rosetta isn't installed: install it with softwareupdate --install-rosetta --agree-to-license" : "It's an Apple silicon build: check it on an Apple silicon Mac"}, or pass --static to check the bundle without launching it`);
-    log(`architecture: ${appArchs.join(" + ")}, with a matching SF Symbols helper`);
+    if (process.arch === "arm64" && !appArchs.includes("arm64")) patience = 6;
+    log(`architecture: ${appArchs.join(" + ")}, with a matching SF Symbols helper${patience > 1 ? "; it runs under Rosetta here, so every wait is longer" : ""}`);
   }
   const wanted = signature ? buildInfoFor(signature) : { signing: "none", updates: "notify" };
   assert(recorded?.signing === wanted.signing && recorded?.updates === wanted.updates, `package.json's sonobe field matches the signature (${JSON.stringify(wanted)})`, recorded ?? "no sonobe field");
@@ -272,7 +279,7 @@ try {
     for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]) delete env[key];
     if (values["mcp-port"]) env.SONOBE_MCP_PORT = values["mcp-port"];
     // macOS reads -AppleLanguages as the app's preferred languages, as a non-English system would set them.
-    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 });
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 * patience });
     app.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
     const win = await app.firstWindow();
     const pageErrors = [];
@@ -378,7 +385,7 @@ try {
     const blocked = path.join(temp, "userData-no-cache");
     mkdirSync(blocked);
     writeFileSync(path.join(blocked, "compile-cache"), "");
-    app = await electron.launch({ executablePath: executable, args: ["--mute-audio"], env: { ...env, SONOBE_USER_DATA: blocked, SONOBE_HOME: path.join(temp, "home-no-cache") }, timeout: 60_000 });
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio"], env: { ...env, SONOBE_USER_DATA: blocked, SONOBE_HOME: path.join(temp, "home-no-cache") }, timeout: 60_000 * patience });
     const second = await app.firstWindow();
     await poll(() => second.evaluate(() => (document.getElementById("root")?.childElementCount ?? 0) > 0), { timeout: 15_000, message: "the editor to mount in a launch without a compile cache" });
     const uncached = await app.evaluate(() => globalThis.__sonobeTest.compileCache());
@@ -391,7 +398,7 @@ try {
     // (electron/launch.ts), and the document is the prototype, read by the preload on the way.
     const project = path.join(temp, "Like Toggle.sonobe");
     cpSync(path.resolve(root, "../../examples/02-like-toggle"), project, { recursive: true });
-    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", project], env: { ...env, SONOBE_USER_DATA: path.join(temp, "userData-project"), SONOBE_HOME: path.join(temp, "home-project") }, timeout: 60_000 });
+    app = await electron.launch({ executablePath: executable, args: ["--mute-audio", project], env: { ...env, SONOBE_USER_DATA: path.join(temp, "userData-project"), SONOBE_HOME: path.join(temp, "home-project") }, timeout: 60_000 * patience });
     const third = await app.firstWindow();
     await poll(() => app.evaluate(() => globalThis.__sonobeTest?.hasRendererMethod("document.info") === true), { timeout: 15_000, message: "the editor of a launch with a prototype" });
     const opened = await app.evaluate(() => globalThis.__sonobeTest.invokeRenderer("document.info"));

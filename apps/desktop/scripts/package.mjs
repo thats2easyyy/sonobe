@@ -38,13 +38,14 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { SigningError, checkArtifacts, checkHelper, checkSignature, helperArch, macSigningOptions, planSigning, readIdentities, readSignature, withLibraryValidationDisabled } from "./signing.ts";
+import { SigningError, certificateSource, checkArtifacts, checkHelper, checkSignature, helperArch, macSigningOptions, planSigning, readIdentities, readSignature, withLibraryValidationDisabled } from "./signing.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
@@ -81,8 +82,60 @@ function keychainIdentities() {
   return readIdentities(found.stdout ?? "");
 }
 
+/** Runs `security` for the certificate's keychain. A failure carries security's own words and never the arguments, which hold passwords. */
+function security(args, doing) {
+  const ran = spawnSync("/usr/bin/security", args, { encoding: "utf8", timeout: 60_000 });
+  if (ran.status === 0) return ran.stdout ?? "";
+  const said = (ran.stderr || ran.stdout || "").trim().split("\n")[0];
+  throw new SigningError(
+    `The certificate in CSC_LINK couldn't be installed: ${doing} failed${said ? ` (${said})` : ""}.`,
+    "Check that CSC_LINK is the Developer ID Application certificate exported with its private key as a .p12 (the file's path or its base64), and that CSC_KEY_PASSWORD is the password it was exported with.",
+  );
+}
+
+/**
+ * A release given its certificate as CSC_LINK (the release workflow) installs it here, in a keychain of its
+ * own that is gone when the script ends, and signs from it as from a Mac that has the certificate.
+ * electron-builder can't be left to import it: it gives `security set-key-partition-list` the certificate's
+ * password where the keychain's is asked for, and current macOS refuses (scripts/signing.ts, certificateSource).
+ */
+function installCertificate() {
+  const source = certificateSource(process.env.CSC_LINK, existsSync);
+  const folder = mkdtempSync(path.join(tmpdir(), "sonobe-certificate-"));
+  const keychain = path.join(folder, "release.keychain-db");
+  const searched = security(["list-keychains", "-d", "user"], "reading the keychain search list")
+    .split("\n")
+    .map((line) => line.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  let listed = false;
+  // The search list goes back to what it was, whatever ends the build.
+  process.on("exit", () => {
+    if (listed) spawnSync("/usr/bin/security", ["list-keychains", "-d", "user", "-s", ...searched]);
+    spawnSync("/usr/bin/security", ["delete-keychain", keychain]);
+    rmSync(folder, { recursive: true, force: true });
+  });
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(signal, () => process.exit(code));
+
+  const p12 = "file" in source ? source.file : path.join(folder, "certificate.p12");
+  if ("base64" in source) writeFileSync(p12, Buffer.from(source.base64, "base64"), { mode: 0o600 });
+  const password = randomBytes(24).toString("hex");
+  security(["create-keychain", "-p", password, keychain], "making a keychain");
+  security(["set-keychain-settings", keychain], "keeping the keychain unlocked");
+  security(["unlock-keychain", "-p", password, keychain], "unlocking the keychain");
+  security(["import", p12, "-k", keychain, "-P", process.env.CSC_KEY_PASSWORD ?? "", "-T", "/usr/bin/codesign", "-T", "/usr/bin/productbuild"], "importing the .p12");
+  if ("base64" in source) rmSync(p12, { force: true });
+  // The keychain's own password. This is the step electron-builder gets wrong.
+  security(["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, keychain], "letting codesign use the key");
+  // codesign only signs from a keychain on the search list.
+  security(["list-keychains", "-d", "user", "-s", keychain, ...searched], "adding the keychain to the search list");
+  listed = true;
+  return { keychain, identities: readIdentities(security(["find-identity", "-v", "-p", "codesigning", keychain], "reading the certificate")) };
+}
+
 let plan;
+let installed = null;
 try {
+  if (values.release && process.platform === "darwin" && process.env.CSC_LINK) installed = installCertificate();
   plan = planSigning({
     platform: process.platform,
     hostArch: process.arch,
@@ -94,8 +147,10 @@ try {
     out: values.out,
     version: values.version,
     launchEnv: values["launch-env"],
-    env: process.env,
-    identities: keychainIdentities(),
+    // The certificate is in a keychain now, so the plan reads it there and CSC_LINK has done its part.
+    env: installed ? { ...process.env, CSC_LINK: undefined, CSC_NAME: undefined } : process.env,
+    identities: installed ? installed.identities : keychainIdentities(),
+    certificateFrom: installed ? "CSC_LINK" : "keychain",
     fileExists: existsSync,
   });
 } catch (err) {
@@ -106,6 +161,11 @@ step(plan.label);
 // electron-builder reads these itself, so a local or rehearsal build is cut off from the shell's certificates.
 for (const name of plan.scrubEnv) delete process.env[name];
 Object.assign(process.env, plan.setEnv);
+if (installed) {
+  // electron-builder signs from that keychain alone, and never imports the certificate itself.
+  for (const name of ["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME"]) delete process.env[name];
+  process.env.CSC_KEYCHAIN = installed.keychain;
+}
 
 // 2. Editor build.
 const editorIndex = path.join(repo, "apps", "editor", "dist", "index.html");
