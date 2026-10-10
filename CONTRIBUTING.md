@@ -129,7 +129,7 @@ It doesn't edit a tracked file to instrument the app. It launches a copy whose e
 
 A release is built by `.github/workflows/release.yml` from a version tag: the macOS app for Apple silicon and Intel, signed with a Developer ID certificate and notarized. The workflow stops at a draft GitHub release. Publishing the draft is yours to do.
 
-No release has been cut yet, and the workflow has never run: the first run is its first test. Until then the README is right to say there are no prebuilt downloads.
+No release has been cut yet. The workflow has run by hand from a branch, which signs, notarizes and verifies both architectures and makes no release; a tag's own steps (the version check against the tag, and the draft) have never run. Until the first release the README is right to say there are no prebuilt downloads.
 
 ### Confirm before the first release
 
@@ -226,7 +226,7 @@ To try a signed build without a Developer ID, build a rehearsal: `node apps/desk
 
 ### On a clean Mac
 
-Use a Mac that has never built or run Sonobe, on the oldest macOS you mean to support (the app needs 13). The Intel build has never been launched anywhere: the Mac it was built on has no Rosetta, so it was only read (`verify-package.mjs --static`). Its first launch is the release workflow's Rosetta step, so try it on an Intel Mac if you can.
+Use a Mac that has never built or run Sonobe, on the oldest macOS you mean to support (the app needs 13). The Intel build has only ever run under Rosetta, on the release workflow's runner, where package verification passes at about 40 seconds a launch. It has never run on an Intel Mac, so try it on one if you can.
 
 - Download the DMG with a browser, so macOS quarantines it. Open it, drag Sonobe into Applications and launch it. macOS asks once whether to open an app from the internet, and nothing else.
 - With the draft still unpublished, choose **Check for Updates…** in the Sonobe menu. Before the first release it must answer "There's no published release of Sonobe to update to yet.", and from the second release on "Sonobe is up to date". This is the first time the app asks the real feed on GitHub: any other answer is a problem with the feed or with how the app reads it.
