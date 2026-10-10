@@ -56,11 +56,21 @@ npm install
 npm run package -w @sonobe/desktop
 ```
 
-On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-0.1.0-mac-arm64.dmg`. Open the DMG and drag Sonobe into Applications. For an Intel Mac, add `-- --arch x64`.
+On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-<version>-mac-arm64.dmg`. Open the DMG and drag Sonobe into Applications. The app needs macOS 13 or later. For an Intel Mac, add `-- --arch x64`; that build has never been launched, on an Intel Mac or under Rosetta.
 
-Local builds are ad-hoc signed and not notarized. That's enough to run the app on the Mac that built it, but not to give it to other people. To check a build, run `npm run package:verify -w @sonobe/desktop -- --dmg`. It launches the app from inside the DMG with audio muted, then checks the editor, the MCP endpoint, and the bundled CLI.
+Local builds are ad-hoc signed and not notarized. That's enough to run the app on the Mac that built it, but not to give it to other people. The signed, notarized build for everyone else comes from a release workflow that hasn't cut its first release yet ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). To check a build, run `npm run package:verify -w @sonobe/desktop -- --dmg`. It checks the app inside the DMG (its files, signature and entitlements), then launches it with audio muted and checks the editor, the MCP endpoint, and the bundled CLI.
 
 Windows (NSIS) and Linux (AppImage, deb) targets are configured in `apps/desktop/electron-builder.yml`, but those builds haven't been verified yet.
+
+### Updates
+
+An installed Sonobe looks for a newer release a few seconds after it starts and every four hours while it runs. There is no release yet, so today the check finds nothing.
+
+- A build signed for release downloads the new version in the background and offers **Restart to Update**. The restart asks about unsaved changes first, and Sonobe opens again with what you had open. The update also goes in the next time you quit.
+- A build you make yourself is ad-hoc signed, and macOS won't let an update replace it. It tells you a new version exists and opens its release page.
+- Sonobe run from a checkout (`npm run desktop`) never checks.
+
+A check is a few ordinary web requests to GitHub: its list of Sonobe's releases, the newest one's tag, and that release's update file. GitHub sees what any site you visit sees: your network address and your system's language. The requests carry no identifier for you or your copy of Sonobe, and nothing about your prototypes. Turn the automatic check off in **Settings → Updates**; **Check for Updates…** in the Sonobe menu still works. `SONOBE_UPDATES=off` turns updates off altogether, the menu command included.
 
 ### From source, for development
 

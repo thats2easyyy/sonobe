@@ -20,6 +20,10 @@ export interface DesktopEnv {
   lan: boolean;
   /** SONOBE_LAN_PORT: fixed phone preview port; null picks a free port. */
   lanPort: number | null;
+  /** SONOBE_UPDATES=off: never check for a new version, whatever else is set. */
+  updates: boolean;
+  /** SONOBE_UPDATE_FEED: a generic update feed to read instead of the release feed (http(s) only), for rehearsals. */
+  updateFeed: URL | null;
 }
 
 function flag(value: string | undefined): boolean {
@@ -46,19 +50,34 @@ export function projectPathsFromArgv(argv: readonly string[], cwd: string): stri
   return out;
 }
 
+/**
+ * Why a build made with `package.mjs --launch-env` must not run, or null. Such a build is for the update
+ * rehearsal (tests/update-rehearsal.mjs), which gives it a data folder of its own through those variables.
+ * macOS relaunches an updated app without the environment it was started with, so the build carries them
+ * in Info.plist; if they still aren't there, it stops rather than use the person's real Sonobe data.
+ */
+export function launchEnvProblem(required: readonly string[], env: Record<string, string | undefined>): string | null {
+  const missing = required.filter((name) => !nonEmpty(env[name]));
+  if (!missing.length) return null;
+  return `This is a rehearsal build of Sonobe: it only runs with ${required.join(", ")} set, and ${missing.join(" and ")} ${missing.length > 1 ? "aren't" : "isn't"}. Start it with node apps/desktop/tests/update-rehearsal.mjs, which sets them, or build a normal app with npm run package -w @sonobe/desktop.`;
+}
+
+/** An http(s) URL from a switch, or null with a warning. */
+function httpUrl(name: string, raw: string | null, warn: (msg: string) => void): URL | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "http:" || url.protocol === "https:") return url;
+    warn(`${name} must be http(s); ignoring ${raw}`);
+  } catch {
+    warn(`${name} is not a valid URL; ignoring ${raw}`);
+  }
+  return null;
+}
+
 /** Parse desktop env vars; invalid values are ignored with a warning. */
 export function readDesktopEnv(env: Record<string, string | undefined>, warn: (msg: string) => void = () => undefined): DesktopEnv {
-  let devUrl: URL | null = null;
-  const rawDevUrl = nonEmpty(env.SONOBE_DEV_URL);
-  if (rawDevUrl) {
-    try {
-      const url = new URL(rawDevUrl);
-      if (url.protocol === "http:" || url.protocol === "https:") devUrl = url;
-      else warn(`SONOBE_DEV_URL must be http(s); ignoring ${rawDevUrl}`);
-    } catch {
-      warn(`SONOBE_DEV_URL is not a valid URL; ignoring ${rawDevUrl}`);
-    }
-  }
+  const devUrl = httpUrl("SONOBE_DEV_URL", nonEmpty(env.SONOBE_DEV_URL), warn);
 
   let mcpPort: number | null = null;
   const rawPort = nonEmpty(env.SONOBE_MCP_PORT);
@@ -87,5 +106,7 @@ export function readDesktopEnv(env: Record<string, string | undefined>, warn: (m
     testHooks: flag(env.SONOBE_TEST),
     lan: flag(env.SONOBE_LAN),
     lanPort,
+    updates: !["off", "0", "false"].includes(env.SONOBE_UPDATES?.trim().toLowerCase() ?? ""),
+    updateFeed: httpUrl("SONOBE_UPDATE_FEED", nonEmpty(env.SONOBE_UPDATE_FEED), warn),
   };
 }

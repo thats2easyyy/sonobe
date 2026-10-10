@@ -62,27 +62,6 @@ describe("draft keeper", () => {
     expect(writes[1]).toMatchObject({ id: "draft-0001", revision: 11 });
   });
 
-  it("says whether the document has edits its draft doesn't hold, also after a write that failed", async () => {
-    const { document, keeper, drafts } = setup();
-    expect(keeper.pending()).toBe(false);
-
-    document.getState().apply([addRect("Card")], { label: "Add Card" });
-    expect(keeper.pending()).toBe(true);
-    await keeper.flush();
-    expect(keeper.pending()).toBe(false);
-    expect(keeper.current()).toMatchObject({ id: "draft-0001" });
-
-    // flush() resolves when the write fails, so pending() is the only way to know the edit isn't in.
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.mocked(drafts.write).mockRejectedValueOnce(new Error("disk full"));
-    document.getState().apply([addRect("Dot")], { label: "Add Dot" });
-    await keeper.flush();
-    expect(keeper.pending()).toBe(true);
-    await keeper.flush();
-    expect(keeper.pending()).toBe(false);
-    vi.restoreAllMocks();
-  });
-
   it("waits for an open gesture to end", async () => {
     const { document, writes } = setup();
     document.getState().apply([addRect("Card", "card")], { label: "Add Card" });
@@ -163,6 +142,28 @@ describe("draft keeper", () => {
     // Nothing new: another flush writes nothing.
     await keeper.flush();
     expect(writes).toHaveLength(1);
+  });
+
+  it("says whether the draft on disk is missing edits: before a write, and after one that failed", async () => {
+    const { document, keeper, drafts } = setup();
+    const onError = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // A clean document, and a copy that's only marked unsaved, have nothing waiting: there is no draft to write.
+    expect(keeper.pending()).toBe(false);
+    document.getState().replaceDocument(createEmptyDocument({ name: "Tap to Grow" }), { projectPath: null, saved: false, label: "Opened example" });
+    expect(keeper.pending()).toBe(false);
+    document.getState().apply([addRect("Card")], { label: "Add Card" });
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    // The next write fails (a full disk): the draft on disk is the old one, and the keeper says so.
+    vi.mocked(drafts.write).mockRejectedValueOnce(new Error("ENOSPC"));
+    document.getState().apply([addRect("Badge")], { label: "Add Badge" });
+    await keeper.flush();
+    expect(keeper.current()).toMatchObject({ id: "draft-0001" });
+    expect(keeper.pending()).toBe(true);
+    await keeper.flush();
+    expect(keeper.pending()).toBe(false);
+    onError.mockRestore();
   });
 
   it("records the ids the session has seen, and continues a restored draft under its own id", async () => {

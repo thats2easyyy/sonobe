@@ -103,7 +103,7 @@ claude mcp add --scope local sonobe-headless -- /Applications/Sonobe.app/Content
 
 Headless mode serves a project folder directly, with editing, simulation, saving and screenshots. Changes save after every edit. Add `--no-autosave` to keep them in memory until Claude calls `save_document`. If the folder changes while Claude works, because you, git or the app wrote to it, saving stops with `disk_changed` instead of writing over it, and Claude asks whether to reload or overwrite.
 
-Headless screenshots are drawn without the app, so text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need a native image library installed beside the CLI. The CLI and plugin builds include it, and if it's missing, Claude is told so and checks the prototype with the outline and simulations instead. Only the app knows what you've selected in the editor.
+Headless screenshots are drawn without the app, so text uses approximate font metrics, and video, Lottie and shaders show placeholders. They need a native image library installed beside the CLI. A checkout's CLI build and the plugin build include it. The CLI inside the Sonobe app doesn't, so there Claude is told to open the project in the app, and checks the prototype with the outline and simulations instead. Only the app knows what you've selected in the editor.
 
 ## Connect Claude Desktop
 
@@ -150,6 +150,7 @@ Extensions you build yourself don't update automatically. To update, build and p
 
 - **"the Sonobe app isn't running."** Open Sonobe first. In Claude Code, reconnect with `/mcp` → `sonobe` → Reconnect. In Claude Desktop, turn the extension off and on, or restart Claude Desktop if you used a config entry.
 - **"rejected the token."** The connection file is from an earlier launch. Quit and reopen Sonobe.
+- **Sonobe restarted while Claude was connected** (an update does this). The session finds Sonobe again by itself within about 20 seconds; a tool call that was running fails once and says to check what's open. If Sonobe stays closed longer, calls fail until you open it again, and the next one finds it.
 - **A custom settings folder.** If you launch Sonobe with `SONOBE_HOME`, set the same variable for the relay, or set the extension's **Sonobe settings folder**.
 - **A session has no Sonobe tools.** Run `claude mcp list` in that session's folder. If `sonobe` is missing, it was set up for another folder only: add it with `--scope user` as above.
 - **A session isn't listed on the Connect Claude screen.** Sessions appear once Claude starts Sonobe's server; in Claude Code, check `/mcp`. A client that doesn't go through the `sonobe mcp` relay, or an older copy of the relay, can't say which session it is, so it shows as one "Unidentified MCP client" row.

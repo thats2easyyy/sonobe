@@ -1,7 +1,7 @@
 /** Electron main process entry: lifecycle, windows, menus, file IO, the MCP endpoint, and phone preview. */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
-import { existsSync } from "node:fs";
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,9 +20,9 @@ import { createConnectionStore } from "./assistant/connection.ts";
 import { registerAssistant, type AssistantRegistration } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
-import { isCommandId, toHostPlatform } from "./commands.ts";
-import { projectPathsFromArgv, readDesktopEnv } from "./env.ts";
-import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, ViewerWindowStatus } from "./host-api.d.ts";
+import { isCommandId, RELEASES_URL, toHostPlatform } from "./commands.ts";
+import { launchEnvProblem, projectPathsFromArgv, readDesktopEnv } from "./env.ts";
+import type { McpStatus, PreviewStatus, SecretsStatus, SonobeCommandId, UpdateStatus, ViewerWindowStatus } from "./host-api.d.ts";
 import { IPC } from "./ipc.ts";
 import { phonePreviewDetail, resolveUnder, startLanPreview, type LanPreviewHandle } from "./lan-preview.ts";
 import { defaultSonobeHome, startMcpServer, type McpServerHandle } from "./mcp-server.ts";
@@ -34,6 +34,9 @@ import { createRendererRpcHub, type RendererRpcHub, type RpcIpcEvent } from "./r
 import { createSecretStore, createTestCipher, type SecretStore } from "./secrets.ts";
 import { ALLOWED_PERMISSIONS, isAppUrl, isExternalUrl, isMailtoUrl } from "./security.ts";
 import { desktopSymbols } from "./symbols.ts";
+import { createQuitResume, moveConflict, reopenPlan, restartConfirmation, restartKeepingWork, takeReopenRecord, writeReopenRecord, type ReopenRecord, type ReopenStep, type ReopenWindow, type RestartWindow } from "./update-restart.ts";
+import type { NativeUpdaterLike } from "./updater-driver.ts";
+import { createUpdateController, createUpdateSettings, installLocation, manualCheckDialog, updateMode, type UpdateController, type UpdateDriver, type UpdateModeResult } from "./updates.ts";
 
 const APP_NAME = "Sonobe";
 const VERSION = __SONOBE_VERSION__;
@@ -65,6 +68,9 @@ function resolveContentSource(): WindowContentSource {
 
 /** How often MCP resource-updated notifications go out while a document keeps changing. */
 const RESOURCE_NOTIFY_MS = 250;
+
+/** Updates start this long after the first window is on screen, so reading what the build can do never competes with launch. */
+const UPDATES_START_MS = 1000;
 
 /** Window content size for the pop-out viewer: the prototype's screen, shrunk to fit the display. */
 function viewerWindowSize(doc: SonobeDocument | undefined, workArea: { width: number; height: number }): [number, number] {
@@ -130,6 +136,31 @@ function main(): void {
   const symbols = desktopSymbols({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname, platform: process.platform, systemVersion: process.getSystemVersion(), exists: existsSync });
   /** Drafts of unsaved work in <userData>/Drafts (ARCHITECTURE §3.5 Drafts). */
   let drafts: DraftStore | null = null;
+  /** Updates (electron/updates.ts). Nothing about them runs until the first window is on screen. */
+  let updates: UpdateController | null = null;
+  /** What this build does about updates: read once, when first asked. */
+  let updateBuild: UpdateModeResult | null = null;
+  /** electron-updater, loaded when the first check starts. */
+  let updateDriver: Promise<UpdateDriver> | null = null;
+  /** A stand-in updater (SONOBE_TEST only), which also makes the run count as a build that installs updates. */
+  let testUpdateDriver: UpdateDriver | null = null;
+  let testUpdateInstalls = 0;
+  /** Resolves when updates have started: the editor's questions about them wait until then. */
+  let updatesStarted!: () => void;
+  const updatesReady = new Promise<void>((resolve) => (updatesStarted = resolve));
+  /** The update item the menu shows now. */
+  let menuUpdateItem: "check" | "restart" | undefined;
+  /** Restart to Update or Move to Applications is closing the windows: the app neither quits nor opens a window on its own meanwhile. */
+  let restarting = false;
+  let restartRunning: Promise<boolean> | null = null;
+  /** Rejects the install step of a restart when the updater reports an error. */
+  let restartFailed: ((err: Error) => void) | null = null;
+  /** The next editor window opens again what was open before a restart, so its editor skips the welcome screen. */
+  let reopenInNextWindow = false;
+  /** Settles once a launch that reopens work has done so. MCP calls wait for it: one that got in first would land on the blank launch document. */
+  let reopened: Promise<void> = Promise.resolve();
+  /** A quit that stopped at a window's unsaved-changes prompt carries on once that window has closed (update-restart.ts). */
+  const quitResume = createQuitResume(() => app.quit());
 
   /** Every editor window writes its unsaved edits to its draft (at most 1.5 s each). */
   const flushDrafts = () =>
@@ -181,10 +212,13 @@ function main(): void {
       dev: !app.isPackaged,
       previewRunning: preview !== null,
       ...(historyLabels ? { undoLabel: historyLabels.undo, redoLabel: historyLabels.redo } : {}),
+      ...((menuUpdateItem = updateMenuItem()) ? { updates: menuUpdateItem } : {}),
     });
     const template = toMenuTemplate(spec, platform, {
       command: (id: SonobeCommandId) => {
         if (id === "viewer.previewOnDevice") void showPhonePreview().catch((err: unknown) => log("warn", `Phone preview failed: ${errorMessage(err)}`));
+        // With no window open, About is the system's panel: it doesn't open a window to show a dialog in.
+        else if (id === "help.about" && windows.size === 0) app.showAboutPanel();
         else void ensureWindow().then((w) => w.sendCommand(id));
       },
       openRecent: (dir) => void openProjects([dir]),
@@ -226,6 +260,14 @@ function main(): void {
       await stopPreview();
       return;
     }
+    if (action === "checkForUpdates") {
+      await checkForUpdates();
+      return;
+    }
+    if (action === "restartToUpdate") {
+      await restartToUpdate();
+      return;
+    }
     const w = primaryWindow();
     if (!w) return;
     if (action === "maximize") {
@@ -236,16 +278,20 @@ function main(): void {
     }
   };
 
-  const createWindow = (): Promise<AppWindow> =>
-    createAppWindow({
+  const createWindow = (): Promise<AppWindow> => {
+    const reopening = reopenInNextWindow;
+    reopenInNextWindow = false;
+    return createAppWindow({
       preloadPath: path.join(__dirname, "preload.cjs"),
       source: resolveContentSource(),
       statePath: path.join(app.getPath("userData"), "window-state.json"),
       mute: env.mute,
+      reopening,
       rpc: rpc!,
       appName: APP_NAME,
       log,
       onDiscardDrafts: async (id) => drafts?.discard(id),
+      onCloseAnswered: (closed) => quitResume.answered(closed),
       onCreated: (w) => {
         const id = w.webContents.id;
         windows.set(id, w);
@@ -278,6 +324,7 @@ function main(): void {
         });
       },
     });
+  };
 
   const ensureWindow = (): Promise<AppWindow> => {
     const existing = primaryWindow();
@@ -295,19 +342,28 @@ function main(): void {
     if (await draftAt(dir)) throw new Error(`${String(dir)} is a draft of unsaved work, not a prototype. Bring it back from Recovered on the welcome screen (Help > Welcome Screen), then save it where you want it.`);
   };
 
-  /** A draft folder opened like a project (Show in Finder on a Recovered draft, then a double-click): it comes back as the draft it is, so its next save asks where to go. */
-  const recoverDraftFolder = async (id: string, into?: AppWindow): Promise<void> => {
+  /**
+   * A draft folder opened like a project (Show in Finder on a Recovered draft, then a double-click), or a draft kept through a restart: it
+   * comes back as the draft it is, so its next save asks where to go. Resolves false when it didn't come back.
+   */
+  const recoverDraftFolder = async (id: string, into?: AppWindow): Promise<boolean> => {
     const holder = drafts?.holder(id);
     const open = holder !== undefined ? windows.get(holder) : undefined;
-    if (open) return open.focus();
+    if (open) {
+      open.focus();
+      return true;
+    }
     try {
       const w = into ?? (await ensureWindow());
       w.focus();
       await waitForEditor(w);
-      const failed = rpc ? await rpc.invoke(w.webContents, "document.recoverDraft", { id }, { timeoutMs: 120_000 }).then(() => null, (err: unknown) => err) : new Error("The editor isn't ready yet.");
+      // person: the app is acting for the person, so Settings → Claude → Read only doesn't refuse it (agentAccess.ts).
+      const failed = rpc ? await rpc.invoke(w.webContents, "document.recoverDraft", { id, person: true }, { timeoutMs: 120_000 }).then(() => null, (err: unknown) => err) : new Error("The editor isn't ready yet.");
       if (failed && !w.win.isDestroyed()) await dialog.showMessageBox(w.win, { type: "info", message: "Sonobe couldn't bring back that draft.", detail: errorMessage(failed) });
+      return !failed;
     } catch (err) {
       log("warn", `Couldn't recover draft ${id}: ${errorMessage(err)}`);
+      return false;
     }
   };
 
@@ -427,6 +483,245 @@ function main(): void {
     }, 500);
   };
   mcpClients.subscribe(publishMcpStatus);
+
+  // --- Updates (electron/updates.ts) -----------------------------------------------------------
+
+  /** What this build does about updates. A checkout and every automated run are off without reading anything. */
+  const updateBuildMode = (): UpdateModeResult => {
+    if (testUpdateDriver) return { mode: "install", reason: null, canMove: false };
+    return (updateBuild ??= updateMode({
+      env,
+      packaged: app.isPackaged,
+      feedConfig: () => existsSync(path.join(process.resourcesPath, "app-update.yml")),
+      // What package.mjs recorded about the signature (BuildInfo in scripts/signing.ts), in the packaged package.json.
+      recorded: () => {
+        try {
+          return (JSON.parse(readFileSync(path.join(app.getAppPath(), "package.json"), "utf8")) as { sonobe?: { updates?: unknown } }).sonobe?.updates;
+        } catch {
+          return undefined;
+        }
+      },
+      location: () =>
+        installLocation({ platform: process.platform, exePath: process.execPath, inApplications: () => app.isInApplicationsFolder(), access: (target) => accessSync(target, constants.W_OK), appImage: process.env.APPIMAGE }),
+    }));
+  };
+
+  /**
+   * electron-updater, loaded the first time it's needed: never at launch, and never in a build that's off. It lives in its own
+   * bundle, dist/updater.cjs (scripts/build.mjs), so main.cjs doesn't carry its 600 KB through every launch.
+   */
+  const loadUpdateDriver = (): Promise<UpdateDriver> => {
+    if (testUpdateDriver) return Promise.resolve(testUpdateDriver);
+    return (updateDriver ??= Promise.resolve()
+      .then(() => (require(path.join(__dirname, "updater.cjs")) as typeof import("./updater-driver.ts")).loadUpdaterDriver({ native: autoUpdater as unknown as NativeUpdaterLike, mode: updateBuildMode().mode, feed: env.updateFeed, platform: process.platform, log, onError: (err) => restartFailed?.(err) }))
+      .catch((err: unknown) => {
+        updateDriver = null;
+        throw err;
+      }));
+  };
+
+  const requireUpdates = (): UpdateController => {
+    if (!updates) throw new Error("Updates aren't ready yet.");
+    return updates;
+  };
+
+  /**
+   * The menu's update item. Until the build has been read (which waits for the first window), it's there whenever updates aren't
+   * plainly off, so Check for Updates… is in the menu from the start.
+   */
+  function updateMenuItem(): "check" | "restart" | undefined {
+    if (!updates) return undefined;
+    if (!updateBuild && !testUpdateDriver) return env.updates && app.isPackaged && !(env.testHooks && !env.updateFeed) ? "check" : undefined;
+    const status = updates.status();
+    return status.mode === "off" ? undefined : status.state === "ready" ? "restart" : "check";
+  }
+
+  const publishUpdateStatus = (status: UpdateStatus) => {
+    for (const w of windows.values()) if (!w.webContents.isDestroyed()) w.webContents.send(IPC.updatesChanged, status);
+    // "Sonobe was updated" is said once: by the first window that hears it, and not by one opened later.
+    if (status.updatedFrom && [...windows.values()].some((w) => w.showsUpdates())) updates?.updatedSaid();
+    if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
+  };
+
+  /** Answers a check in a native dialog: for Check for Updates… when no editor is listening (no window open, or a page without the notices). */
+  const showUpdateDialog = async (status: UpdateStatus) => {
+    const box = manualCheckDialog(status);
+    const parent = primaryWindow()?.win;
+    const options = { type: "info" as const, message: box.message, detail: box.detail, buttons: box.buttons, defaultId: 0, cancelId: box.buttons.length - 1 };
+    const { response } = parent && !parent.isDestroyed() ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    if (response !== 0 || !box.action) return;
+    if (box.action === "restart") await restartToUpdate();
+    else await shell.openExternal(status.releaseUrl);
+  };
+
+  /** Check for Updates… in the menu. The editor's notices answer when one is listening, a dialog otherwise. */
+  const checkForUpdates = async () => {
+    const status = await requireUpdates().check({ manual: true });
+    // The check read what this build can do, if nothing had yet: a build that never checks loses the item.
+    if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
+    if (![...windows.values()].some((w) => w.showsUpdates())) await showUpdateDialog(status);
+  };
+
+  const reopenFile = () => path.join(app.getPath("userData"), "reopen-after-update.json");
+
+  /** The editor windows as a restart sees them, front first. */
+  const restartWindows = (): RestartWindow[] => {
+    const focused = BrowserWindow.getFocusedWindow();
+    return [...windows.values()]
+      .filter((w) => !w.win.isDestroyed())
+      .sort((a, b) => Number(b.win === focused) - Number(a.win === focused))
+      .map((w) => ({
+        project: async () => {
+          if (rpc?.hasMethod(w.webContents, "document.info") !== true) return null;
+          const info = await rpc.invoke<{ projectPath?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 5000 });
+          return typeof info?.projectPath === "string" ? info.projectPath : null;
+        },
+        focus: () => w.focus(),
+        requestClose: (reason) => w.requestClose(reason),
+      }));
+  };
+
+  /** The helper windows (pop-out viewer, scene renderer, design captures) go too: the updater only quits an app with no window left. */
+  const noWindowsLeft = async (): Promise<boolean> => {
+    abortCaptures();
+    const started = Date.now();
+    while (BrowserWindow.getAllWindows().length > 0 && Date.now() - started < 5000) {
+      // They hold nothing of the person's, so one that's slow to go is destroyed. Never an editor window: one that
+      // opened meanwhile (a prototype double-clicked in Finder) stays, and the restart is called off.
+      if (Date.now() - started > 1500) for (const win of BrowserWindow.getAllWindows()) if (!windows.has(win.webContents.id)) win.destroy();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return BrowserWindow.getAllWindows().length === 0;
+  };
+
+  /** The editor showing `dir` in `w`, or the wait running out: opening a project is asked of the editor, which answers later. */
+  const waitForProject = async (w: AppWindow, dir: string, timeoutMs = 15_000) => {
+    const started = Date.now();
+    while (!w.webContents.isDestroyed() && rpc && Date.now() - started < timeoutMs) {
+      const info = await rpc.invoke<{ projectPath?: unknown }>(w.webContents, "document.info", undefined, { timeoutMs: 2000 }).catch(() => null);
+      if (info?.projectPath === dir) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  /** What to open for a restart's record: each window's draft when it's still there, else its project. */
+  const reopenSteps = async (record: ReopenRecord): Promise<ReopenStep[]> => {
+    const unclaimed = drafts ? (await drafts.list().catch(() => [])).map((draft) => draft.id) : [];
+    return reopenPlan(record, { drafts: unclaimed, exists: (dir) => existsSync(path.join(dir, "project.json")) });
+  };
+
+  const reopen = async (steps: readonly ReopenStep[]) => {
+    for (const step of steps) {
+      // Restoring a draft opens its project underneath. Main wrote the record for a folder the person had open, so the
+      // editor may read it again, whatever its name and whether or not it's still among the recent ones.
+      if (step.kind === "draft" && step.project) access.approve(step.project);
+      const dir = step.kind === "project" ? step.path : (await recoverDraftFolder(step.id)) ? null : step.project;
+      if (!dir) continue;
+      await openProjects([dir]);
+      const w = primaryWindow();
+      if (w) await waitForProject(w, dir);
+    }
+  };
+
+  /** Every window is closed and the app is still running: a window comes back with what was open. */
+  const recoverAfterRestart = async (open: ReopenWindow[]) => {
+    // The record was for a launch that isn't coming.
+    takeReopenRecord(reopenFile());
+    const steps = await reopenSteps({ version: 1, windows: open });
+    reopenInNextWindow = steps.length > 0;
+    await ensureWindow();
+    await reopen(steps);
+  };
+
+  const setRestarting = (on: boolean) => {
+    restarting = on;
+    updates?.setRestarting(on);
+  };
+
+  /**
+   * Restart to Update. Each window closes through its unsaved-changes prompt (Save, Keep Draft or Cancel), what was open is written
+   * down for the next launch, and only then does the updater quit the app. Resolves false when it didn't restart.
+   */
+  const restartToUpdate = (): Promise<boolean> =>
+    (restartRunning ??= (async () => {
+      const status = requireUpdates().status();
+      if (status.state !== "ready") return false;
+      const outcome = await restartKeepingWork({
+        reason: "restart",
+        confirm: async () => {
+          const sessions = mcpClients.list().filter((client) => client.state === "connected").map((client) => client.label);
+          const question = restartConfirmation(sessions, status.version, process.platform);
+          if (!question) return true;
+          const parent = primaryWindow()?.win;
+          const options = { type: "question" as const, message: question.message, detail: question.detail, buttons: question.buttons, defaultId: 0, cancelId: question.buttons.length - 1 };
+          const { response } = parent && !parent.isDestroyed() ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+          return response === 0;
+        },
+        windows: restartWindows,
+        setRestarting,
+        record: (open) => writeReopenRecord(reopenFile(), { version: 1, windows: open }),
+        noWindowsLeft,
+        // When it works the app is gone before this settles. It rejects when the updater reports an error instead.
+        install: () =>
+          new Promise<void>((_resolve, reject) => {
+            restartFailed = reject;
+            requireUpdates().install().catch(reject);
+          }),
+        recover: recoverAfterRestart,
+      });
+      if (outcome.result === "failed") requireUpdates().fail(outcome.error, "install");
+      return false;
+    })()
+      .catch((err: unknown) => {
+        log("warn", `Restart to Update failed: ${errorMessage(err)}`);
+        return false;
+      })
+      .finally(() => {
+        restartFailed = null;
+        restartRunning = null;
+      }));
+
+  /**
+   * Moves the app to the Applications folder and opens it there (macOS), so it can update itself. The windows close as for a
+   * restart, and the moved app opens what was open. Resolves false when the app stayed where it is.
+   */
+  const moveToApplications = (): Promise<boolean> =>
+    (restartRunning ??= (async () => {
+      if (process.platform !== "darwin" || !requireUpdates().status().canMove) return false;
+      const outcome = await restartKeepingWork({
+        reason: "move",
+        confirm: async () => true,
+        windows: restartWindows,
+        setRestarting,
+        record: (open) => writeReopenRecord(reopenFile(), { version: 1, windows: open }),
+        noWindowsLeft,
+        install: () => {
+          const moved = app.moveToApplicationsFolder({
+            conflictHandler: (conflict) => {
+              const answer = moveConflict(conflict);
+              if (answer.replace === false) {
+                dialog.showMessageBoxSync({ type: "info", message: answer.message, detail: answer.detail });
+                return false;
+              }
+              const { message, detail, buttons } = answer.question;
+              return dialog.showMessageBoxSync({ type: "question", message, detail, buttons, defaultId: 0, cancelId: buttons.length - 1 }) === 0;
+            },
+          });
+          // Moved: the app quits and the copy in Applications opens, before this would settle.
+          return moved ? new Promise<void>(() => undefined) : Promise.reject(new Error("Sonobe stayed where it is."));
+        },
+        recover: recoverAfterRestart,
+      });
+      if (outcome.result === "failed") log("info", `Move to Applications: ${outcome.error.message}`);
+      return false;
+    })()
+      .catch((err: unknown) => {
+        log("warn", `Move to Applications failed: ${errorMessage(err)}`);
+        return false;
+      })
+      .finally(() => {
+        restartRunning = null;
+      }));
 
   // --- Phone preview (LAN web player) ---------------------------------------------------------
 
@@ -790,12 +1085,16 @@ function main(): void {
     contents.on("will-attach-webview", (event) => event.preventDefault());
   });
 
+  // A restart closes every window before the updater quits the app: closing the last one mustn't quit it first (the update would
+  // install without opening Sonobe again), and the Dock mustn't open a window in between.
   app.on("window-all-closed", () => {
-    if (platform !== "darwin") app.quit();
+    if (platform !== "darwin" && !restarting) app.quit();
   });
 
+  app.on("before-quit", () => quitResume.began());
+
   app.on("activate", () => {
-    if (ready && windows.size === 0) void ensureWindow();
+    if (ready && windows.size === 0 && !restarting) void ensureWindow();
   });
 
   // The players show the document in front, so switching editor windows may change what they show.
@@ -804,6 +1103,7 @@ function main(): void {
   });
 
   app.on("will-quit", () => {
+    updates?.stop();
     abortCaptures();
     for (const { watcher } of watchers.values()) watcher.close();
     watchers.clear();
@@ -957,6 +1257,37 @@ function main(): void {
     ipcMain.handle(IPC.previewStop, (event): Promise<PreviewStatus> => {
       requireWindow(event);
       return stopPreview();
+    });
+
+    // The editor's questions about updates wait until updates have started, after the first window is on screen: answering reads
+    // what the build can do, and that never happens during launch.
+    ipcMain.handle(IPC.updatesStatus, async (event): Promise<UpdateStatus> => {
+      requireWindow(event);
+      await updatesReady;
+      const status = requireUpdates().status();
+      if (status.updatedFrom) requireUpdates().updatedSaid();
+      return status;
+    });
+    ipcMain.handle(IPC.updatesCheck, async (event): Promise<UpdateStatus> => {
+      requireWindow(event);
+      await updatesReady;
+      return requireUpdates().check({ manual: true });
+    });
+    ipcMain.handle(IPC.updatesSetAutoCheck, async (event, enabled: unknown): Promise<UpdateStatus> => {
+      requireWindow(event);
+      await updatesReady;
+      return requireUpdates().setAutoCheck(enabled === true);
+    });
+    ipcMain.handle(IPC.updatesRestart, (event): Promise<boolean> => {
+      requireWindow(event);
+      return restartToUpdate();
+    });
+    ipcMain.handle(IPC.updatesMoveToApplications, (event): Promise<boolean> => {
+      requireWindow(event);
+      return moveToApplications();
+    });
+    ipcMain.on(IPC.updatesListeners, (event, count: unknown) => {
+      if (typeof count === "number") trustedWindow(event)?.setUpdateListeners(count);
     });
 
     ipcMain.on(IPC.documentChanged, (event, revision: unknown, labels: unknown) => {
@@ -1115,6 +1446,16 @@ function main(): void {
     rpc = createRendererRpcHub(ipcMain, { isTrustedSender: (event: RpcIpcEvent) => !!trustedWindow(event as unknown as IpcMainEvent) });
     // Test runs use a reversible cipher so automated launches never touch (or prompt for) the keychain.
     secrets = createSecretStore({ file: path.join(app.getPath("userData"), "secrets.json"), cipher: env.testHooks ? createTestCipher() : safeStorage, log });
+    // Created here and started once the first window is on screen. Until then it reads nothing and loads nothing.
+    updates = createUpdateController({
+      current: VERSION,
+      mode: updateBuildMode,
+      settings: createUpdateSettings({ file: path.join(app.getPath("userData"), "updates.json"), log }),
+      driver: loadUpdateDriver,
+      releasesUrl: RELEASES_URL,
+      onChange: publishUpdateStatus,
+      log,
+    });
     registerIpc();
     drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
@@ -1162,6 +1503,7 @@ function main(): void {
       registry: createPatchRegistry(),
       targets: editorTargets,
       ensureTarget: async () => {
+        await reopened;
         const w = await ensureWindow();
         await waitForEditor(w);
         return editorTarget(w);
@@ -1195,25 +1537,57 @@ function main(): void {
     }
     rebuildMenu();
 
+    // A restart for an update wrote down what was open: it opens again, once. A project named on the command line or opened from
+    // Finder wins, and the record is used up either way. Without a record (every other launch) this is one failed read.
+    const record = takeReopenRecord(reopenFile());
+    const reopening = record && !pendingOpen.length ? await reopenSteps(record) : [];
+    let finishReopen = () => undefined as void;
+    if (reopening.length) {
+      reopenInNextWindow = true;
+      // MCP calls wait for the work to be back (the endpoint below listens before the window exists), 30 s at most.
+      reopened = new Promise((resolve) => (finishReopen = resolve));
+      setTimeout(finishReopen, 30_000).unref();
+    }
+
     if (env.mcpEnabled) {
       try {
         mcp = await startMcpServer({ version: VERSION, port: env.mcpPort, ...(env.home ? { configDir: env.home } : {}), clients: mcpClients, log });
-        mcpHandler = createHttpHandler(appHost, {
+        const handler = (mcpHandler = createHttpHandler(appHost, {
           version: VERSION,
           guides: loadGuides(bundledResource("guides", "packages/mcp/guides")),
           clients: mcpClients,
           onError: (err) => log("warn", `MCP transport error: ${err.message}`),
+        }));
+        // A relay that outlived the restart reconnects as soon as /health answers: its calls wait until the work is back.
+        mcp.setHandler(async (req, res) => {
+          await reopened;
+          return handler(req, res);
         });
-        mcp.setHandler(mcpHandler);
       } catch (err) {
         log("warn", `MCP endpoint disabled: ${errorMessage(err)}`);
       }
     }
 
-    await ensureWindow();
+    const first = await ensureWindow();
     ready = true;
     if (pendingOpen.length) await openProjects(pendingOpen.splice(0));
+    else if (reopening.length) await reopen(reopening).catch((err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`));
+    finishReopen();
     if (env.lan) void startPreview();
+
+    // Updates begin once the window is on screen, and a moment later still, so launch never waits on them. The first check comes
+    // a few seconds after that (updates.ts).
+    let begun = false;
+    const beginUpdates = () => {
+      if (begun) return;
+      begun = true;
+      updates?.start();
+      updatesStarted();
+      if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
+    };
+    void first.shown.then(() => setTimeout(beginUpdates, UPDATES_START_MS).unref());
+    // A window that never shows (closed at once) doesn't hold updates back for good.
+    setTimeout(beginUpdates, 10 * UPDATES_START_MS).unref();
 
     if (env.testHooks) {
       (globalThis as Record<string, unknown>).__sonobeTest = {
@@ -1253,6 +1627,31 @@ function main(): void {
         setCaptureDeadline: (ms: number | null) => {
           testCaptureDeadlineMs = typeof ms === "number" && ms > 0 ? ms : undefined;
         },
+        updates: {
+          status: () => updates?.status() ?? null,
+          check: () => requireUpdates().check({ manual: true }),
+          restart: () => restartToUpdate(),
+          /** Whether electron-updater was ever loaded in this run. */
+          driverLoaded: () => updateDriver !== null,
+          /**
+           * A stand-in updater that finds `version` (or fails with `fail`), downloads at once and only counts its installs. It also
+           * makes this run count as a build that installs updates, which a checkout never is, so the restart can be driven here.
+           */
+          useFakeDriver: (options: { version?: string; fail?: string }) => {
+            testUpdateDriver = {
+              check: async () => {
+                if (options.fail) throw new Error(options.fail);
+                return options.version ? { version: options.version } : null;
+              },
+              download: async (onProgress) => onProgress(1),
+              install: () => void testUpdateInstalls++,
+            };
+            if (updateMenuItem() !== menuUpdateItem) rebuildMenu();
+          },
+          installs: () => testUpdateInstalls,
+          /** The update item in the menu now. */
+          menuItem: () => menuUpdateItem ?? null,
+        },
         /** Destroy every window without the unsaved-changes prompt. */
         destroyWindows: () => {
           for (const w of windows.values()) w.win.destroy();
@@ -1264,4 +1663,14 @@ function main(): void {
   });
 }
 
-main();
+// A build made for the update rehearsal (package.mjs --launch-env) stops here unless it was given its own data
+// folder: macOS opens an updated app without the environment of the one it replaced, and it must never run on the
+// person's real Sonobe data instead.
+const launchProblem = launchEnvProblem(__SONOBE_LAUNCH_ENV__.split(",").filter(Boolean), process.env);
+if (launchProblem) {
+  console.error(`[sonobe] ${launchProblem}`);
+  dialog.showErrorBox("This rehearsal build of Sonobe can't run here", launchProblem);
+  app.exit(1);
+} else {
+  main();
+}

@@ -81,8 +81,8 @@ const port = server.address().port;
 
 const temp = mkdtempSync(path.join(tmpdir(), "sonobe-import-smoke-"));
 const home = path.join(temp, "home");
-const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: path.join(temp, "userData"), SONOBE_TEST: "1" };
-for (const key of ["SONOBE_DEV_URL", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_EDITOR_DIST", "ELECTRON_RUN_AS_NODE"]) delete env[key];
+const env = { ...process.env, SONOBE_MUTE: "1", SONOBE_HOME: home, SONOBE_USER_DATA: path.join(temp, "userData"), SONOBE_TEST: "1", SONOBE_UPDATES: "off" };
+for (const key of ["SONOBE_DEV_URL", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_EDITOR_DIST", "SONOBE_UPDATE_FEED", "ELECTRON_RUN_AS_NODE"]) delete env[key];
 
 let app;
 let failed = false;

@@ -98,7 +98,8 @@ test.describe("rest", () => {
     const before = await frame(page);
     await expect(readout(page)).toHaveText(/^\d+ fps$/, { timeout: 5000 });
     expect(await hook(page, (s) => s.resting())).toBe(false);
-    expect(await frame(page)).toBeGreaterThan(before + 10);
+    // Frames keep coming; how many have run by the time the readout shows a rate depends on the machine.
+    await expect.poll(() => frame(page)).toBeGreaterThan(before + 10);
     // Unplugging the clock lets it rest again.
     await hook(page, (s) => void s.session.document.getState().undo());
     await atRest(page);

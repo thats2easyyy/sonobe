@@ -5,7 +5,7 @@ Sonobe is an open-source interaction prototyping app: layers, a patch graph and 
 Read these before changing code:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) is the contract. When the code and it disagree, fix one of them in the same change.
-- [CONTRIBUTING.md](CONTRIBUTING.md) has setup, code style, and the steps for common changes: patches, MCP tools, patch editor node sizes, Sonobe Viewer and the evals.
+- [CONTRIBUTING.md](CONTRIBUTING.md) has setup, code style, and the steps for common changes: patches, MCP tools, patch editor node sizes, Sonobe Viewer, the evals and releasing.
 - [ROADMAP.md](ROADMAP.md) says what's done and what's left. Check off what you finish, and say what's left of anything partial.
 
 The rules that matter most:
@@ -24,7 +24,7 @@ npx vitest run packages/core          # one package or folder
 npm run e2e                           # Playwright in Chromium; SONOBE_E2E_PORT=<port> for a server of your own
 ```
 
-CI runs these three (`.github/workflows/ci.yml`). The e2e run rewrites the screenshots in `apps/editor/screenshots`; keep only the ones your change meant to change.
+CI runs these three (`.github/workflows/ci.yml`), and a second job there builds and verifies the desktop package. The e2e run rewrites the screenshots in `apps/editor/screenshots`; keep only the ones your change meant to change.
 
 Docs are checked too: `packages/cli/src/docs.test.ts` and `apps/desktop/electron/architecture.test.ts` compare the README, ARCHITECTURE, ROADMAP and the guides with the code, and `packages/mcp/src/guides.test.ts` runs the agent guides' examples and holds them to a line limit. Update docs in the same change, and trim rather than raise a limit.
 
@@ -44,8 +44,11 @@ npm run smoke -w @sonobe/desktop   # the muted Electron end-to-end run
 npm run bench -w @sonobe/editor    # editor boot and interaction timings
 npm run test:ios                   # Sonobe Viewer on an iOS Simulator (Xcode)
 node evals/run.ts                  # Claude builds each eval case (uses your Claude account)
+node apps/desktop/tests/update-rehearsal.mjs --identity "<name>"   # a real update between two signed builds (macOS)
 ```
 
-The desktop build packages `packages/cli/dist` when it's there, and the evals run it, so run `npm run build -w @sonobe/cli` before either. The Electron run rewrites the screenshots in `apps/desktop/screenshots`; keep only the ones you meant to change.
+The evals run `packages/cli/dist`, so run `npm run build -w @sonobe/cli` before them; the desktop build always bundles the CLI from source. The Electron run rewrites the screenshots in `apps/desktop/screenshots`; keep only the ones you meant to change.
+
+A release is built from a version tag by `.github/workflows/release.yml`, and `node scripts/set-version.ts <x.y.z>` sets the version everywhere it lives (CONTRIBUTING.md, Releasing).
 
 `apps/editor/src/state/document.ts` has a NUL byte inside a template literal. Edit that file byte for byte.
