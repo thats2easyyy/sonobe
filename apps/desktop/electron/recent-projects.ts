@@ -80,9 +80,9 @@ export class RecentProjects {
     return (this.items ?? []).filter((p) => !this.missing.has(p));
   }
 
-  /** Whether the last look left a folder out. */
+  /** Whether the last look left a folder of the list out. One the list has dropped since (pushed off the end, removed) doesn't count. */
   hasMissing(): boolean {
-    return this.missing.size > 0;
+    return (this.items ?? []).some((p) => this.missing.has(p));
   }
 
   /** The saved list, missing folders included. Reads the file once and checks nothing. */

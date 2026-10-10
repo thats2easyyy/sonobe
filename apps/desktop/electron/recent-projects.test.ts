@@ -122,6 +122,30 @@ describe("RecentProjects", () => {
     expect(recents.snapshot()).toEqual([]);
   });
 
+  it("stops counting a missing folder once newer ones have pushed it off the list", async () => {
+    const gone = path.join(dir, "Gone.sonobe");
+    const recents = new RecentProjects(file, { max: 2 });
+    await recents.add(gone);
+    await recents.add(projects[0]!);
+    await recents.available();
+    expect(recents.hasMissing()).toBe(true);
+    await recents.add(projects[1]!);
+    expect(await recents.list()).toEqual([projects[1], projects[0]]);
+    expect(recents.hasMissing()).toBe(false);
+  });
+
+  it("doesn't count a folder whose check answers after it was removed", async () => {
+    let answer!: (there: boolean) => void;
+    const recents = new RecentProjects(file, { exists: (target) => (target === "/slow/Late.sonobe" ? new Promise<boolean>((resolve) => (answer = resolve)) : Promise.resolve(true)) });
+    await recents.add("/slow/Late.sonobe");
+    await recents.add(projects[0]!);
+    const looking = recents.available();
+    await recents.remove("/slow/Late.sonobe");
+    answer(false);
+    expect(await looking).toEqual([projects[0]]);
+    expect(recents.hasMissing()).toBe(false);
+  });
+
   it("survives a corrupt file", async () => {
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, "{{{");
