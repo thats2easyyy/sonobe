@@ -2,7 +2,7 @@
 
 import { COMPONENT_INSTANCE_LAYER_TYPE, findLayer, type Id, type Op } from "@sonobe/core";
 import { Component, Copy, Ellipsis, Layers, Pointer, RotateCcw, ScanSearch, Upload } from "lucide-react";
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, type DragEvent } from "react";
 import { LayerTypeIcon } from "../../shell/icons.tsx";
 import { dragHasFiles, filesFromDataTransfer } from "../../state/assets.ts";
 import { useDocument, useEditorSession, useSelection } from "../../state/EditorProvider.tsx";
@@ -22,6 +22,7 @@ import { FieldRow, type FieldRowCable } from "./FieldRow.tsx";
 import { InspectorHeader } from "./Header.tsx";
 import { changedCount, editLabel, intersectFields, layerSections, layerSources, planFieldSet, sectionStartsOpen, splitAdvanced, subjectLabel, type InspectorField } from "./model.ts";
 import { InspectorSection } from "./Section.tsx";
+import { useSubjectKey, useSubjectState } from "./subject.ts";
 import { useInspectorEdit } from "./useInspectorEdit.ts";
 
 export interface LayerInspectorProps {
@@ -47,11 +48,26 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
   const edit = useInspectorEdit();
   const drag = useCableDrag(session);
   const cableHover = useCableHover(drag !== null);
-  const [fileOver, setFileOver] = useState(false);
+  const subjectKey = useSubjectKey();
+  const [fileOver, setFileOver] = useSubjectState(false);
   const component = doc.components[componentId];
   const sources = useMemo(() => layerSources(doc, componentId, layerIds, registry), [doc, componentId, layerIds, registry]);
   const fields = useMemo(() => intersectFields(sources), [sources]);
   const sections = useMemo(() => layerSections(fields), [fields]);
+
+  // The rows stay for the next layers, and what the last ones left on them goes: the port a row under
+  // the pointer lit elsewhere, and focus on a button that is now another layer's (a control's field is
+  // remounted, which drops its focus too). Before the Inspector stayed mounted, both went with it.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(
+    () => () => {
+      const selection = session.selection.getState();
+      if (selection.hovered?.source === "inspector") selection.setHovered(null);
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && rootRef.current?.contains(focused)) focused.blur();
+    },
+    [session, subjectKey],
+  );
 
   const layers = component ? sources.map((s) => findLayer(component.layers, s.id)!.layer) : [];
   if (!component || layers.length === 0) return null;
@@ -151,7 +167,7 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
     : {};
 
   return (
-    <div className="sb-insp-layer" data-file-drop={fileOver || undefined} data-cable={drag ? "" : undefined} {...fileHandlers}>
+    <div ref={rootRef} className="sb-insp-layer" data-file-drop={fileOver || undefined} data-cable={drag ? "" : undefined} {...fileHandlers}>
       <InspectorHeader
         icon={single ? <LayerTypeIcon type={single.type} size={15} /> : <Layers size={15} strokeWidth={1.75} />}
         name={single ? single.name : `${layers.length} layers`}
@@ -161,11 +177,11 @@ export function LayerInspector({ layerIds }: LayerInspectorProps) {
         actions={
           <>
             {single && (
-              <Menu aria-label={`Add an interaction to ${single.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, single.id)}>
+              <Menu key={`touch:${subjectKey}`} aria-label={`Add an interaction to ${single.name}`} placement="bottom-end" entries={() => touchMenuEntries(session, single.id)}>
                 <TouchButton />
               </Menu>
             )}
-            <Menu aria-label="Layer options" placement="bottom-end" entries={overflow}>
+            <Menu key={`options:${subjectKey}`} aria-label="Layer options" placement="bottom-end" entries={overflow}>
               <IconButton size="sm" icon={<Ellipsis size={14} />} label="Layer options" />
             </Menu>
           </>

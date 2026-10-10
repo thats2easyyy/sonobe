@@ -96,7 +96,7 @@ import { createAppearStore } from "./state/appear.ts";
 import { patchEditorBridge, registerPatchEditor } from "./state/bridge.ts";
 import { PatchEditorContext, type PatchEditorContextValue } from "./state/context.ts";
 import { completeConnectionToLayerProp, dropTargetAt } from "./state/linkToLayer.ts";
-import { createLiveStore } from "./state/liveStore.ts";
+import { createLiveStore, followEveryFrame } from "./state/liveStore.ts";
 import { useInstanceCopies, useWatchedCopy } from "./state/watch.ts";
 import { createUiStore, type UiStore } from "./state/uiStore.ts";
 import { useReducedMotion } from "./state/useReducedMotion.ts";
@@ -1370,6 +1370,11 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
         .join("\n"),
     [model.ports],
   );
+  /** Boolean outputs with a cable: a cable sends an orb on each change, so these are read on every frame (followEveryFrame). */
+  const stateKey = useMemo(() => {
+    const shown = new Set(model.outputAddresses);
+    return [...new Set(model.edges.filter((e) => e.data.sourceType === "boolean" && shown.has(e.data.from)).map((e) => e.data.from))].join("\n");
+  }, [model.edges, model.outputAddresses]);
   useEffect(() => {
     if (livePrefix === null) {
       live.clear();
@@ -1401,6 +1406,8 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
           { hz: 20 },
         )
       : () => undefined;
+    const states = stateKey ? stateKey.split("\n").map((address) => [address, scopedAddress(livePrefix, address)] as const) : [];
+    const unsubscribeStates = states.length && typeof session.runtime.subscribeFrame === "function" ? session.runtime.subscribeFrame(followEveryFrame(live, states, (address) => session.runtime.readValue(address))) : () => undefined;
     let unsubscribePulses: () => void = () => undefined;
     if (livePrefix === "") unsubscribePulses = session.runtime.subscribePulses((fire) => live.firePulses(fire.addresses));
     else if (pulseKey && typeof session.runtime.subscribeFrame === "function") {
@@ -1417,10 +1424,11 @@ function Canvas({ session, componentId, arrivals, showBreadcrumbs, showToolbar, 
     }
     return () => {
       unsubscribeValues();
+      unsubscribeStates();
       unsubscribePulses();
       live.clear();
     };
-  }, [session, livePrefix, addressesKey, pulseKey, live, ui]);
+  }, [session, livePrefix, addressesKey, stateKey, pulseKey, live, ui]);
 
   // -- Reveal requests ------------------------------------------------------
   const reveal = useStore(session.selection, (s) => s.reveal);

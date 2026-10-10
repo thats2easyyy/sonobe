@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { designStore, initialDesignData } from "../panels/design/designStore.ts";
 import { DESIGN_CANVAS_SPLIT, followDesignBox } from "../panels/design/layout.ts";
 import { ThemeProvider } from "../theme/ThemeProvider.tsx";
 import { CommandProvider } from "../ui/commands/CommandProvider.tsx";
 import { AppShell } from "./AppShell.tsx";
+import { failRender } from "../ui/ErrorBoundary.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { Toaster, toast } from "../ui/Toast.tsx";
 import { assistantStore } from "../panels/assistant/assistantStore.ts";
 import { layoutStore, savedLayout, setLiveDrawerWidth } from "./layoutStore.ts";
 import { Panel } from "./Panel.tsx";
@@ -267,5 +269,99 @@ describe("AppShell fit", () => {
     expect(container.querySelector('.sb-rail[data-panel="viewer"]')).toBeNull();
     expect(shell().style.getPropertyValue("--sb-viewer-w")).toBe("273px");
     expect(layoutStore.getState().sizes.viewer).toBe(296);
+  });
+});
+
+describe("AppShell containment", () => {
+  const PANELS = [
+    ["layers", "Layers", "#sb-layers"],
+    ["viewer", "The Viewer", "#sb-viewer"],
+    ["canvas", "The canvas", ".sb-shell__canvas"],
+    ["patchEditor", "The Patches panel", ".sb-shell__patches"],
+    ["inspector", "The Inspector", "#sb-inspector"],
+    ["hud", "The bottom panel", "#sb-hud"],
+  ] as const;
+  const slots = Object.fromEntries(PANELS.map(([slot]) => [slot, <p className={`body-${slot}`}>{slot}</p>]));
+  const bodies = () => PANELS.map(([slot]) => container.querySelector(`.body-${slot}`));
+  const problem = (scope: ParentNode = container) => scope.querySelector(".sb-surface-problem .sb-empty__title")?.textContent ?? null;
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    act(() => layoutStore.getState().toggleCollapsed("hud", false));
+  });
+  afterEach(() => {
+    for (const name of [...PANELS.map(([, name]) => name), "The notice bar", "The command palette", "The Claude button"]) failRender(name, false);
+    act(() => toast.clear());
+    vi.restoreAllMocks();
+  });
+
+  it.each(PANELS)("says a problem in the %s slot when it throws, and leaves the toolbar and every other slot alone", (slot, name, where) => {
+    renderShell({ slots });
+    const before = bodies();
+    const toolbar = container.querySelector(".sb-toolbar");
+
+    act(() => failRender(name));
+    const place = container.querySelector(where)!;
+    expect(problem(place)).toBe(`${name} hit a problem`);
+    expect([...container.querySelectorAll(".sb-surface-problem")]).toHaveLength(1);
+    // A side or center panel that failed still looks like its panel: the same title over the problem.
+    if (slot !== "hud") expect(place.querySelector(".sb-panel__title")?.textContent).toBe({ layers: "Layers", viewer: "Viewer", canvas: "Canvas", patchEditor: "Patches", inspector: "Inspector" }[slot]);
+    expect(container.querySelector(".sb-toolbar")).toBe(toolbar);
+    bodies().forEach((body, i) => expect(body, PANELS[i]![0]).toBe(PANELS[i]![0] === slot ? null : before[i]));
+
+    failRender(name, false);
+    act(() => place.querySelector<HTMLButtonElement>(".sb-surface-problem button")!.click());
+    expect(problem()).toBeNull();
+    expect(container.querySelector(`.body-${slot}`)?.textContent).toBe(slot);
+  });
+
+  it("says in one line that a notice can't be drawn, tells the root which part failed, and shows the notice on Try again", () => {
+    const onCaughtError = vi.fn();
+    act(() => root.unmount());
+    root = createRoot(container, { onCaughtError });
+    renderShell({ slots: { ...slots, banner: <p className="notice">Changed on disk</p> } });
+    const bar = container.querySelector(".sb-shell__banners")!;
+    expect(bar.querySelector(".notice")).not.toBeNull();
+
+    act(() => failRender("The notice bar"));
+    expect(bar.querySelector(".notice")).toBeNull();
+    expect(bar.querySelector('[role="alert"]')!.textContent).toBe("A notice couldn’t be shown here. The rest of Sonobe still works.Try again");
+    expect(problem()).toBeNull();
+    expect(bodies().every((body) => body !== null)).toBe(true);
+    // The root's handler hears it with the boundary's name (errorReports.ts logs it).
+    expect(onCaughtError).toHaveBeenCalledTimes(1);
+    expect((onCaughtError.mock.calls[0]![1] as { errorBoundary: { props: { name: string } } }).errorBoundary.props.name).toBe("The notice bar");
+
+    // A notice that arrives later isn't lost for the session: Try again draws the bar again.
+    failRender("The notice bar", false);
+    act(() => bar.querySelector<HTMLButtonElement>("button")!.click());
+    expect(bar.querySelector(".notice")!.textContent).toBe("Changed on disk");
+    expect(bar.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("closes a command palette that can't be drawn, with a toast, and opens it again once it can", () => {
+    renderShell({ slots });
+    act(() => root.render(<ThemeProvider><CommandProvider><AppShell slots={slots} /><Toaster /></CommandProvider></ThemeProvider>));
+    const open = () => act(() => container.querySelector<HTMLButtonElement>(".sb-toolbar__search")!.click());
+    act(() => failRender("The command palette"));
+    expect([...document.querySelectorAll(".sb-toast__title")].map((el) => el.textContent)).toEqual(["The command palette hit a problem"]);
+    expect(bodies().every((body) => body !== null)).toBe(true);
+
+    failRender("The command palette", false);
+    open();
+    expect(document.querySelector('[role="dialog"] input, .sb-palette input')).not.toBeNull();
+  });
+
+  it("leaves the toolbar when its Claude button can't be drawn, with a button that brings it back", () => {
+    renderShell({ slots: { ...slots, claude: <button className="claude">Connect Claude</button> } });
+    expect(container.querySelector(".sb-toolbar .claude")).not.toBeNull();
+    act(() => failRender("The Claude button"));
+    expect(container.querySelector(".sb-toolbar .claude")).toBeNull();
+    expect(container.querySelector(".sb-toolbar__search")).not.toBeNull();
+    expect(bodies().every((body) => body !== null)).toBe(true);
+
+    failRender("The Claude button", false);
+    act(() => container.querySelector<HTMLButtonElement>('.sb-toolbar button[aria-label="The Claude button hit a problem. Try again"]')!.click());
+    expect(container.querySelector(".sb-toolbar .claude")!.textContent).toBe("Connect Claude");
   });
 });

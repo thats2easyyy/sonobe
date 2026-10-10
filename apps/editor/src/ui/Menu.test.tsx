@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MenuList, type MenuEntry } from "./Menu.tsx";
+import { ContextMenu, MenuList, type MenuEntry } from "./Menu.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -76,5 +76,33 @@ describe("MenuList", () => {
   it("puts no tooltip on rows without one", () => {
     render();
     expect(item("Duplicate").hasAttribute("aria-describedby")).toBe(false);
+  });
+});
+
+describe("ContextMenu", () => {
+  const open = () => document.querySelectorAll('[role^="menuitem"]').length > 0;
+  const show = (dismissKey: string) =>
+    act(() =>
+      root.render(
+        <ContextMenu entries={[{ id: "reset", label: "Reset" }]} dismissKey={dismissKey}>
+          <div id="target" />
+        </ContextMenu>,
+      ),
+    );
+  const rightClick = () =>
+    act(() => {
+      container.querySelector("#target")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+
+  it("closes an open menu when its dismiss key changes, and stays open while it doesn't", () => {
+    show("card");
+    rightClick();
+    expect(open()).toBe(true);
+    show("card");
+    expect(open()).toBe(true);
+    show("tile");
+    expect(open()).toBe(false);
+    rightClick();
+    expect(open()).toBe(true);
   });
 });

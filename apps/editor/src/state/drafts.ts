@@ -32,7 +32,7 @@ export interface DraftKeeper {
   adopt(id: string, draft: { createdAt: number; projectPath: string | null }): void;
   /** The current document's draft, once it's on disk. */
   current(): { id: string; updatedAt: number } | null;
-  /** Unsaved edits the draft on disk doesn't hold yet: a write is due, or the last one failed. */
+  /** Unsaved edits the draft on disk doesn't hold yet: a write is due, or the last one failed. Still true after a flush whose write failed, since `flush()` resolves either way. */
   pending(): boolean;
   dispose(): void;
 }

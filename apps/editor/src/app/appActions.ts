@@ -13,7 +13,7 @@ import type { EditorSession } from "../state/session.ts";
 import type { CommandRegistry } from "../ui/commands/commandRegistry.ts";
 import { detectHostPlatform } from "../ui/commands/shortcutManager.ts";
 import { toast, type ToastOptions } from "../ui/Toast.tsx";
-import { EDITOR_VERSION, issueUrl } from "./about.ts";
+import { EDITOR_VERSION, issueUrl, type IssueContext } from "./about.ts";
 import { alignOps, alignPatchRects, patchRects, type AlignEdge } from "./alignPatches.ts";
 import { clipParentPlan, INSERTED_LAYER_REF, insertLayerOps, insertParentFor, layerPickItems } from "./layerActions.ts";
 import { settingsStore } from "./settings.ts";
@@ -135,10 +135,19 @@ export function toggleViewerFullscreen(target: Document = document, notify: Noti
   }
 }
 
-/** Help → Report an Issue: a new issue with the version and platform filled in, in the system browser. */
-export function reportIssue(session: Pick<EditorSession, "host">): string {
+/** What a report says about where Sonobe is running: version, host and platform. */
+export function issueContext(session: Pick<EditorSession, "host"> | null): IssueContext {
+  return { version: getDesktopHostApi()?.version ?? EDITOR_VERSION, platform: detectHostPlatform(), host: session?.host?.kind ?? "browser", ...(typeof navigator !== "undefined" ? { userAgent: navigator.userAgent } : {}) };
+}
+
+/**
+ * Help → Report an Issue: a new issue with the version and platform filled in, in the system browser.
+ * Help passes the editor's latest error when it reported one (`lastEditorErrorText`); the recovery
+ * screen passes the error that stopped the editor, and may have no session to pass.
+ */
+export function reportIssue(session: Pick<EditorSession, "host"> | null, options: { error?: string | null } = {}): string {
   const api = getDesktopHostApi();
-  const url = issueUrl({ version: api?.version ?? EDITOR_VERSION, platform: detectHostPlatform(), host: session.host?.kind ?? "browser", ...(typeof navigator !== "undefined" ? { userAgent: navigator.userAgent } : {}) });
+  const url = issueUrl({ ...issueContext(session), ...(options.error ? { error: options.error } : {}) });
   if (api?.openExternal) void api.openExternal(url);
   else if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
   return url;

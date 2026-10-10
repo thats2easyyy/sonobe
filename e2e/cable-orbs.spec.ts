@@ -172,12 +172,15 @@ test("a quick tap sends the turn-off orb too", async ({ page }) => {
   );
   expect(applied.ok).toBe(true);
   await page.locator('[aria-label="Zoom to fit"]').first().click();
-  await page.waitForTimeout(300);
+  // The new cable is on the canvas, all of it, before the tap: an orb whose cable draws in long after its change is dropped (staleOrb).
+  await expect(page.locator('.react-flow__edge[data-id="cable:q_not.value"]')).toBeAttached();
+  await settle(page);
   const photo = await page.locator('#sb-viewer [data-layer="photo"]').first().boundingBox();
   expect(photo).not.toBeNull();
   await page.mouse.move(photo!.x + photo!.width / 2, photo!.y + photo!.height / 2);
   await page.mouse.down();
-  await page.waitForTimeout(90);
+  // Let go as soon as the prototype has run a frame with the press in it, however long that frame takes on this machine.
+  await page.waitForFunction(() => window.__sonobe?.getValue("q_tap.down") === true);
   await page.mouse.up();
 
   // Down turns off well inside the cable's gap between orbs; the dim orb waits for it instead of being dropped.

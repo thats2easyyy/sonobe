@@ -73,3 +73,18 @@ export function createLiveStore(): LiveStore {
     },
   };
 }
+
+/**
+ * A frame listener (RuntimeHost.subscribeFrame) that reads `sources`, each an address here and the
+ * address the runtime knows it by, and stores what changed. The patch editor's subscription samples
+ * values 20 times a second, so a boolean that is on for a single frame (Down under a quick tap)
+ * falls between two samples most of the time, and its cable would send neither orb. The booleans
+ * that cables carry are read on every frame the prototype steps instead; at rest there are none.
+ */
+export function followEveryFrame(live: LiveStore, sources: readonly (readonly [address: string, source: string])[], read: (source: string) => unknown): () => void {
+  return () => {
+    const values: Record<string, unknown> = {};
+    for (const [address, source] of sources) values[address] = read(source);
+    live.setValues(values);
+  };
+}

@@ -7,6 +7,8 @@ import { EditorProvider } from "../../state/EditorProvider.tsx";
 import { createEditorSession, type EditorSession } from "../../state/session.ts";
 import { CommandProvider } from "../../ui/commands/CommandProvider.tsx";
 import { CommandRegistry } from "../../ui/commands/commandRegistry.ts";
+import { failRender } from "../../ui/ErrorBoundary.tsx";
+import { PanelBoundary } from "../../shell/Panel.tsx";
 import type { BoundsProvider, PreviewStatus } from "./hostBridge.ts";
 import { ViewerPanel } from "./ViewerPanel.tsx";
 
@@ -64,6 +66,34 @@ const STOPPED: PreviewStatus = { running: false, url: null, urls: [], lanReachab
 const RUNNING: PreviewStatus = { running: true, url: "http://192.168.1.5:5204/p?t=abc", urls: ["http://192.168.1.5:5204/p?t=abc", "http://10.0.0.2:5204/p?t=abc"], lanReachable: true, clients: 1, error: null };
 
 describe("ViewerPanel", () => {
+  it("lets go of the prototype's renderer when the panel fails, while the prototype runs on, and takes it back on Try again", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mount(
+      <PanelBoundary name="The Viewer" title="Viewer" scope="viewer" surface="sunken">
+        <ViewerPanel />
+      </PanelBoundary>,
+    );
+    expect(session.runtime.state.getState().viewers).toBe(1);
+
+    act(() => failRender("The Viewer"));
+    expect(container.querySelector(".sb-panel__title")?.textContent).toBe("Viewer");
+    expect(container.querySelector(".sb-surface-problem .sb-empty__title")?.textContent).toBe("The Viewer hit a problem");
+    expect(container.querySelector(".sonobe-device")).toBeNull();
+    expect(session.runtime.state.getState().viewers).toBe(0);
+    // The prototype belongs to the session, not the panel: it still steps.
+    const frame = session.runtime.runtime.frame;
+    session.runtime.stepFrame();
+    expect(session.runtime.runtime.frame).toBe(frame + 1);
+
+    failRender("The Viewer", false);
+    act(() => container.querySelector<HTMLButtonElement>(".sb-surface-problem button")!.click());
+    act(() => scheduler.frame());
+    expect(session.runtime.state.getState().viewers).toBe(1);
+    expect(container.querySelector(".sonobe-device .sonobe-stage")?.childElementCount).toBeGreaterThan(0);
+    vi.restoreAllMocks();
+  });
+
+
   it("draws the prototype inside a device frame", () => {
     mount(<ViewerPanel />);
     expect(container.querySelector(".sonobe-device[data-frame=on]")).not.toBeNull();

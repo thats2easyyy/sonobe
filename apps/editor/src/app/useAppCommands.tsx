@@ -16,6 +16,7 @@ import type { Command, CommandRegistry } from "../ui/commands/commandRegistry.ts
 import type { Platform } from "../ui/commands/shortcutManager.ts";
 import { closePrototype, insertLayer, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask } from "./appActions.ts";
 import { appPanels } from "./appPanels.ts";
+import { lastEditorErrorText } from "./errorReports.ts";
 import { learnNav } from "./learnStore.ts";
 import { dialogsFor } from "./sessionServices.ts";
 import { updateStore } from "./updates/updateStore.ts";
@@ -127,7 +128,7 @@ export function appCommands(session: EditorSession, registry: CommandRegistry, o
     { id: "help.lessons", title: "Lessons", category: "Help", icon: GraduationCap, keywords: ["tutorial", "learn", "course", "beginner", "onboarding"], run: () => learnNav.getState().open({ kind: "lessons" }) },
     { id: "help.patchReference", title: "Browse Patch Reference", category: "Help", icon: BookMarked, keywords: ["docs", "patches", "library"], run: () => learnNav.getState().open({ kind: "patches" }) },
     { id: "help.welcome", title: "Welcome Screen", category: "Help", icon: LayoutTemplate, keywords: ["start", "templates", "recent"], run: () => welcomeStore.getState().show("menu") },
-    { id: "help.reportIssue", title: "Report an Issue…", category: "Help", icon: Bug, keywords: ["bug", "feedback", "github"], run: () => void reportIssue(session) },
+    { id: "help.reportIssue", title: "Report an Issue…", category: "Help", icon: Bug, keywords: ["bug", "feedback", "github"], run: () => void reportIssue(session, { error: lastEditorErrorText() }) },
     { id: "help.about", title: "About Sonobe", category: "Help", icon: Info, keywords: ["version", "credits", "licenses", "open source"], run: () => appPanels.getState().show("about") },
     // The menu's own Check for Updates… is handled by the app, so it works with no window open. This is the palette's, listed only in a copy that checks.
     {

@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Tooltip } from "../../ui/Tooltip.tsx";
+import { useSubjectKey } from "./subject.ts";
 
 export interface InspectorHeaderProps {
   icon: ReactNode;
@@ -24,13 +25,15 @@ export interface InspectorHeaderProps {
 }
 
 export function InspectorHeader({ icon, name, placeholder, onRename, allowEmpty = false, subtitle, subtitleTooltip, subtitleAction, subtitleDot, actions, children }: InspectorHeaderProps) {
+  const subjectKey = useSubjectKey();
   return (
     <div className="sb-insp-header">
       <div className="sb-insp-header__main">
         <span className="sb-insp-header__icon" aria-hidden>
           {icon}
         </span>
-        {onRename ? <NameInput value={name} placeholder={placeholder} allowEmpty={allowEmpty} onRename={onRename} /> : <div className="sb-insp-header__name">{name || placeholder}</div>}
+        {/* Keyed by the subject: a name being typed is never committed to the next selection. */}
+        {onRename ? <NameInput key={subjectKey} value={name} placeholder={placeholder} allowEmpty={allowEmpty} onRename={onRename} /> : <div className="sb-insp-header__name">{name || placeholder}</div>}
         {actions && <div className="sb-insp-header__actions">{actions}</div>}
         {(subtitle || subtitleAction) && (
           <div className="sb-insp-header__meta">

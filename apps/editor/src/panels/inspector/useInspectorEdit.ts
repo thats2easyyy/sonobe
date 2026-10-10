@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ApplyInput } from "../../state/document.ts";
 import { useEditorSession } from "../../state/EditorProvider.tsx";
 import { toast } from "../../ui/Toast.tsx";
+import { useSubjectKey } from "./subject.ts";
 
 export interface InspectorEdit {
   /**
@@ -58,7 +59,8 @@ export function useInspectorEdit(): InspectorEdit {
       },
     };
   }, [session]);
-  // A control that unmounts mid-gesture (selection changed during a scrub) must not leave it open.
-  useEffect(() => () => edit.endGesture(), [edit]);
+  // A control that unmounts mid-gesture, or a row that stays while the selection changes during a scrub, must not leave it open.
+  const subjectKey = useSubjectKey();
+  useEffect(() => () => edit.endGesture(), [edit, subjectKey]);
   return edit;
 }

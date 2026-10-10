@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Tooltip } from "./Tooltip.tsx";
 import { cx } from "./lib/cx.ts";
 import { useControllableState, useLatest } from "./lib/hooks.ts";
@@ -604,7 +604,8 @@ export function TreeView<T extends TreeNodeLike<T>>({
   );
 }
 
-function TreeLabel({ id, label }: { id: string; label: string }) {
+/** Memoized: the tree renders on every change to its nodes, and a row's name and tooltip seldom differ. */
+const TreeLabel = memo(function TreeLabel({ id, label }: { id: string; label: string }) {
   const [truncated, setTruncated] = useState(false);
   return (
     <Tooltip content={truncated ? label : undefined} placement="bottom-start">
@@ -613,7 +614,7 @@ function TreeLabel({ id, label }: { id: string; label: string }) {
       </span>
     </Tooltip>
   );
-}
+});
 
 function RenameInput({ initial, onDone }: { initial: string; onDone: (name: string | null) => void }) {
   const ref = useRef<HTMLInputElement>(null);

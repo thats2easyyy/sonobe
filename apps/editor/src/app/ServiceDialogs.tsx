@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import type { DialogRequest, DialogStore, DialogVariant, PickDialogItem } from "../state/dialogs.ts";
 import { Button, type ButtonVariant } from "../ui/Button.tsx";
 import { Dialog, DIALOG_WIDTH } from "../ui/Dialog.tsx";
+import { DialogBoundary } from "../ui/ErrorBoundary.tsx";
 import { SearchList } from "../ui/SearchList.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { FuzzyKey } from "../ui/lib/fuzzy.ts";
@@ -15,16 +16,20 @@ export function ServiceDialogs({ store }: { store: DialogStore }) {
   const request = useStore(store, (s) => s.queue[0] ?? null);
   if (!request) return null;
   const settle: Settle = (value) => store.getState().settle(request.id, value);
-  switch (request.kind) {
-    case "confirm":
-      return <ConfirmDialog key={request.id} request={request} onSettle={settle} />;
-    case "prompt":
-      return <PromptDialog key={request.id} request={request} onSettle={settle} />;
-    case "choose":
-      return <ChooseDialog key={request.id} request={request} onSettle={settle} />;
-    case "pick":
-      return <PickDialog key={request.id} request={request} onSettle={settle} />;
-  }
+  // A dialog that can't be drawn answers as Cancel does, so whoever asked isn't left waiting and the next request shows.
+  return (
+    <DialogBoundary name="The dialog" resetKey={request.id} onFailed={() => settle(request.kind === "confirm" ? false : null)}>
+      {request.kind === "confirm" ? (
+        <ConfirmDialog key={request.id} request={request} onSettle={settle} />
+      ) : request.kind === "prompt" ? (
+        <PromptDialog key={request.id} request={request} onSettle={settle} />
+      ) : request.kind === "choose" ? (
+        <ChooseDialog key={request.id} request={request} onSettle={settle} />
+      ) : (
+        <PickDialog key={request.id} request={request} onSettle={settle} />
+      )}
+    </DialogBoundary>
+  );
 }
 
 const VARIANTS: Record<DialogVariant, ButtonVariant> = { primary: "primary", danger: "danger", default: "secondary" };

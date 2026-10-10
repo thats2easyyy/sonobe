@@ -154,6 +154,31 @@ describe("ScrubNumberField", () => {
     expect(document.activeElement).toBe(input());
   });
 
+  it("selects its text a frame after a click, but never what was typed before that frame came", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    const runFrames = () => act(() => frames.splice(0).forEach((frame) => frame(0)));
+    try {
+      act(() => root.render(<Controlled />));
+      pointer("pointerdown", 50);
+      pointer("pointerup", 50);
+      runFrames();
+      expect([input().selectionStart, input().selectionEnd]).toEqual([0, 2]);
+      act(() => input().blur());
+
+      // A busy editor: the frame comes after the first key. Selecting "3" then would let the next key replace it.
+      pointer("pointerdown", 50);
+      pointer("pointerup", 50);
+      type("3");
+      input().setSelectionRange(1, 1);
+      runFrames();
+      expect(input().value).toBe("3");
+      expect([input().selectionStart, input().selectionEnd]).toEqual([1, 1]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("shows a mixed placeholder and applies scrubs relative to zero", () => {
     const onChange = vi.fn();
     act(() => root.render(<ScrubNumberField aria-label="X" value={0} mixed onChange={onChange} pixelsPerStep={1} />));

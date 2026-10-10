@@ -1,5 +1,5 @@
 import { Link2 } from "lucide-react";
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { cx } from "./lib/cx.ts";
 import { useLatest } from "./lib/hooks.ts";
 import { MAX_DECIMALS, clamp, createScrubSession, formatNumber, nudgeValue, parseNumberInput, roundTo, type ScrubSession } from "./lib/scrubMath.ts";
@@ -188,7 +188,15 @@ export function ScrubNumberField({
     }
   };
 
-  const selectSoon = () => requestAnimationFrame(() => inputRef.current?.select());
+  // Select the text a frame from now, unless something was typed meanwhile. A frame that comes late (a busy editor)
+  // must not select what the person just typed, or their next key replaces it: "33" would arrive as "3".
+  const selectSoon = () => {
+    const draftThen = draftRef.current;
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el && document.activeElement === el && draftRef.current === draftThen) el.select();
+    });
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!editable) return;
@@ -280,13 +288,10 @@ export function ScrubNumberField({
     if (gesture.current?.pointerId === event.pointerId) finishGesture("commit");
   };
 
-  const onFocus = (event: FocusEvent<HTMLInputElement>) => {
+  const onFocus = () => {
     if (!editable) return;
     setDraft(displayText);
-    const el = event.currentTarget;
-    requestAnimationFrame(() => {
-      if (document.activeElement === el) el.select();
-    });
+    selectSoon();
   };
 
   return (
