@@ -22,6 +22,8 @@ export interface AppWindowOptions {
   mute: boolean;
   /** What this window starts on (electron/launch.ts). Its page is loaded with LAUNCH_QUERY, and its editor asks before its first render. */
   launch?: Promise<LaunchInfo>;
+  /** Whether the app is past will-quit. Asked right before the window is created: none is, and the promise never settles. */
+  quitting?(): boolean;
   rpc: RendererRpcHub;
   appName: string;
   log(level: "info" | "warn" | "error", message: string): void;
@@ -102,6 +104,8 @@ export async function createAppWindow(opts: AppWindowOptions): Promise<AppWindow
   const mac = process.platform === "darwin";
   const workAreas = screen.getAllDisplays().map((d) => d.workArea);
   const state: WindowState = await loadWindowState(opts.statePath, workAreas, WINDOW_DEFAULTS);
+  // The app began to quit while the state was read. A window created after will-quit takes the process down.
+  if (opts.quitting?.()) return new Promise<AppWindow>(() => undefined);
 
   const win = new BrowserWindow({
     ...state.bounds,

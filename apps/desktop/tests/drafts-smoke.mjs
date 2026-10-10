@@ -31,6 +31,9 @@
  *    is told nothing, starts as usual and offers the draft. With every window closed and the app still
  *    running, opening the project starts the new window on it too, with no welcome screen although a
  *    draft is waiting.
+ * 8. SIGTERM during launch (a logout, or `kill`, in the app's first second), at sixteen moments from before
+ *    `ready` to after the first window, launched with two prototypes: every launch ends on its own, without
+ *    a crash, and leaves no mcp.json for the next `sonobe mcp` to trust.
  *
  * SONOBE_SMOKE_VERBOSE=1 shows the app's own log.
  *
@@ -41,7 +44,8 @@
 
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -466,6 +470,52 @@ try {
   await app.evaluate(() => globalThis.__sonobeTest.destroyWindows());
   await app.close();
   app = null;
+
+  // ---------------------------------------------------------------------------------------------
+  // 8. SIGTERM during launch
+  // ---------------------------------------------------------------------------------------------
+  // Spawned directly: Playwright would wait for a window that a launch cut short never opens.
+  const other = path.join(temp, "Projects", "Like Toggle.sonobe");
+  cpSync(path.join(repoDir, "examples", "02-like-toggle"), other, { recursive: true });
+  const quitHome = path.join(temp, "quit-home");
+  const quitToken = path.join(quitHome, "mcp.json");
+  /** One launch with both prototypes, SIGTERM `afterMs` after the spawn (never, when null): how it ended, and when mcp.json appeared. */
+  const launchAndQuit = (afterMs) =>
+    new Promise((resolve) => {
+      rmSync(quitHome, { recursive: true, force: true });
+      rmSync(path.join(temp, "quit-data"), { recursive: true, force: true });
+      const spawned = Date.now();
+      const child = spawn(electronPath, ["--mute-audio", appDir, target, other], { cwd: appDir, env: { ...env, SONOBE_HOME: quitHome, SONOBE_USER_DATA: path.join(temp, "quit-data") }, stdio: "ignore" });
+      let endpointAt = null;
+      const watch = setInterval(() => {
+        if (endpointAt === null && existsSync(quitToken)) endpointAt = Date.now() - spawned;
+        // The launch that is only timed: it ends once the endpoint is up.
+        if (afterMs === null && endpointAt !== null) child.kill("SIGTERM");
+      }, 5);
+      const term = afterMs === null ? null : setTimeout(() => child.kill("SIGTERM"), afterMs);
+      const giveUp = setTimeout(() => child.kill("SIGKILL"), afterMs === null ? 30_000 : afterMs + 6000);
+      child.once("exit", (code, signal) => {
+        clearInterval(watch);
+        clearTimeout(term ?? undefined);
+        clearTimeout(giveUp);
+        resolve({ code, signal, endpointAt, ms: Date.now() - spawned });
+      });
+    });
+  // The endpoint comes up between `ready` and the first window, so its time says where in the launch to aim.
+  const timed = await launchAndQuit(null);
+  assert(timed.endpointAt !== null, "a launch that isn't interrupted brings the MCP endpoint up", timed);
+  const endings = [];
+  for (let i = 0; i < 16; i++) {
+    const afterMs = Math.max(50, Math.round(timed.endpointAt - 200 + i * 30));
+    const outcome = await launchAndQuit(afterMs);
+    // Before Chromium has its handler the signal's default ends the process, which is a quit too.
+    const quit = (outcome.code === 0 && outcome.signal === null) || outcome.signal === "SIGTERM";
+    assert(quit, `SIGTERM ${afterMs} ms into launch ends the app on its own, without a crash or a hang`, outcome);
+    await new Promise((r) => setTimeout(r, 150));
+    assert(!existsSync(quitToken), `SIGTERM ${afterMs} ms into launch leaves no mcp.json behind`, outcome);
+    endings.push(outcome.signal === "SIGTERM" ? "early" : "quit");
+  }
+  log(`SIGTERM during launch, 16 moments around the endpoint coming up at ${timed.endpointAt} ms: ${endings.filter((how) => how === "quit").length} quit, ${endings.filter((how) => how === "early").length} ended before any handler; none hung, crashed or left mcp.json`);
   log("PASS");
 } catch (err) {
   failed = true;

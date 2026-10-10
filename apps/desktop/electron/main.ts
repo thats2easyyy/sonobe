@@ -114,6 +114,11 @@ function main(): void {
   let previewStarting: Promise<void> | null = null;
   let creating: Promise<AppWindow> | null = null;
   let ready = false;
+  /**
+   * will-quit has run: the app has stopped what it had and is on its way out. A logout or a `kill` can land anywhere in
+   * launch, so what launch does next looks here first: nothing starts after it, and no window is created.
+   */
+  let quitting = false;
   let secrets: SecretStore | null = null;
   /** Stopped on quit: it runs Claude's agent adapter as a child process when the subscription is on. */
   let assistant: AssistantRegistration | null = null;
@@ -310,6 +315,7 @@ function main(): void {
       source: resolveContentSource(),
       statePath: path.join(app.getPath("userData"), "window-state.json"),
       mute: env.mute,
+      quitting: () => quitting,
       ...(launch ? { launch } : {}),
       rpc: rpc!,
       appName: APP_NAME,
@@ -351,6 +357,9 @@ function main(): void {
   };
 
   const ensureWindow = (): Promise<AppWindow> => {
+    // The app is quitting: a window created now crashes the process on its way out, or keeps it running with nothing to
+    // show. Whoever asked is left waiting for a process that is about to end.
+    if (quitting) return new Promise<AppWindow>(() => undefined);
     const existing = primaryWindow();
     if (existing) return Promise.resolve(existing);
     creating ??= createWindow().finally(() => {
@@ -1175,6 +1184,7 @@ function main(): void {
   });
 
   app.on("will-quit", () => {
+    quitting = true;
     updates?.stop();
     abortCaptures();
     for (const { watcher } of watchers.values()) watcher.close();
@@ -1192,6 +1202,15 @@ function main(): void {
     }
   });
   process.on("exit", () => mcp?.removeTokenFile());
+
+  // A quit that came before `ready` (a `kill` in the app's first moments): Electron fires will-quit and quit and then `ready`
+  // all the same, and from there app.quit() and app.exit() do nothing, because it has already shut down. Launch went on to
+  // create a window after the quit, and about one such launch in five never ended: no window, and the single-instance lock
+  // held until a force quit. will-quit has run with nothing to stop, so the process ends here. `process.exit` is app.exit in
+  // Electron's main process, hence Node's own exit underneath it.
+  app.once("ready", () => {
+    if (quitting) (process as unknown as { reallyExit(code: number): never }).reallyExit(0);
+  });
 
   const registerIpc = () => {
     ipcMain.handle(IPC.dialogOpenProject, async (event) => {
@@ -1613,6 +1632,8 @@ function main(): void {
       if (await draftAt(dir)) await recents.remove(dir);
       else access.approve(dir);
     }
+    // A quit while the list was read: launch stops, and what a restart wrote down stays for the next one.
+    if (quitting) return;
     rebuildMenu();
 
     // A restart for an update wrote down what was open: it opens again, once. A project named on the command line or opened from
@@ -1643,6 +1664,14 @@ function main(): void {
       } catch (err) {
         log("warn", `MCP endpoint disabled: ${errorMessage(err)}`);
       }
+    }
+
+    // A quit during the awaits above: will-quit ran before the endpoint was up, so it closed nothing and mcp.json would stay
+    // behind for the next `sonobe mcp` to trust. The endpoint goes here, and launch stops.
+    if (quitting) {
+      mcp?.removeTokenFile();
+      void mcp?.close().catch(() => undefined);
+      return;
     }
 
     // The window comes after the work above on purpose. `new BrowserWindow` returns about 60 ms after `ready` however early
