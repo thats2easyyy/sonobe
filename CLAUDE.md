@@ -42,6 +42,7 @@ These run by hand, outside CI:
 ```sh
 npm run smoke -w @sonobe/desktop   # the muted Electron end-to-end run
 npm run bench -w @sonobe/editor    # editor boot and interaction timings
+npm run bench:startup -w @sonobe/desktop   # the packaged app's launch timeline (macOS)
 npm run test:ios                   # Sonobe Viewer on an iOS Simulator (Xcode)
 node evals/run.ts                  # Claude builds each eval case (uses your Claude account)
 node apps/desktop/tests/update-rehearsal.mjs --identity "<name>"   # a real update between two signed builds (macOS)
