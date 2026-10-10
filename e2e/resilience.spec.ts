@@ -25,11 +25,15 @@ test.describe("when the editor can't draw", () => {
     await hook(page, (s) => s.apply([{ op: "addLayer", layer: { id: "hero", type: "rectangle", name: "Hero Card" } }], "Add Hero Card"));
     // An edit made a moment before the failure, which the draft doesn't hold yet: the recovery screen writes it.
     await expect.poll(() => hook(page, (s) => s.session.drafts?.current()?.id ?? null)).not.toBeNull();
-    await hook(page, (s) => s.apply([{ op: "addLayer", layer: { id: "badge", type: "oval", name: "Badge" } }], "Add Badge"));
-    expect(await hook(page, (s) => s.session.drafts?.pending())).toBe(true);
-
+    // The edit, the check and the failure in one call: the keeper writes a second after an edit, so a second call could come too late.
     // The hook goes away with the editor, so this is the last call through it until the reload.
-    await hook(page, (s) => s.failRender("Sonobe"));
+    const pending = await hook(page, (s) => {
+      s.apply([{ op: "addLayer", layer: { id: "badge", type: "oval", name: "Badge" } }], "Add Badge");
+      const waiting = s.session.drafts?.pending();
+      s.failRender("Sonobe");
+      return waiting;
+    });
+    expect(pending).toBe(true);
     const recovery = page.locator(".sb-recovery");
     await expect(recovery.getByRole("heading", { name: "Sonobe hit a problem" })).toBeVisible();
     await expect(recovery).toContainText("The editor couldn’t draw itself, so it stopped. Reload to start it again.");
@@ -92,6 +96,8 @@ test.describe("when one part of the editor can't draw", () => {
     const inspector = page.locator("#sb-inspector");
     await expect(inspector.locator(".sb-insp-row").first()).toBeVisible();
 
+    // The console row shows when it was logged: a fixed time of day, so the screenshot is the same on every run.
+    await page.clock.setFixedTime(new Date(2026, 0, 1, 10, 0, 0));
     await hook(page, (s) => s.failRender("The Inspector"));
     await expect(inspector.locator(".sb-surface-problem")).toContainText("The Inspector hit a problem");
     await expect(inspector.locator(".sb-surface-problem")).toContainText("The rest of Sonobe still works.");
