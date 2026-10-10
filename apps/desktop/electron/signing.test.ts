@@ -11,6 +11,7 @@ import {
   DISABLE_LIBRARY_VALIDATION,
   SigningError,
   buildInfoFor,
+  certificateSource,
   checkArtifacts,
   checkHelper,
   checkSignature,
@@ -257,19 +258,54 @@ describe("planSigning: a release", () => {
     expect(read("../scripts/package.mjs")).toContain('readIdentities(found.stdout ?? "")');
   });
 
-  it("leaves the identity to electron-builder when CSC_LINK supplies the certificate", () => {
-    const ci = release({
-      env: { ...API_KEY, CSC_LINK: "base64…", CSC_KEY_PASSWORD: "x" },
-      identities: [],
-    });
+  it("signs from the keychain package.mjs makes for CSC_LINK's certificate, and keeps the import from electron-builder", () => {
+    // package.mjs has installed the certificate by now: the plan reads that keychain's names, and CSC_LINK is gone.
+    const ci = release({ env: API_KEY, identities: [DEVELOPER_ID], certificateFrom: "CSC_LINK" });
     expect(ci).toMatchObject({
-      identity: undefined,
+      identity: "Example Co (ABCDE12345)",
+      certificate: DEVELOPER_ID,
       notarize: true,
       forceCodeSigning: true,
       build: { signing: "developer-id", updates: "install" },
     });
-    expect(ci.label).toContain("CSC_LINK");
-    expect(macSigningOptions(ci, PATHS, noSign)).not.toHaveProperty("identity");
+    expect(ci.label).toContain(`signed with "${DEVELOPER_ID}" from CSC_LINK`);
+    expect(macSigningOptions(ci, PATHS, noSign)).toMatchObject({ identity: "Example Co (ABCDE12345)" });
+    // A .p12 with another kind of certificate, or none with its key, is refused as CSC_LINK's, not as this Mac's.
+    const wrong = { release: true, env: API_KEY, certificateFrom: "CSC_LINK" } as const;
+    expect(refusal({ ...wrong, identities: [DEVELOPMENT] }).message).toBe(
+      `A release is signed with a "Developer ID Application" certificate, and CSC_LINK holds only "${DEVELOPMENT}".`,
+    );
+    expect(refusal({ ...wrong, identities: [] }).message).toMatch(
+      /CSC_LINK holds no code signing certificate with its private key/,
+    );
+    // electron-builder gives `security set-key-partition-list` the certificate's password where the keychain's
+    // is asked for, and current macOS refuses. package.mjs passes the keychain's, then points electron-builder
+    // at that keychain with nothing left for it to import.
+    const script = read("../scripts/package.mjs");
+    expect(script).toContain('["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, keychain]');
+    expect(script).toContain('for (const name of ["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME"]) delete process.env[name];');
+    expect(script).toContain("process.env.CSC_KEYCHAIN = installed.keychain;");
+  });
+
+  it("reads CSC_LINK as a .p12 file or the file's base64, and refuses anything else", () => {
+    const exists = (file: string) => file === "/certs/developer-id.p12";
+    const refused = (link: string): string => {
+      try {
+        certificateSource(link, exists);
+      } catch (err) {
+        if (err instanceof SigningError) return err.message;
+        throw err;
+      }
+      throw new Error("expected certificateSource to refuse");
+    };
+    expect(certificateSource("/certs/developer-id.p12", exists)).toEqual({ file: "/certs/developer-id.p12" });
+    expect(certificateSource("file:///certs/Developer%20ID.p12", exists)).toEqual({ file: "/certs/Developer ID.p12" });
+    // A repository secret holds the base64, and `base64` may have wrapped it.
+    const base64 = "MIIK".repeat(40);
+    expect(certificateSource(` ${base64.slice(0, 76)}\n${base64.slice(76)}\n`, exists)).toEqual({ base64 });
+    expect(refused("https://example.com/developer-id.p12")).toMatch(/web address/);
+    expect(refused("/certs/missing.p12")).toBe("CSC_LINK names a file that isn't there: /certs/missing.p12");
+    expect(refused("not a certificate")).toBe("CSC_LINK is neither a .p12 file nor a .p12 file's base64.");
   });
 
   it("refuses flags that would make it less than a release, and other platforms", () => {
