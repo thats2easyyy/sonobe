@@ -62,6 +62,25 @@ describe("planLaunch", () => {
     expect(failing.info).toEqual({ reopening: false, open: { kind: "project", path: "/work/Checkout.sonobe" }, problems: [{ path: "/share/Slow.sonobe", reason: "missing" }] });
   });
 
+  it("doesn't wait for a path that doesn't answer: the window starts on the next one, and that path opens the usual way", async () => {
+    const looked: string[] = [];
+    const hanging = await plan(["/share/Hung.sonobe", "/work/Checkout.sonobe", "/work/Onboarding.sonobe"], [], {
+      resolve: (candidate) => (candidate.startsWith("/share/") ? new Promise<string | null>(() => undefined) : Promise.resolve(candidate)),
+      exists: (candidate) => (looked.push(candidate), false),
+      lookTimeoutMs: 20,
+    });
+    // Not a problem: nobody knows yet whether it's there. And nothing looks at it again, which would wait on the same share.
+    expect(hanging).toEqual({ info: { reopening: false, open: { kind: "project", path: "/work/Checkout.sonobe" }, problems: [] }, restPaths: ["/share/Hung.sonobe", "/work/Onboarding.sonobe"], restSteps: [] });
+    expect(looked).toEqual([]);
+  });
+
+  it("starts on nothing when the only path doesn't answer, and never on what a restart wrote down", async () => {
+    const started = Date.now();
+    const planned = await plan(["/share/Hung.sonobe"], [{ kind: "project", path: "/work/Onboarding.sonobe" }], { resolve: () => new Promise<string | null>(() => undefined), lookTimeoutMs: 20 });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(planned).toEqual({ info: { reopening: false, open: null, problems: [] }, restPaths: ["/share/Hung.sonobe"], restSteps: [] });
+  });
+
   it("starts on a restart's first step with `reopening`, and returns the rest", async () => {
     const steps: ReopenStep[] = [
       { kind: "draft", id: DRAFT, project: "/work/Checkout.sonobe" },
