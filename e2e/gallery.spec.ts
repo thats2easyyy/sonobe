@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleProblems, skipWelcome } from "./helpers.ts";
+import { collectConsoleProblems, skipWelcome, waitForPrototype } from "./helpers.ts";
 
 test("the widget gallery route still loads", async ({ page }) => {
   const problems = collectConsoleProblems(page);
@@ -12,7 +12,7 @@ test("the widget gallery route still loads", async ({ page }) => {
   await page.evaluate(() => {
     window.location.hash = "";
   });
-  await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
+  await waitForPrototype(page);
   await expect(page.locator("#sb-layers").getByText("Event Card", { exact: true })).toBeVisible();
   expect(problems).toEqual([]);
 });

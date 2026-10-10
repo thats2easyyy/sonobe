@@ -22,8 +22,8 @@ export function useWatchedCopy(session: EditorSession): number | null {
  * without ports.
  */
 export function useInstanceCopies(session: EditorSession, scope: LiveScope): number | undefined {
-  const doc = useStore(session.document, (s) => s.doc);
-  const address = instanceCopiesAddress(scope, doc);
+  // The address is all this reads from the document, so an edit that leaves it alone renders nothing here.
+  const address = useStore(session.document, (s) => instanceCopiesAddress(scope, s.doc));
   const subscribe = useCallback((cb: () => void) => (address ? session.runtime.subscribeFrame(() => cb()) : none()), [session, address]);
   const read = useCallback(() => {
     const copies = address ? session.runtime.runtime.inspect(address).copies : undefined;

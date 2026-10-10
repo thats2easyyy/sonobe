@@ -7,7 +7,7 @@ import type { Op, SonobeDocument, Value } from "@sonobe/core";
 import type { ApplyOpsResult } from "@sonobe/core";
 import { handleDesignPreview } from "../host/rpcHandlers.ts";
 import type { DesignPreviewUpdate } from "../host/types.ts";
-import { importDesign, type ImportOutcome } from "../panels/import/importDesign.ts";
+import type { ImportOutcome } from "../panels/import/importDesign.ts";
 import type { SelectionState } from "../state/selection.ts";
 import type { EditorSession } from "../state/session.ts";
 import { layoutStore, type LayoutStore } from "../shell/layoutStore.ts";
@@ -20,6 +20,8 @@ export interface SonobeTestHook {
   getValue(address: string): Value;
   frame(): number;
   playing(): boolean;
+  /** Playing with no frame scheduled: nothing in the prototype moves. A test that waits for the prototype waits for this or for frames. */
+  resting(): boolean;
   selection(): SelectionState;
   layout(): LayoutStore;
   apply(ops: Op[], label?: string): Pick<ApplyOpsResult, "ok" | "errors" | "idMap">;
@@ -53,13 +55,15 @@ export function installTestHook(session: EditorSession, target: Window = window)
     getValue: (address) => session.runtime.runtime.getValue(address),
     frame: () => session.runtime.runtime.frame,
     playing: () => session.runtime.isPlaying(),
+    resting: () => session.runtime.isResting(),
     selection: () => session.selection.getState(),
     layout: () => layoutStore.getState(),
     apply(ops, label = "Test change") {
       const { ok, errors, idMap } = session.document.getState().apply(ops, { label });
       return { ok, errors, idMap };
     },
-    importHtml: (html, options = {}) => importDesign(session, { html, ...options }, { desktop: null }),
+    // Imported on use: a static import would put the whole design-import pipeline in the startup chunk.
+    importHtml: async (html, options = {}) => (await import("../panels/import/importDesign.ts")).importDesign(session, { html, ...options }, { desktop: null }),
     previewDesign: (update) => handleDesignPreview(session, update),
   };
   target.__sonobe = hook;

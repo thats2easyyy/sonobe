@@ -10,6 +10,7 @@ import path from "node:path";
 import { findLayer, type Component, type Diagnostic, type SonobeDocument } from "@sonobe/core";
 import { componentNodeBoxes } from "@sonobe/core/graph";
 import { createRuntime } from "@sonobe/engine";
+import { buildDoc } from "@sonobe/engine/testing";
 import { createHeadlessHost } from "@sonobe/mcp";
 import { createPatchRegistry } from "@sonobe/patches";
 import { afterAll, describe, expect, it } from "vitest";
@@ -21,6 +22,19 @@ import { RECIPES } from "./recipes/index.ts";
 const registry = createPatchRegistry();
 const host = createHeadlessHost({ registry, maxSimSessions: 2 });
 const folders = listExampleFolders();
+
+/**
+ * The defaults every layer of a type inherits its unset props from, by layer type. The engine keeps
+ * one object per type for every document it compiles, so every example's layers share these.
+ */
+function layerDefaults(): Map<string, object> {
+  const types = [...registry.layers.keys()].filter((type) => type !== "componentInstance");
+  const runtime = createRuntime(buildDoc({ layers: types.map((type) => ({ id: type, type, name: type, props: {} })) as never }, registry), { registry, deterministic: true, fps: 60, platform: {} });
+  const defaults = new Map(runtime.step().roots.map((node) => [node.type, Object.getPrototypeOf(node.props) as object]));
+  runtime.dispose();
+  return defaults;
+}
+const defaultsBefore = new Map([...layerDefaults()].map(([type, defaults]) => [type, structuredClone(defaults)]));
 
 const README_SECTIONS = ["## What you'll learn", "## Build it step by step", "## The patch chain", "## Variations"];
 
@@ -152,3 +166,12 @@ for (const recipe of RECIPES) {
     }
   });
 }
+
+describe("layer defaults", () => {
+  it("are untouched after every scenario ran: nothing writes into what all layers of a type share", () => {
+    const now = layerDefaults();
+    expect(now.size).toBeGreaterThan(10);
+    expect(layerDefaults().get("rectangle")).toBe(now.get("rectangle"));
+    for (const [type, defaults] of now) expect(defaults, type).toEqual(defaultsBefore.get(type));
+  });
+});

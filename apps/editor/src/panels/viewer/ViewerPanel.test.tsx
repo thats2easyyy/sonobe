@@ -272,6 +272,34 @@ describe("ViewerPanel", () => {
     expect(pill()?.getAttribute("aria-label")).toContain("1 runtime warning");
   });
 
+  it("keeps saying Live while the prototype rests, and says so in place of a frame rate", () => {
+    vi.useFakeTimers();
+    try {
+      mount(<ViewerPanel />);
+      const status = () => container.querySelector<HTMLElement>(".sb-vw__pill[data-static]")!;
+      const tip = () => {
+        act(() => void status().dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })));
+        act(() => void status().dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" })));
+        act(() => void vi.advanceTimersByTime(600));
+        return document.querySelector('[role="tooltip"]')?.textContent;
+      };
+      act(() => session.runtime.state.setState({ playing: true, resting: true, fps: 0 }));
+      expect(status().textContent).toBe("Live");
+      expect(tip()).toBe("At rest: nothing is moving");
+      act(() => session.runtime.state.setState({ resting: false, fps: 60 }));
+      expect(tip()).toBe("60 fps");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows no frame rate in the floating window while the prototype rests", () => {
+    mount(<ViewerPanel />);
+    chooseMore("Pop Out Viewer");
+    act(() => session.runtime.state.setState({ playing: true, resting: true, fps: 0 }));
+    expect(document.querySelector(".sb-float .sb-vw__pill[data-static]")?.textContent).toBe("Live");
+  });
+
   it("lets keyboard users reach the frame count and fps tooltip on the status", () => {
     mount(<ViewerPanel />);
     expect(container.querySelector(".sb-vw__pill[data-static]")?.getAttribute("tabindex")).toBe("0");

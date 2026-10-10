@@ -1,9 +1,10 @@
 /**
  * The scene the canvas draws: the component being edited at frame 0 (a private deterministic
- * runtime, re-run on every document change), or the live prototype's latest frame.
+ * runtime, re-run on every document change; a literal edit is applied in place, in a component as
+ * in the root), or the live prototype's latest frame.
  */
 
-import { artboardSize, componentDocument, type Id } from "@sonobe/core";
+import { artboardSize, componentDocument, type Id, type ProjectManifest, type SonobeDocument } from "@sonobe/core";
 import { createRuntime, type SceneFrame, type SonobeRuntime } from "@sonobe/engine";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -21,10 +22,30 @@ export interface CanvasSceneState {
 
 const LIVE_INTERVAL_MS = 50;
 
+/**
+ * `componentDocument` that hands back the same project object while the project, the component and
+ * its artboard size are the same. The engine applies a literal edit in place only to a document whose
+ * project is the object it already has, so a new project per edit made every edit inside a component
+ * recompile it.
+ */
+export function createComponentDocuments(): (doc: SonobeDocument, componentId: Id) => SonobeDocument {
+  let last: { project: ProjectManifest; componentId: Id; derived: ProjectManifest } | null = null;
+  return (doc, componentId) => {
+    const derived = componentDocument(doc, componentId);
+    if (derived === doc) return doc;
+    const [width, height] = derived.project.device.size ?? [];
+    const [lastWidth, lastHeight] = last?.derived.device.size ?? [];
+    if (last && last.project === doc.project && last.componentId === componentId && lastWidth === width && lastHeight === height) return { ...doc, project: last.derived };
+    last = { project: doc.project, componentId, derived: derived.project };
+    return derived;
+  };
+}
+
 export function useCanvasScene(session: EditorSession, componentId: Id, source: SceneSource): CanvasSceneState {
   const doc = useStore(session.document, (s) => s.doc);
   const live = source === "live" && componentId === doc.project.root;
   const runtimeRef = useRef<SonobeRuntime | null>(null);
+  const [componentDocumentOf] = useState(createComponentDocuments);
 
   useEffect(
     () => () => {
@@ -36,7 +57,7 @@ export function useCanvasScene(session: EditorSession, componentId: Id, source: 
 
   const designScene = useMemo(() => {
     if (live) return null;
-    const derived = componentDocument(doc, componentId);
+    const derived = componentDocumentOf(doc, componentId);
     if (!derived.components[derived.project.root]) return null;
     try {
       let rt = runtimeRef.current;
@@ -57,7 +78,7 @@ export function useCanvasScene(session: EditorSession, componentId: Id, source: 
     } catch {
       return null;
     }
-  }, [doc, componentId, live, session]);
+  }, [doc, componentId, live, session, componentDocumentOf]);
 
   const [liveScene, setLiveScene] = useState<SceneFrame | null>(null);
   useEffect(() => {

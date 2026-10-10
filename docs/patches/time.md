@@ -17,7 +17,7 @@ Time is the prototype's clock. It counts up from 0 when the prototype starts and
 
 - **Enabled** freezes the outputs while off. When it's turned back on, the outputs jump to the current prototype time, because the clock itself never stops.
 - **Time** is seconds since the prototype started, with fractions: 1.5 means a second and a half.
-- **Frame** counts frames since the start, from 0. It's about Time × 60 on a 60 Hz display and Time × 120 on a 120 Hz display.
+- **Frame** counts the frames the prototype has run since the start, from 0. While Time is enabled the prototype runs every frame, so Frame is about Time × 60 on a 60 Hz display and Time × 120 on a 120 Hz display. A prototype where nothing moves runs no frames, so a Time that is enabled later reads a lower Frame than that.
 
 ## Tips
 - Drive endless motion from Time: wire it through Math Expression into Rotation for a spinner that turns at the same speed on every display.
@@ -39,7 +39,7 @@ Origami's Enable port is called Enabled here.
 | Output | Type | Description |
 |---|---|---|
 | **Time**<br>`time` | `number` (duration) | Seconds since the prototype started, from 0, with fractions. |
-| **Frame**<br>`frame` | `index` | Frames since the prototype started, from 0. About Time × 60 at 60 fps and Time × 120 at 120 fps. |
+| **Frame**<br>`frame` | `index` | Frames the prototype has run since it started, from 0. About Time × 60 at 60 fps and Time × 120 at 120 fps while frames run; a prototype at rest runs none. |
 
 ## Examples
 

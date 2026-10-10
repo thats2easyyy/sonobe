@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, openEditor, screenshot, storedInput, touchLayer } from "./helpers.ts";
+import { blurFields, centerOf, collectConsoleProblems, collectUiWarnings, connectNewPatch, dragCable, fitPatches, flowNode, handle, hook, modKey, openEditor, screenshot, storedInput, touchLayer, waitForPrototype } from "./helpers.ts";
 
 test.describe("interactive lessons", () => {
   test("completes lesson 1, Your first prototype, through the UI", async ({ page }) => {
@@ -209,7 +209,7 @@ test.describe("interactive lessons", () => {
 
     // A reload keeps the offer: progress is saved, but it doesn't resume on another prototype.
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
+    await waitForPrototype(page);
     await expect(offer).toBeVisible();
     await expect(inspector).toBeVisible();
 
@@ -237,7 +237,7 @@ test.describe("interactive lessons", () => {
     // Saved progress on another prototype: the row offers a restart and says why, with no "In progress" badge.
     await page.evaluate(() => localStorage.setItem("sonobe.lessons.v1", JSON.stringify({ active: { id: "first-prototype", step: 3 }, completed: {} })));
     await page.reload();
-    await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
+    await waitForPrototype(page);
     if (!(await learn.isVisible())) await page.getByRole("button", { name: "Learn", exact: true }).click();
     const suggested = learn.locator(".sb-lessoncard[data-expanded]");
     await expect(suggested).toContainText("Your practice prototype isn't open");

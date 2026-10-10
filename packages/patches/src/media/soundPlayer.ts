@@ -96,10 +96,12 @@ function playableSound(ctx: PatchContext, raw: unknown): AssetRef | null {
   return assetExists(ctx, raw) ? raw : null;
 }
 
+/** The sound's length from the host's media info. While the host is still loading it, asks for the next frame so Duration arrives. */
 function mediaDuration(ctx: PatchContext, ref: AssetRef | null): number {
   if (!ref) return 0;
   try {
     const info = ctx.services.mediaInfo?.(ref);
+    if (info?.status === "loading") ctx.requestNextFrame();
     return info?.status === "ready" && Number.isFinite(info.duration) && info.duration > 0 ? info.duration : 0;
   } catch {
     return 0;

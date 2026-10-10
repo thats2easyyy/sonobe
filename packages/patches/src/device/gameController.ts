@@ -1,6 +1,7 @@
 /**
  * Game Controller: polls one controller slot from the host's gamepad snapshot every frame and
  * reports buttons, triggers, D-pad, and thumbsticks (W3C "standard" layout, radial dead zone).
+ * No event announces a button, so it asks for every frame where the host has controllers.
  * Stateless.
  */
 
@@ -54,11 +55,13 @@ export const gameControllerPatch = definePatch("gameController", {
   evaluate(ctx) {
     const slot = Math.max(0, Math.floor(finiteOr(toNumber(ctx.input("controller"), 0), 0)));
     let pad: GamepadSnapshot | null | undefined;
+    const gamepads = ctx.services.platform.gamepads;
     try {
-      pad = ctx.services.platform.gamepads?.()?.[slot];
+      pad = gamepads?.()?.[slot];
     } catch {
       pad = undefined;
     }
+    if (typeof gamepads === "function") ctx.requestNextFrame();
     if (!pad?.connected) {
       outputIdle(ctx);
       return;

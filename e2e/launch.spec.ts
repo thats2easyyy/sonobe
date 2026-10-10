@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { installFakeLaunch, launchSeen } from "./fakeLaunch.ts";
-import { blurFields, collectConsoleProblems, hook, modKey, openEditor, WELCOME_SEEN_KEY } from "./helpers.ts";
-
-const framesRun = () => (window.__sonobe?.frame() ?? -1) > 3;
+import { blurFields, collectConsoleProblems, hook, modKey, openEditor, waitForPrototype, WELCOME_SEEN_KEY } from "./helpers.ts";
 
 test.describe("a window opened for a prototype", () => {
   test("starts on it: its name is the only one the toolbar shows, and the welcome screen never appears", async ({ page }) => {
@@ -15,7 +13,7 @@ test.describe("a window opened for a prototype", () => {
     await page.evaluate((key) => localStorage.removeItem(key), WELCOME_SEEN_KEY);
     await installFakeLaunch(page, { open: { kind: "project", path: "browser:Checkout Flow" } });
     await page.reload();
-    await page.waitForFunction(framesRun);
+    await waitForPrototype(page);
     expect(await hook(page, (s) => ({ name: s.doc().project.name, path: s.session.document.getState().projectPath, dirty: s.session.document.getState().dirty }))).toEqual({ name: "Checkout Flow", path: "browser:Checkout Flow", dirty: false });
     await expect(page.locator("#sb-layers").getByText("Event Card", { exact: true }).first()).toBeVisible();
     await expect(page.locator(".sb-pe .react-flow__node").first()).toBeVisible();
@@ -35,7 +33,7 @@ test.describe("a window opened for a prototype", () => {
     expect(await hook(page, (s) => s.session.document.getState().saveTo("browser:Slow Share").then((result) => result.ok))).toBe(true);
     await installFakeLaunch(page, { open: { kind: "project", path: "browser:Slow Share" } }, { delayMs: 300 });
     await page.reload();
-    await page.waitForFunction(framesRun);
+    await waitForPrototype(page);
     const seen = await launchSeen(page);
     expect(seen.answeredAt).not.toBeNull();
     expect(seen.renderedAt!).toBeGreaterThan(seen.answeredAt!);
@@ -58,7 +56,7 @@ test.describe("a window opened for a prototype", () => {
     // What the app sends for a folder that's gone, and for one whose files it then can't read.
     await installFakeLaunch(page, { open: { kind: "project", path: "browser:Moved Away" }, problems: [{ path: "/Volumes/Work/Old Flow.sonobe", reason: "missing" }] });
     await page.reload();
-    await page.waitForFunction(framesRun);
+    await waitForPrototype(page);
     expect((await launchSeen(page)).titles).toEqual(["Photo Zoom"]);
     const unreadable = page.locator(".sb-toast", { hasText: "Couldn't open “Moved Away”" });
     await expect(unreadable).toBeVisible();
@@ -93,7 +91,7 @@ test.describe("a window opened for a prototype", () => {
     await page.evaluate((key) => localStorage.removeItem(key), WELCOME_SEEN_KEY);
     await installFakeLaunch(page, { reopening: true, open: { kind: "draft", id: draft, project: "browser:Checkout Flow" } });
     await page.reload();
-    await page.waitForFunction(framesRun);
+    await waitForPrototype(page);
     expect(await hook(page, (s) => ({ path: s.session.document.getState().projectPath, dirty: s.session.document.getState().dirty, draft: s.session.drafts?.current()?.id ?? null }))).toEqual({ path: "browser:Checkout Flow", dirty: true, draft });
     await expect(page.locator("#sb-layers").getByText("Unsaved Badge", { exact: true }).first()).toBeVisible();
     await page.waitForTimeout(600);

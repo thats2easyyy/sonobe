@@ -72,6 +72,95 @@ export function runFrames(runtime: Runtime, n: number, events?: EventsByFrame): 
   return frames;
 }
 
+export interface RestedRun {
+  /** Frames (of `n`) the resting runtime stepped; it sat the others out. */
+  steps: number;
+  /** Where the two runtimes first disagreed ("frame 12: roots.0.x 10 vs 12"), or null. */
+  mismatch: string | null;
+  /** The `watch` addresses as the resting runtime read them at the end. */
+  values: Record<string, Value>;
+}
+
+/** Prototypes already found equal (scene props inherit one defaults object per layer, which never changes). */
+const equalDefaults = new WeakMap<object, object>();
+
+/** The first place two values differ (".x 10 vs 12"), numbers compared to a relative `tolerance`. Inherited keys count. */
+function firstDifference(a: unknown, b: unknown, tolerance: number): string | null {
+  if (a === b) return null;
+  if (typeof a === "number" && typeof b === "number") {
+    if ((Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) <= tolerance * Math.max(1, Math.abs(a), Math.abs(b))) return null;
+  } else if (typeof a === "object" && typeof b === "object" && a !== null && b !== null && Array.isArray(a) === Array.isArray(b)) {
+    const pa = Object.getPrototypeOf(a) as object | null;
+    const pb = Object.getPrototypeOf(b) as object | null;
+    if (pa !== pb && pa && pb && equalDefaults.get(pa) !== pb) {
+      const found = firstDifference(pa, pb, tolerance);
+      if (found) return found;
+      equalDefaults.set(pa, pb);
+    }
+    const keys = Object.keys(a);
+    for (const key of keys) {
+      const found = firstDifference((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], tolerance);
+      if (found) return `.${key}${found}`;
+    }
+    if (Object.keys(b).length !== keys.length) for (const key of Object.keys(b)) if (!Object.hasOwn(a, key)) return `.${key} undefined vs ${JSON.stringify((b as Record<string, unknown>)[key])}`;
+    return null;
+  }
+  return ` ${JSON.stringify(a)} vs ${JSON.stringify(b)}`;
+}
+
+/**
+ * The rest property (ARCHITECTURE.md §5.2): a host that rests draws what a host that steps on every
+ * frame draws. Runs `doc` live for `n` frames twice. One runtime steps on every frame. The other
+ * steps the way a resting host does: only while it isn't `resting` or after `onWake`, with the whole
+ * gap as `dt`. After every frame the two must hold the same scene (frame and time aside) and read
+ * the same `watch` addresses. Numbers compare to a relative 1e-6, because the two clocks add the
+ * same time in different steps.
+ */
+export function runRested(
+  doc: SonobeDocument,
+  definitions: EngineRegistry | readonly PatchDefinition[] | undefined,
+  n: number,
+  events?: EventsByFrame,
+  options: { watch?: readonly string[]; runtime?: Partial<Omit<RuntimeOptions, "registry" | "deterministic" | "onWake">> } = {},
+): RestedRun {
+  const registry = isEngineRegistry(definitions) ? definitions : createMockRegistry(definitions ?? []);
+  const base: RuntimeOptions = { seed: 1, platform: {}, ...options.runtime, registry, deterministic: false };
+  const every = createRuntime(doc, base);
+  let awake = true;
+  const rested = createRuntime(doc, { ...base, onWake: () => (awake = true) });
+  const dt = 1 / every.fps;
+  const difference = (name: string, a: unknown, b: unknown) => {
+    const found = firstDifference(a, b, 1e-6);
+    return found ? name + found : null;
+  };
+  let steps = 0;
+  let skipped = 0;
+  let mismatch: string | null = null;
+  for (let i = 0; i < n && !mismatch; i++) {
+    const batch = typeof events === "function" ? events(i) : (events as Record<number, readonly InputEvent[] | undefined> | undefined)?.[i];
+    if (batch?.length) {
+      every.dispatch(structuredClone([...batch]));
+      rested.dispatch(structuredClone([...batch]));
+    }
+    const a = every.step(dt);
+    if (awake || !rested.resting) {
+      awake = false;
+      rested.step(dt * (skipped + 1));
+      steps++;
+      skipped = 0;
+    } else skipped++;
+    const b = rested.scene();
+    mismatch = difference("size", a.size, b.size) ?? difference("background", a.background, b.background) ?? difference("roots", a.roots, b.roots);
+    for (const address of options.watch ?? []) mismatch ??= difference(address, every.getValue(address), rested.getValue(address));
+    if (mismatch) mismatch = `frame ${i}: ${mismatch}`;
+  }
+  const values: Record<string, Value> = {};
+  for (const address of options.watch ?? []) values[address] = rested.getValue(address);
+  every.dispose();
+  rested.dispose();
+  return { steps, mismatch, values };
+}
+
 export interface RunPatchOptions {
   id?: Id;
   typeParam?: string;

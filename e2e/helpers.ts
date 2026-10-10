@@ -21,6 +21,9 @@ export interface OpenOptions {
   welcome?: boolean;
 }
 
+/** Where e2e/production.setup.ts builds the editor. Not apps/editor/dist, which a running Sonobe may be showing, and not test-results, which CI uploads. */
+export const PRODUCTION_BUILD = fileURLToPath(new URL("../node_modules/.cache/sonobe-e2e/editor", import.meta.url));
+
 /** localStorage key the welcome screen uses to remember it was shown (apps/editor/src/app/welcome/welcomeStore.ts). */
 export const WELCOME_SEEN_KEY = "sonobe.welcome.v1";
 
@@ -67,14 +70,30 @@ export async function skipWelcome(page: Page): Promise<void> {
   }, WELCOME_SEEN_KEY);
 }
 
-/** Open the editor and wait for the prototype to render a few frames. */
+/**
+ * Wait until the prototype has drawn, and either is still running or has come to rest. A prototype
+ * where nothing moves stops asking for frames after two or three (ARCHITECTURE.md §5.2), so a frame
+ * count alone would never arrive.
+ */
+export async function waitForPrototype(page: Page, timeout = 30_000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const sonobe = window.__sonobe;
+      return !!sonobe && sonobe.frame() >= 0 && (sonobe.resting() || sonobe.frame() > 3);
+    },
+    undefined,
+    { timeout },
+  );
+}
+
+/** Open the editor and wait for the prototype to draw and settle. */
 export async function openEditor(page: Page, options: OpenOptions = {}): Promise<void> {
   await page.addInitScript((keepFsa) => {
     if (!keepFsa) Object.defineProperty(window, "showDirectoryPicker", { value: undefined, configurable: true });
   }, options.fileSystemAccess ?? false);
   if (!options.welcome) await skipWelcome(page);
   await page.goto(options.path ?? "/");
-  await page.waitForFunction(() => (window.__sonobe?.frame() ?? -1) > 3, undefined, { timeout: 30_000 });
+  await waitForPrototype(page);
 }
 
 /** "Meta" or "Control": the key the app treats as Mod (it follows navigator.platform, which the Desktop Chrome profile sets to Windows). */

@@ -51,12 +51,18 @@ export function useUi<T>(selector: (state: PatchEditorUiState) => T): T {
 
 const noop = () => () => undefined;
 
-/** The live runtime value at an address (undefined when not running or null address). */
-export function useLiveValue(address: string | null | undefined): unknown {
+/**
+ * The live runtime value at an address (undefined when not running or null address). With `shown`,
+ * which works out what of the value the view paints (a string, number or boolean), the view renders
+ * again only when that changes, and gets the value as it is at that render.
+ */
+export function useLiveValue(address: string | null | undefined, shown?: (value: unknown) => string | number | boolean | undefined): unknown {
   const { live } = usePatchEditor();
   const subscribe = useCallback((cb: () => void) => (address ? live.subscribe(address, cb) : noop()), [live, address]);
-  const get = useCallback(() => (address ? live.get(address) : undefined), [live, address]);
-  return useSyncExternalStore(subscribe, get, get);
+  const value = () => (address ? live.get(address) : undefined);
+  const get = shown ? () => shown(value()) : value;
+  const followed = useSyncExternalStore(subscribe, get, get);
+  return shown ? value() : followed;
 }
 
 /** How many times a pulse output has fired (changes pop the output's pulse ring). */

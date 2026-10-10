@@ -3,8 +3,9 @@
  * taps reach the device as navigator.vibrate calls on Android and as bridge messages under a native
  * host like Sonobe Viewer; Sonobe's restart reaches the phone; a three-finger tap opens the menu
  * without touching the prototype; Network Request and remote images reach other hosts through the
- * player's CSP, which also lets the platform read a picked photo and a data: file; and Device Info reads
- * the phone's appearance, safe area, rotation and density.
+ * player's CSP, which also lets the platform read a picked photo and a data: file; Device Info reads
+ * the phone's appearance, safe area, rotation and density; and a prototype where nothing moves asks
+ * for no animation frames until a touch, an edit, a restart or the device wakes it.
  * Skipped without Playwright's browser.
  */
 
@@ -57,6 +58,46 @@ function nativeHostV2() {
   w.sonobeNative = Object.freeze({ version: 2, platform: "ios", haptics: ["impactMedium", "notificationSuccess"], vibrate: true, actions: ["openAnother"], menuTipSeen: false });
   w.webkit = { messageHandlers: { sonobe: { postMessage: (message: unknown) => w.__posted.push(message) } } };
   delete (Navigator.prototype as { vibrate?: unknown }).vibrate;
+}
+
+/** Counts the animation frames the page asks for. Added before the player's own script runs. */
+function countFrames() {
+  const w = window as unknown as { __frames: number };
+  w.__frames = 0;
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (callback) => {
+    w.__frames++;
+    return raf(callback);
+  };
+}
+
+/**
+ * Counts the display refreshes the page gets, with a ticker of its own. Added before countFrames, so the
+ * ticker's requests aren't counted as the player's.
+ */
+function countRefreshes() {
+  const w = window as unknown as { __refreshes: number };
+  w.__refreshes = 0;
+  const raf = window.requestAnimationFrame.bind(window);
+  const tick = () => {
+    w.__refreshes++;
+    raf(tick);
+  };
+  raf(tick);
+}
+
+const framesAsked = (page: Page) => page.evaluate(() => (window as unknown as { __frames: number }).__frames);
+
+/** Wait until the player has asked for no frame for `quietMs`, and return its count then. */
+async function settled(page: Page, quietMs = 500): Promise<number> {
+  let count = await framesAsked(page);
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(quietMs);
+    const next = await framesAsked(page);
+    if (next === count) return count;
+    count = next;
+  }
+  throw new Error(`The player kept asking for animation frames (${count} so far): the prototype never came to rest.`);
 }
 
 const posted = (page: Page) => page.evaluate(() => (window as unknown as { __posted: unknown[] }).__posted.map((m) => JSON.stringify(m)));
@@ -354,6 +395,120 @@ describe.skipIf(!playwright)("web player on a phone", () => {
     } finally {
       await context.close();
       await device.close();
+    }
+  });
+
+  it("asks for no frames while nothing moves, and a tap, a restart, an edit and the appearance each wake it", { timeout: 90_000 }, async () => {
+    const restDoc = (label: string) =>
+      buildDoc(
+        {
+          name: "Rest Check",
+          device: "iphone-17-pro",
+          layers: [
+            { id: "surface", type: "rectangle", name: "Tap Anywhere", props: { position: [0, 0], size: [402, 874], color: "#1c1c22" } },
+            { id: "count", type: "text", name: "Tap Count", props: { position: [24, 380], size: [354, 60], text: { link: "count_text.text" }, fontSize: 34, textColor: "#ffffff" } },
+            { id: "label", type: "text", name: "Label", props: { position: [24, 200], size: [354, 40], text: label, fontSize: 24, textColor: "#ffffff" } },
+            { id: "dark", type: "text", name: "Dark", props: { position: [24, 260], size: [354, 40], text: { link: "info.darkMode" }, fontSize: 24, textColor: "#ffffff" } },
+          ],
+          patches: {
+            touch: { type: "interaction", inputs: { layer: { layer: "surface" } } },
+            tick: { type: "haptic", inputs: { play: { link: "touch.tap" }, type: "impactMedium" } },
+            taps: { type: "counter", inputs: { increase: { link: "touch.tap" } } },
+            count_text: { type: "formatNumber", inputs: { value: { link: "taps.count" } } },
+            info: { type: "deviceInfo" },
+          },
+        },
+        createPatchRegistry(),
+      );
+    const rest = await servePlayer({ doc: restDoc("First"), token: "rest-check" });
+    const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: "light" });
+    try {
+      await context.addInitScript(countFrames);
+      await context.addInitScript(nativeHost);
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (err) => errors.push(err.message));
+      await page.goto(rest.url);
+      await page.waitForFunction(() => document.getElementById("status")?.dataset.state === "live", null, { timeout: 15_000 });
+      const count = page.locator('[data-layer="count"]');
+      await count.getByText("0", { exact: true }).waitFor({ timeout: 10_000 });
+
+      // Nothing moves: after the first frames it asks for none, for as long as nothing happens.
+      // (The one-time menu tip, 1.2 s in, animates with a frame of its own: wait it out first.)
+      await page.waitForTimeout(2_000);
+      const atStart = await settled(page);
+      expect(atStart).toBeLessThan(30);
+      await page.waitForTimeout(1_000);
+      expect(await framesAsked(page)).toBe(atStart);
+
+      // A tap lands (the count and the haptic), then it rests again.
+      await page.touchscreen.tap(201, 600);
+      await count.getByText("1", { exact: true }).waitFor({ timeout: 5_000 });
+      expect(await posted(page)).toContain(JSON.stringify({ kind: "haptic", type: "impactMedium" }));
+      const afterTap = await settled(page);
+      expect(afterTap).toBeGreaterThan(atStart);
+      expect(afterTap - atStart).toBeLessThan(30);
+
+      // Sonobe restarts the prototype.
+      rest.restart();
+      await count.getByText("0", { exact: true }).waitFor({ timeout: 5_000 });
+      const afterRestart = await settled(page);
+      expect(afterRestart - afterTap).toBeLessThan(30);
+
+      // An edit in Sonobe hot-swaps in.
+      rest.update(restDoc("Second"));
+      await page.locator('[data-layer="label"]').getByText("Second", { exact: true }).waitFor({ timeout: 5_000 });
+      const afterEdit = await settled(page);
+      expect(afterEdit - afterRestart).toBeLessThan(30);
+
+      // The phone switches to dark mode.
+      await page.locator('[data-layer="dark"]').getByText("false", { exact: true }).waitFor({ timeout: 5_000 });
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.locator('[data-layer="dark"]').getByText("true", { exact: true }).waitFor({ timeout: 5_000 });
+      const afterDark = await settled(page);
+      expect(afterDark - afterEdit).toBeLessThan(30);
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+      await rest.close();
+    }
+  });
+
+  it("keeps the frames coming for a prototype that moves", { timeout: 60_000 }, async () => {
+    const doc = buildDoc(
+      {
+        name: "Motion Check",
+        device: "iphone-17-pro",
+        layers: [{ id: "spinner", type: "rectangle", name: "Spinner", props: { position: [151, 387], size: [100, 100], rotation: { link: "turn.output" } } }],
+        patches: { clock: { type: "time" }, turn: { type: "multiply", typeParam: "number", inputs: { value1: { link: "clock.time" }, value2: 90 } } },
+      },
+      createPatchRegistry(),
+    );
+    const motion = await servePlayer({ doc, token: "motion-check" });
+    const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    try {
+      await context.addInitScript(countRefreshes);
+      await context.addInitScript(countFrames);
+      const page = await context.newPage();
+      await page.goto(motion.url);
+      await page.waitForFunction(() => document.getElementById("status")?.dataset.state === "live", null, { timeout: 15_000 });
+      await page.waitForTimeout(500);
+      // Both counts are read together, so a slow round trip to the page adds nothing to either.
+      const sample = () => page.evaluate(() => ({ asked: (window as unknown as { __frames: number }).__frames, refreshes: (window as unknown as { __refreshes: number }).__refreshes }));
+      const before = await sample();
+      await page.waitForTimeout(1_000);
+      const after = await sample();
+      const asked = after.asked - before.asked;
+      const refreshes = after.refreshes - before.refreshes;
+      // A frame for each refresh the display gave the page, as before, however many this machine managed in
+      // a second (60 in Playwright's Chromium on a quiet one, a third of that on a busy runner): it never
+      // stops asking, and never asks twice.
+      expect(refreshes).toBeGreaterThan(5);
+      expect(asked).toBeGreaterThanOrEqual(refreshes - 2);
+      expect(asked).toBeLessThanOrEqual(refreshes + 2);
+    } finally {
+      await context.close();
+      await motion.close();
     }
   });
 

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DomTextMeasurer, approximateWidth, breakChunks, cssFont, fontStack } from "./textMeasurer.ts";
 import type { TextStyle } from "./textMeasurer.ts";
 
@@ -87,5 +87,108 @@ describe("DomTextMeasurer", () => {
     expect(fontStack("monospace")).toMatch(/^monospace, /);
     expect(fontStack("Georgia, serif")).toBe("Georgia, serif");
     expect(cssFont(style({ italic: true, fontWeight: 650, fontSize: 13 }))).toMatch(/^italic 650 13px "Inter"/);
+  });
+});
+
+describe("DomTextMeasurer: what it keeps", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const TEXT = "hello wide world";
+
+  it("lays a wrapped text out once, and hands every later call the same frozen layout", () => {
+    const m = measurer();
+    const first = m.layout(TEXT, style(), 60);
+    expect(first.lines).toEqual(["hello ", "wide ", "world"]);
+    expect(m.layout(TEXT, style(), 60)).toBe(first);
+    expect(m.layout(TEXT, { ...style() }, 60).lines).toBe(first.lines);
+    expect([Object.isFrozen(first), Object.isFrozen(first.lines), Object.isFrozen(first.lineWidths)]).toEqual([true, true, true]);
+    expect(m.measure(TEXT, style(), 60)).toEqual({ width: 50, height: 60 });
+    // Text that only breaks at its newlines is cheap to lay out and isn't kept.
+    expect(m.layout(TEXT, style(), null)).not.toBe(m.layout(TEXT, style(), null));
+    expect(m.layout(TEXT, style(), null)).toEqual(m.layout(TEXT, style(), null));
+  });
+
+  it("lays out again when anything a layout is made from differs", () => {
+    // Widths and line heights that follow every part of the font, so a stale layout would show.
+    const m = new DomTextMeasurer({
+      measureWidth: (t, font, size) => [...t].length * size + (font.includes("italic") ? 1 : 0) + (font.includes("700") ? 2 : 0) + (font.includes("Georgia") ? 3 : 0),
+      measureLineHeight: (font, size) => size * 2 + (font.includes("Georgia") ? 1 : 0),
+    });
+    const base = style({ fontSize: 10 });
+    const kept = m.layout(TEXT, base, 60);
+    expect([kept.lines, kept.lineWidths, kept.height]).toEqual([["hello ", "wide ", "world"], [50, 40, 50], 60]);
+    const others: [string, TextStyle, number, string][] = [
+      ["font size", style({ fontSize: 12 }), 60, TEXT],
+      ["font weight", style({ fontSize: 10, fontWeight: 700 }), 60, TEXT],
+      ["font family", style({ fontSize: 10, fontFamily: "Georgia" }), 60, TEXT],
+      ["italic", style({ fontSize: 10, italic: true }), 60, TEXT],
+      ["letter spacing", style({ fontSize: 10, letterSpacing: 2 }), 60, TEXT],
+      ["line height", style({ fontSize: 10, lineHeight: 33 }), 60, TEXT],
+      ["text transform", style({ fontSize: 10, textTransform: "uppercase" }), 60, TEXT],
+      ["max width", base, 100, TEXT],
+      ["text", base, 60, "hello wide words"],
+    ];
+    const seen = new Set<unknown>([kept]);
+    for (const [what, s, maxWidth, text] of others) {
+      const layout = m.layout(text, s, maxWidth);
+      expect(seen.has(layout), what).toBe(false);
+      seen.add(layout);
+      // And each is what a measurer that kept nothing lays out.
+      const fresh = new DomTextMeasurer({
+        measureWidth: (t, font, size) => [...t].length * size + (font.includes("italic") ? 1 : 0) + (font.includes("700") ? 2 : 0) + (font.includes("Georgia") ? 3 : 0),
+        measureLineHeight: (font, size) => size * 2 + (font.includes("Georgia") ? 1 : 0),
+      });
+      expect(layout, what).toEqual(fresh.layout(text, s, maxWidth));
+      expect(layout, what).not.toEqual(kept);
+    }
+    expect(m.layout(TEXT, base, 60)).toBe(kept);
+  });
+
+  it("forgets its layouts when a font finishes loading, and on clearCache()", () => {
+    const fonts = new EventTarget();
+    let glyph = 10;
+    const m = new DomTextMeasurer({ measureWidth: (t) => [...t].length * glyph, measureLineHeight: () => 20, document: { fonts } as unknown as Document });
+    const fallback = m.layout(TEXT, style(), 60);
+    expect(fallback.lines).toHaveLength(3);
+    // The web font arrives and is narrower: the same text fits on two lines.
+    glyph = 5;
+    expect(m.layout(TEXT, style(), 60)).toBe(fallback);
+    fonts.dispatchEvent(new Event("loadingdone"));
+    const loaded = m.layout(TEXT, style(), 60);
+    expect(loaded.lines).toEqual(["hello wide ", "world"]);
+    expect(m.layout(TEXT, style(), 60)).toBe(loaded);
+    m.clearCache();
+    expect(m.layout(TEXT, style(), 60)).not.toBe(loaded);
+    m.dispose();
+  });
+
+  it("keeps the 2,000 newest layouts: the oldest goes when another arrives", () => {
+    const m = measurer();
+    const first = m.layout("text 0 wraps", style(), 60);
+    const second = m.layout("text 1 wraps", style(), 60);
+    for (let i = 2; i < 2000; i++) m.layout(`text ${i} wraps`, style(), 60);
+    expect(m.layout("text 0 wraps", style(), 60)).toBe(first);
+    m.layout("text 2000 wraps", style(), 60);
+    expect(m.layout("text 1 wraps", style(), 60)).toBe(second);
+    const again = m.layout("text 0 wraps", style(), 60);
+    expect(again).not.toBe(first);
+    expect(again).toEqual(first);
+  });
+
+  it("counts a letter-spaced string's graphemes once", () => {
+    const segment = vi.spyOn(Intl.Segmenter.prototype, "segment");
+    const m = new DomTextMeasurer({ measureWidth: (t) => t.length * 10, measureLineHeight: () => 20 });
+    const spaced = style({ letterSpacing: 2 });
+    expect(m.textWidth("👍🏽 ok", spaced)).toBe(70 + 4 * 2);
+    const calls = segment.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    expect(m.textWidth("👍🏽 ok", spaced)).toBe(78);
+    expect(m.measure("👍🏽 ok", style({ letterSpacing: 3 }), null).width).toBe(70 + 4 * 3);
+    expect(segment.mock.calls.length).toBe(calls);
+    m.clearCache();
+    expect(m.textWidth("👍🏽 ok", spaced)).toBe(78);
+    expect(segment.mock.calls.length).toBeGreaterThan(calls);
   });
 });

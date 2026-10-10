@@ -6,12 +6,14 @@
  * app opened for a prototype, the session already shows it (launch.ts), and no welcome screen covers it.
  *
  * The patch editor (React Flow and ELK), the Learn drawer (guides, examples, lessons, patch reference),
- * the welcome screen, and the dialogs load on demand so the first paint stays small.
+ * the welcome screen, the Assistant and the dialogs load on demand so the first paint stays small. Each
+ * is a `loadable` (`ui/loadable.tsx`): it shows as soon as its own code is in, and never holds back or
+ * hides another.
  */
 
 import { getDevicePreset, type Op } from "@sonobe/core";
 import { FilePlus, FolderOpen, FolderSearch, Save, SaveAll, ScanLine, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getDesktopHostApi } from "../host/detect.ts";
 import { registerRpcHandlers } from "../host/rpcHandlers.ts";
 import { assistantStore, useAssistant } from "../panels/assistant/assistantStore.ts";
@@ -37,6 +39,7 @@ import { EditorProvider, useDocument, useEditorSession, useRuntimeState } from "
 import type { EditorSession } from "../state/session.ts";
 import { useCommands, useRegisterCommands } from "../ui/commands/CommandProvider.tsx";
 import type { CommandRegistry } from "../ui/commands/commandRegistry.ts";
+import { loadable } from "../ui/loadable.tsx";
 import type { MenuEntry } from "../ui/Menu.tsx";
 import { toast } from "../ui/Toast.tsx";
 import { guardRpcRegistrar } from "./agentAccess.ts";
@@ -61,16 +64,15 @@ import { hasSeenWelcome, shouldShowWelcomeOnLaunch, useWelcome, welcomeStore } f
 import "./app.css";
 import "./workspace.css";
 
-const loadPatchEditor = () => import("../panels/patch-editor/PatchEditor.tsx");
-const PatchEditor = lazy(() => loadPatchEditor().then((m) => ({ default: m.PatchEditor })));
-const LearnDrawer = lazy(() => import("../panels/learn/LearnDrawer.tsx").then((m) => ({ default: m.LearnDrawer })));
-const ConnectClaudeHost = lazy(() => import("../panels/connect/ConnectClaudeDialog.tsx").then((m) => ({ default: m.ConnectClaudeHost })));
-const WelcomeScreen = lazy(() => import("./welcome/WelcomeScreen.tsx").then((m) => ({ default: m.WelcomeScreen })));
-const SettingsDialog = lazy(() => import("./SettingsDialog.tsx").then((m) => ({ default: m.SettingsDialog })));
-const AboutDialog = lazy(() => import("./AboutDialog.tsx").then((m) => ({ default: m.AboutDialog })));
-const ImportDesignDialog = lazy(() => import("../panels/import/ImportDesignDialog.tsx").then((m) => ({ default: m.ImportDesignDialog })));
-const KeyboardShortcutsDialog = lazy(() => import("./KeyboardShortcutsDialog.tsx").then((m) => ({ default: m.KeyboardShortcutsDialog })));
-const AssistantHost = lazy(() => import("../panels/assistant/AssistantHost.tsx").then((m) => ({ default: m.AssistantHost })));
+const PatchEditor = loadable(() => import("../panels/patch-editor/PatchEditor.tsx").then((m) => m.PatchEditor), { name: "The patch editor" });
+const LearnDrawer = loadable(() => import("../panels/learn/LearnDrawer.tsx").then((m) => m.LearnDrawer), { name: "Learn" });
+const ConnectClaudeHost = loadable(() => import("../panels/connect/ConnectClaudeDialog.tsx").then((m) => m.ConnectClaudeHost), { name: "Connect Claude" });
+const WelcomeScreen = loadable(() => import("./welcome/WelcomeScreen.tsx").then((m) => m.WelcomeScreen), { name: "The welcome screen" });
+const SettingsDialog = loadable(() => import("./SettingsDialog.tsx").then((m) => m.SettingsDialog), { name: "Settings" });
+const AboutDialog = loadable(() => import("./AboutDialog.tsx").then((m) => m.AboutDialog), { name: "About Sonobe" });
+const ImportDesignDialog = loadable(() => import("../panels/import/ImportDesignDialog.tsx").then((m) => m.ImportDesignDialog), { name: "Import Design" });
+const KeyboardShortcutsDialog = loadable(() => import("./KeyboardShortcutsDialog.tsx").then((m) => m.KeyboardShortcutsDialog), { name: "Keyboard Shortcuts" });
+const AssistantHost = loadable(() => import("../panels/assistant/AssistantHost.tsx").then((m) => m.AssistantHost), { name: "The Assistant" });
 
 export interface EditorAppProps {
   /** Default: the app-wide session. */
@@ -97,7 +99,7 @@ export function EditorApp({ session }: EditorAppProps) {
   );
 }
 
-/** Dialogs and screens that load on first use. */
+/** Dialogs and screens that load on first use. One that can't load closes again. */
 function Overlays() {
   const session = useEditorSession();
   const connectOpen = useConnectClaude((s) => s.open);
@@ -116,16 +118,27 @@ function Overlays() {
     if (assistantOpen) setAssistantLoaded(true);
   }, [assistantOpen]);
 
+  const hidePanel = () => appPanels.getState().hide();
+  const hideWelcome = () => welcomeStore.getState().hide();
+  const unloadConnect = () => {
+    connectClaudeStore.getState().hide();
+    setConnectLoaded(false);
+  };
+  const unloadAssistant = () => {
+    assistantStore.getState().hide();
+    setAssistantLoaded(false);
+  };
+
   return (
-    <Suspense fallback={null}>
-      {connectLoaded && <ConnectClaudeHost onOpenGuide={(slug) => learnNav.getState().open({ kind: "guide", slug })} />}
-      {assistantLoaded && <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} />}
-      {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={() => welcomeStore.getState().hide()} />}
-      {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
-      {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} onReportIssue={() => reportIssue(session)} />}
-      {panel === "shortcuts" && <KeyboardShortcutsDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
-      {panel === "importDesign" && <ImportDesignDialog open onOpenChange={(open) => !open && appPanels.getState().hide()} />}
-    </Suspense>
+    <>
+      {connectLoaded && <ConnectClaudeHost onOpenGuide={(slug) => learnNav.getState().open({ kind: "guide", slug })} onLoadError={unloadConnect} />}
+      {assistantLoaded && <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} onLoadError={unloadAssistant} />}
+      {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={hideWelcome} onLoadError={hideWelcome} />}
+      {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && hidePanel()} onLoadError={hidePanel} />}
+      {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && hidePanel()} onReportIssue={() => reportIssue(session)} onLoadError={hidePanel} />}
+      {panel === "shortcuts" && <KeyboardShortcutsDialog open onOpenChange={(open) => !open && hidePanel()} onLoadError={hidePanel} />}
+      {panel === "importDesign" && <ImportDesignDialog open onOpenChange={(open) => !open && hidePanel()} onLoadError={hidePanel} />}
+    </>
   );
 }
 
@@ -268,23 +281,9 @@ function Workspace() {
 
   // The patch editor is on screen in split mode; fetch it even when the canvas is showing alone.
   useEffect(() => {
-    const timer = setTimeout(() => void loadPatchEditor().catch(() => undefined), 1200);
+    const timer = setTimeout(() => void PatchEditor.preload(), 1200);
     return () => clearTimeout(timer);
   }, []);
-
-  // A launch with a prototype used to draw twice (the demo, then the prototype), and the second draw is what brought
-  // the patch editor in with it: React keeps a panel that loads on demand behind its fallback for 300 ms, however fast
-  // it loaded, unless something else draws meanwhile. A window that starts on its prototype draws once, so it draws once
-  // more when the patch editor has loaded. A plain launch has the same wait, which is a change of its own.
-  const [, setPatchEditorLoaded] = useState(false);
-  useEffect(() => {
-    if (!launch.opened) return;
-    let mounted = true;
-    void loadPatchEditor().then(() => mounted && setPatchEditorLoaded(true), () => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, [launch]);
 
   const layout = layoutStore.getState();
 
@@ -353,17 +352,19 @@ function Workspace() {
             // The patch editor docks its toolbar here, so it never covers node headers.
             actions={<div ref={setPatchTools} className="sb-app-patches__tools" />}
           >
-            <Suspense fallback={<PanelLoading label="Loading the patch editor…" />}>
-              <PatchEditor showBreadcrumbs={false} toolbarContainer={patchTools} />
-            </Suspense>
+            <PatchEditor showBreadcrumbs={false} toolbarContainer={patchTools} fallback={<PanelLoading label="Loading the patch editor…" />} />
           </Panel>
         ),
         inspector: <InspectorPanel onCollapse={() => layout.toggleCollapsed("inspector", true)} onLearnMore={(type) => learnNav.getState().open({ kind: "patches", type })} />,
         hud: <Hud tab={hudTab} onTabChange={(tab) => layout.setHudTab(tab)} collapsed={hudCollapsed} onToggleCollapse={() => layout.toggleCollapsed("hud")} onConnectClaude={() => connectClaudeStore.getState().show()} />,
         learn: (
-          <Suspense fallback={<PanelLoading label="Loading Learn…" />}>
-            <LearnDrawer onClose={() => layout.setDrawer(null)} {...(requestedLearnView ? { view: requestedLearnView } : {})} onConnectClaude={() => connectClaudeStore.getState().show()} onInsertPatch={insertPatch} />
-          </Suspense>
+          <LearnDrawer
+            onClose={() => layout.setDrawer(null)}
+            {...(requestedLearnView ? { view: requestedLearnView } : {})}
+            onConnectClaude={() => connectClaudeStore.getState().show()}
+            onInsertPatch={insertPatch}
+            fallback={<PanelLoading label="Loading Learn…" />}
+          />
         ),
       }}
     />

@@ -35,6 +35,7 @@ import {
   type PatchNode,
   type PatchSpec,
   type ResolvedPort,
+  type ResolvedProp,
   type SonobeDocument,
   type Value,
   type ValueType,
@@ -129,6 +130,27 @@ interface Label {
 const constBinding = (value: Value | Loop, type: ValueType): Binding => ({ kind: "const", type, pulse: false, value });
 
 const sortedKeys = (record: Record<string, unknown>) => Object.keys(record).sort();
+
+const sharedDefaults = new WeakMap<readonly ResolvedProp[], Record<string, Value>>();
+
+/**
+ * Every prop default of a layer type, as one object for all its layers in every compile, keyed by
+ * the props list resolveLayerProps shares. Scene nodes' props inherit from it (scene.ts), and the
+ * scene build reads a dozen of them per node per frame: with one prototype per type those reads
+ * stay fast, where one per layer made each a lookup V8 couldn't cache. Never written and not
+ * frozen: a bound value is assigned over the inherited one on each node's own props, which a
+ * read-only prototype property would refuse.
+ */
+export function defaultsFor(props: readonly ResolvedProp[]): Record<string, Value> {
+  let defaults = sharedDefaults.get(props);
+  if (!defaults) {
+    defaults = {};
+    // A prop declared with a null default (cornerRadii, gradient, image...) stays null while unset.
+    for (const p of props) defaults[p.key] = p.default === null ? null : (normalizeDefault(p.default, p.type) ?? portDefault(p));
+    sharedDefaults.set(props, defaults);
+  }
+  return defaults;
+}
 
 export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegistry): CompiledGraph {
   const registry = withBuiltinSpecs(engineRegistry);
@@ -371,9 +393,8 @@ export function compileDocument(doc: SonobeDocument, engineRegistry: EngineRegis
         continue;
       }
       const props = resolveLayerProps(doc, scope.component.id, node, registry) ?? [];
-      const defaults: Record<string, Value> = {};
-      // A prop declared with a null default (cornerRadii, gradient, image...) stays null while unset.
-      for (const p of props) defaults[p.key] = p.default === null ? null : (normalizeDefault(p.default, p.type) ?? portDefault(p));
+      // A component instance adds its component's size and published inputs below, so it gets a copy of its own.
+      const defaults = node.type === COMPONENT_INSTANCE_LAYER_TYPE ? { ...defaultsFor(props) } : defaultsFor(props);
       const layer: CLayer = {
         id: node.id,
         type: node.type,

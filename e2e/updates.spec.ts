@@ -6,7 +6,7 @@
  */
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { fakeOpened, fakeUpdateCalls, installFakeUpdates, pushFakeUpdate } from "./fakeUpdates.ts";
+import { fakeOpened, fakeUpdateCalls, fakeUpdateStatus, installFakeUpdates, pushFakeUpdate } from "./fakeUpdates.ts";
 import { collectConsoleProblems, openEditor, runCommand, screenshot } from "./helpers.ts";
 
 const notice = (page: Page, title: string | RegExp): Locator => page.locator(".sb-toast").filter({ has: page.locator(".sb-toast__title", { hasText: title }) });
@@ -32,7 +32,10 @@ test.describe("updates", () => {
     // The app closes windows through the unsaved-changes prompt; the person cancels there, and the update stays ready.
     await ready.getByRole("button", { name: "Restart to Update" }).click();
     await expect.poll(() => fakeUpdateCalls(page)).toEqual(["restart"]);
-    await expect(ready).toBeVisible();
+    // The fake cancels a moment after it is asked, and the cancel is what brings the notice back: wait for it,
+    // or the ✕ below can land on the notice that is closing and the cancel then shows it again.
+    await expect.poll(async () => (await fakeUpdateStatus(page))?.restarting).toBe(false);
+    await expect(ready).toHaveAttribute("data-state", "open");
 
     // Closed with its ✕, it stays closed: the same status again says nothing.
     await ready.getByRole("button", { name: "Dismiss notification" }).click();

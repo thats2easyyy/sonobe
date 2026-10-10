@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "bench": "node scripts/bench/run.ts",
     "thumbnails": "node scripts/generate-thumbnails.mjs"
   },
   "dependencies": {
@@ -18,7 +19,6 @@
     "@xyflow/react": "^12.11.6",
     "elkjs": "^0.12.0",
     "lucide-react": "^1.46.0",
-    "motion": "^13.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

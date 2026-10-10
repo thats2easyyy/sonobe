@@ -132,7 +132,7 @@ The Console shows logs from JavaScript patches, plus runtime issues like script 
 
 ## Performance
 
-Keep an eye on the FPS meter in the bottom HUD. The goal is a steady 60, or 120 on displays that support it.
+Keep an eye on the FPS meter in the bottom HUD while something moves. The goal is a steady 60, or 120 on displays that support it: Sonobe judges "Smooth" against your display's rate, which it measures whenever the prototype is at rest or paused. A prototype that never stops moving hasn't been measured yet, so on a 120 Hz display pause it once before you trust "Smooth" at 60 fps. When nothing in the prototype is moving, the meter reads "At rest": no frames run, so there is no rate to show and nothing is wrong. Tap, drag or scroll to see a number.
 
 When a prototype can't keep up, frames stretch. Sonobe caps each step at 64 ms, so a badly overloaded prototype (below about 15 frames per second) runs in slow motion instead of teleporting. If the animations look slow and FPS is low, you have a performance problem, not a spring problem.
 
@@ -143,10 +143,10 @@ Common costs, and what to do about them:
 | Huge loops of layers | Every item is a full layer. Three layers × 500 items is 1,500 layers | Show fewer items, or recycle what's on screen |
 | Blur, Background Blur, big shadows | Expensive to draw, especially on many layers at once | Apply them to a few large layers, not many small ones |
 | Oversized images | A 4,000-pixel photo shown at 402 points | Resize to about display size. On a 3× phone, a 402-point-wide image needs about 1,206 pixels |
-| Shader layers | They redraw every frame | Keep them small, or turn them off when they're off screen |
-| Heavy JavaScript patches | Their code runs every frame | Do the work once, or only when an input changes |
+| Shader layers | They redraw every frame, so the prototype never rests while one shows | Keep them small, or turn them off when they're off screen |
+| Heavy JavaScript patches | With Always Evaluate, their code runs every frame, and the prototype never rests | Do the work once, or only when an input changes |
 
-To find the culprit, bisect. Mute half the suspect patches or disable half the heavy layers, and watch FPS. Keep halving until you find it. Then test on the device people will actually use, by scanning the Viewer's QR code.
+To find the culprit, bisect. Mute half the suspect patches or disable half the heavy layers, and watch FPS while you repeat the gesture. Keep halving until you find it. Then test on the device people will actually use, by scanning the Viewer's QR code.
 
 ## Try it
 
@@ -154,7 +154,7 @@ To find the culprit, bisect. Mute half the suspect patches or disable half the h
 2. Build a pulse counter and use it to prove a Tap fires once per tap.
 3. Mute the card's Pop Animation, describe what changes, and explain why.
 4. Ask Claude to trace `@card.scale` after a tap and read the settle time back to you.
-5. Make a loop of 2,000 blurred cards and watch FPS. Then get it back to 60.
+5. Make a loop of 2,000 blurred cards that you can drag, and watch FPS while you drag it. Then get it back to 60.
 
 ## Common mistakes
 

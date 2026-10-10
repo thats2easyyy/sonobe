@@ -1,4 +1,4 @@
-import { applyOps, type InputValue, type SonobeDocument } from "@sonobe/core";
+import { applyOps, type InputValue, type LayerRef, type SonobeDocument } from "@sonobe/core";
 import { describe, expect, it } from "vitest";
 import { buildDoc, createMockRegistry, createTestRuntime, defineMock, port, probeDefinition, runFrames, sequenceDefinition, tap, type ComponentInput } from "../testing/index.ts";
 import { compileDocument, updateLiterals } from "./compile.ts";
@@ -137,6 +137,45 @@ describe("loops: layers", () => {
     rt.step();
     expect(items(rt.getRawValue("touch.tap"))).toEqual([false, false, false]);
     expect(items(rt.getRawValue("toggle.on"))).toEqual([false, true, false]);
+  });
+
+  it("hands a patch the same layer references on every frame, and new ones when the copy count changes", () => {
+    const frames: (LayerRef | null)[][] = [];
+    const refProbe = defineMock({
+      type: "refProbe",
+      name: "Ref Probe",
+      inputs: [port("layer", "layer", { default: null })],
+      outputs: [port("type", "text")],
+      evaluate(ctx) {
+        const ref = ctx.input<LayerRef | null>("layer");
+        frames[frames.length - 1]![ctx.loopIndex] = ref;
+        ctx.output("type", (ref && ctx.services.layerInfo(ref)?.type) ?? "");
+      },
+    });
+    const reg = createMockRegistry([refProbe]);
+    const doc = buildDoc({ layers: [{ id: "dot", type: "rectangle", name: "Dot", props: { repeat: 3 } }], patches: { probe: { type: "refProbe", inputs: { layer: { layer: "dot" } } } } }, reg);
+    const rt = createTestRuntime(doc, reg);
+    const step = () => {
+      frames.push([]);
+      rt.step();
+      return frames[frames.length - 1]!;
+    };
+    const three = step();
+    expect(three).toEqual([0, 1, 2].map((instance) => ({ layerId: "dot", instance })));
+    const again = step();
+    again.forEach((ref, i) => expect(ref).toBe(three[i]));
+    expect(items(rt.getRawValue("probe.type"))).toEqual(["rectangle", "rectangle", "rectangle"]);
+
+    const edited = applyOps(doc, [{ op: "setInput", target: "@dot.repeat", value: 4 }], { registry: reg });
+    if (!edited.ok) throw new Error(JSON.stringify(edited.errors));
+    rt.updateDocument(edited.doc);
+    // The count a reference reads is the last frame's, so the fourth shows up one frame later.
+    expect(step()).toHaveLength(3);
+    const four = step();
+    expect(four).toEqual([0, 1, 2, 3].map((instance) => ({ layerId: "dot", instance })));
+    expect(four[0]).not.toBe(three[0]);
+    step().forEach((ref, i) => expect(ref).toBe(four[i]));
+    expect(items(rt.getRawValue("probe.type"))).toEqual(["rectangle", "rectangle", "rectangle", "rectangle"]);
   });
 });
 
