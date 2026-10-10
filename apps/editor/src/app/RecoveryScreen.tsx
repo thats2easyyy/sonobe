@@ -11,7 +11,7 @@ import type { EditorSession } from "../state/session.ts";
 import { Button } from "../ui/Button.tsx";
 import { Tripwire, type BoundaryProblem } from "../ui/ErrorBoundary.tsx";
 import { reportIssue } from "./appActions.ts";
-import { errorDetails, errorText, keepDraft, type DraftStatus } from "./errorReports.ts";
+import { draftStatus, errorDetails, errorText, keepDraft, releaseEditedFlag, type DraftStatus } from "./errorReports.ts";
 import { peekAppSession } from "./session.ts";
 import "./recovery.css";
 
@@ -31,10 +31,15 @@ function draftSentence(status: DraftStatus): string {
       return `Your unsaved changes to “${status.name}” are kept as a draft. After you reload, or quit and reopen Sonobe, the welcome screen lists it under Recovered.`;
     case "nothing":
       return `“${status.name}” had no edits to keep.`;
+    case "behind":
+      return `Sonobe kept an earlier draft of “${status.name}” but hasn't been able to add your last changes to it. After you reload, or quit and reopen Sonobe, the welcome screen lists that draft under Recovered; the last changes may be missing.`;
     case "lost":
-      return `Sonobe couldn't keep a draft of your unsaved changes to “${status.name}”, so reloading loses them.`;
+      return `Sonobe hasn't been able to keep a draft of your unsaved changes to “${status.name}”. Reloading now loses them.`;
   }
 }
+
+/** How long Reload stays busy once the page was asked to go. */
+const RELOAD_SETTLE_MS = 1000;
 
 export function RecoveryScreen({ error, componentStack, session = peekAppSession(), reload = () => window.location.reload() }: RecoveryScreenProps) {
   const [draft, setDraft] = useState<DraftStatus | null>(null);
@@ -44,12 +49,9 @@ export function RecoveryScreen({ error, componentStack, session = peekAppSession
   const textRef = useRef<HTMLPreElement>(null);
   const details = errorDetails(error, componentStack);
 
-  // With the draft in (or nothing of the person's to keep), the window stops counting as edited. The document's Save went
-  // with the tree, so the desktop app's unsaved-changes prompt could offer only Don't Save, which deletes the draft; this
-  // way closing or quitting leaves the draft for the next launch. Without a draft the flag stays, and the prompt still warns.
   const settle = (status: DraftStatus) => {
     setDraft(status);
-    if (status.state === "kept" || status.state === "nothing") session?.host?.setDocumentEdited(false);
+    releaseEditedFlag(session, status);
   };
 
   useEffect(() => {
@@ -57,7 +59,11 @@ export function RecoveryScreen({ error, componentStack, session = peekAppSession
     // Nothing is on screen to stop it with: a prototype left playing would keep its sound and haptics going.
     session?.runtime.pause();
     void keepDraft(session).then((status) => {
-      if (!cancelled) settle(status);
+      if (cancelled) return;
+      settle(status);
+      // The write may only be slow (large assets, a busy disk). flush() waits for it, and tries once more when it failed:
+      // say what the keeper holds after that.
+      if (status.state === "behind" || status.state === "lost") void session?.drafts?.flush().then(() => !cancelled && settle(draftStatus(session)));
     });
     return () => {
       cancelled = true;
@@ -71,6 +77,8 @@ export function RecoveryScreen({ error, componentStack, session = peekAppSession
     // Edits can't arrive anymore, but the first write may not have landed: wait for it again before the page goes.
     settle(await keepDraft(session));
     reload();
+    // Still here a moment later: the browser asked before leaving and the person stayed. Reload can be pressed again.
+    setTimeout(() => setReloading(false), RELOAD_SETTLE_MS);
   };
 
   const onCopy = async () => {

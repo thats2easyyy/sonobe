@@ -172,7 +172,9 @@ export type DraftStatus =
   | { state: "kept"; name: string }
   /** Marked unsaved with no edits of the person's (an example copy): there is nothing to keep. */
   | { state: "nothing"; name: string }
-  /** Unsaved edits with no draft: the host keeps none, or the write hasn't landed. */
+  /** An earlier draft is on disk and the latest edits aren't in it: the write is slow, or it failed. */
+  | { state: "behind"; name: string }
+  /** Unsaved edits with no draft at all: the host keeps none, or the first write hasn't landed. */
   | { state: "lost"; name: string };
 
 /** What the draft keeper holds of the session's unsaved work, as it is now. */
@@ -181,11 +183,17 @@ export function draftStatus(session: Pick<EditorSession, "document" | "drafts"> 
   if (!session || !state?.dirty) return { state: "clean" };
   const name = state.doc.project.name;
   const drafts = session.drafts;
-  if (!drafts || drafts.pending()) return { state: "lost", name };
-  return { state: drafts.current() ? "kept" : "nothing", name };
+  if (!drafts) return { state: "lost", name };
+  const onDisk = drafts.current() !== null;
+  if (drafts.pending()) return { state: onDisk ? "behind" : "lost", name };
+  return { state: onDisk ? "kept" : "nothing", name };
 }
 
-/** Write the session's draft now, waiting at most 1.5 s, and say what it holds. `flush()` resolves when a write fails too, so the answer comes from `pending()`. */
+/**
+ * Write the session's draft now, waiting at most 1.5 s, and say what it holds. `flush()` resolves when a
+ * write fails too, so the answer comes from `pending()`. A write that takes longer carries on: ask
+ * `draftStatus` again once `flush()` settles.
+ */
 export async function keepDraft(session: Pick<EditorSession, "document" | "drafts"> | null = peekAppSession(), limitMs: number = FLUSH_LIMIT_MS): Promise<DraftStatus> {
   if (session?.drafts && session.document.getState().dirty) await Promise.race([session.drafts.flush(), new Promise((resolve) => setTimeout(resolve, limitMs))]);
   return draftStatus(session);

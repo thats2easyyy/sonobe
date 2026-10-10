@@ -39,12 +39,13 @@ interface Fake {
 }
 
 /** As much of a session as the screen reads: whether the document is unsaved, and what the draft keeper holds. */
-function fakeSession(options: { dirty?: boolean; drafts?: "kept" | "pending" | "unedited" | "none"; flush?: () => Promise<void> } = {}): Fake {
+function fakeSession(options: { dirty?: boolean; drafts?: "kept" | "pending" | "behind" | "unedited" | "none"; flush?: () => Promise<void> } = {}): Fake {
   let state = options.drafts ?? "kept";
   const flush = vi.fn(options.flush ?? (async () => undefined));
   const setDocumentEdited = vi.fn();
   const pause = vi.fn();
-  const keeper: Pick<DraftKeeper, "flush" | "pending" | "current"> = { flush, pending: () => state === "pending", current: () => (state === "kept" ? { id: "draft-1", updatedAt: 1 } : null) };
+  // "pending": edits with no draft on disk yet. "behind": a draft on disk that lacks the last edits.
+  const keeper: Pick<DraftKeeper, "flush" | "pending" | "current"> = { flush, pending: () => state === "pending" || state === "behind", current: () => (state === "kept" || state === "behind" ? { id: "draft-1", updatedAt: 1 } : null) };
   const session = {
     document: { getState: () => ({ dirty: options.dirty ?? true, doc: { project: { name: "Checkout Flow" } } }) },
     drafts: state === "none" ? null : keeper,
@@ -102,17 +103,49 @@ describe("RecoveryScreen", () => {
     expect(fake.setDocumentEdited).toHaveBeenCalledWith(false);
   });
 
-  it("says so when the draft couldn't be written or the host keeps none, and leaves the window edited", async () => {
+  it("says so when no draft could be written or the host keeps none, and leaves the window edited", async () => {
     // flush() resolves when a write fails; the keeper still reports the edits as pending.
     const failed = fakeSession({ drafts: "pending" });
     await mount(failed);
-    expect(draft()).toBe("Sonobe couldn't keep a draft of your unsaved changes to “Checkout Flow”, so reloading loses them.");
+    expect(draft()).toBe("Sonobe hasn't been able to keep a draft of your unsaved changes to “Checkout Flow”. Reloading now loses them.");
     expect(failed.setDocumentEdited).not.toHaveBeenCalled();
+    // Once after the wait, and once more to follow a write that might only be slow.
+    expect(failed.flush).toHaveBeenCalledTimes(2);
 
     const none = fakeSession({ drafts: "none" });
     await mount(none);
-    expect(draft()).toBe("Sonobe couldn't keep a draft of your unsaved changes to “Checkout Flow”, so reloading loses them.");
+    expect(draft()).toBe("Sonobe hasn't been able to keep a draft of your unsaved changes to “Checkout Flow”. Reloading now loses them.");
     expect(none.setDocumentEdited).not.toHaveBeenCalled();
+  });
+
+  it("says an earlier draft is kept when only the last write failed, and lets the window close without the prompt that would delete it", async () => {
+    const fake = fakeSession({ drafts: "behind" });
+    await mount(fake);
+    expect(draft()).toBe("Sonobe kept an earlier draft of “Checkout Flow” but hasn't been able to add your last changes to it. After you reload, or quit and reopen Sonobe, the welcome screen lists that draft under Recovered; the last changes may be missing.");
+    expect(container.querySelector(".sb-recovery__draft")!.getAttribute("data-state")).toBe("behind");
+    expect(fake.setDocumentEdited).toHaveBeenCalledWith(false);
+  });
+
+  it("says the draft is kept once a write that outlasted the wait lands", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: () => void;
+      const fake = fakeSession({ drafts: "pending", flush: () => new Promise<void>((resolve) => (finish = resolve)) });
+      act(() => root.render(<RecoveryScreen error={error} componentStack={null} session={fake.session} />));
+      expect(draft()).toBeNull();
+      await act(async () => vi.advanceTimersByTimeAsync(1500));
+      expect(draft()).toBe("Sonobe hasn't been able to keep a draft of your unsaved changes to “Checkout Flow”. Reloading now loses them.");
+      expect(fake.setDocumentEdited).not.toHaveBeenCalled();
+
+      // Large assets, a busy disk: the write lands four seconds later.
+      await act(async () => vi.advanceTimersByTimeAsync(4000));
+      fake.land();
+      await act(async () => finish());
+      expect(draft()).toBe("Your unsaved changes to “Checkout Flow” are kept as a draft. After you reload, or quit and reopen Sonobe, the welcome screen lists it under Recovered.");
+      expect(fake.setDocumentEdited).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("waits for the draft before it reloads, and clears the edited flag only when the draft is in", async () => {
@@ -147,6 +180,14 @@ describe("RecoveryScreen", () => {
       await act(async () => vi.advanceTimersByTimeAsync(1));
       expect(reload).toHaveBeenCalledTimes(1);
       expect(fake.setDocumentEdited).not.toHaveBeenCalled();
+
+      // The browser asked before leaving and the person stayed: Reload can be pressed again.
+      expect(button("Reload Sonobe").disabled).toBe(true);
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      expect(button("Reload Sonobe").disabled).toBe(false);
+      await act(async () => button("Reload Sonobe").click());
+      await act(async () => vi.advanceTimersByTimeAsync(1500));
+      expect(reload).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
