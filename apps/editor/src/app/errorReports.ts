@@ -122,7 +122,7 @@ export function installErrorReporting(target: ErrorTarget = window): () => void 
 /**
  * createRoot's error handlers. Boundaries don't report, so this is the one place a render error is
  * logged: with the name of the boundary that caught it, or, when none did, before the last resort
- * goes up in the emptied container.
+ * goes up in the container's place.
  */
 export function rootErrorOptions(container: Element): RootOptions {
   return {
@@ -192,9 +192,21 @@ export async function keepDraft(session: Pick<EditorSession, "document" | "draft
 }
 
 /**
+ * With a draft on disk, or nothing of the person's to keep, the window stops counting as edited. The
+ * document's Save went with the tree, so the desktop app's unsaved-changes prompt could offer only
+ * Don't Save, which deletes the draft; this way closing or quitting leaves the draft for the next
+ * launch. That holds for a draft that lacks the last changes too: it is all there is to keep. With no
+ * draft at all the flag stays, and the prompt still warns.
+ */
+export function releaseEditedFlag(session: Pick<EditorSession, "host"> | null, status: DraftStatus): void {
+  if (status.state !== "clean" && status.state !== "lost") session?.host?.setDocumentEdited(false);
+}
+
+/**
  * The last resort: the editor threw with no boundary left to catch it (the recovery screen itself
- * failed), and React has emptied the container. Plain DOM, so nothing here can fail the same way,
- * and the window is never blank.
+ * failed), and React draws nothing. Plain DOM, so nothing here can fail the same way, and the window
+ * is never blank. It takes the container's place in the page instead of filling it: React isn't done
+ * with a container it emptied, and clears it again with the next thing it commits there.
  */
 export function showLastResort(container: Element, error: unknown, reload: () => void = () => window.location.reload()): void {
   const doc = container.ownerDocument;
@@ -217,13 +229,27 @@ export function showLastResort(container: Element, error: unknown, reload: () =>
     // Whatever the draft keeper can still write goes in first; the reload happens either way.
     void keepDraft().then(reload, reload);
   });
+  const actions = el("div", "sb-recovery__actions");
+  actions.append(button);
   body.append(
     el("h1", "sb-recovery__title", "Sonobe hit a problem"),
     el("p", "sb-recovery__text", "The editor stopped and couldn't show its recovery screen. Reload to start again: unsaved changes Sonobe kept as a draft are on the welcome screen, under Recovered."),
     // What broke first, then what broke the recovery screen.
     el("pre", "sb-recovery__details sb-selectable sb-scroll", [...(first !== null && first !== error ? [errorText(first), ""] : []), errorText(error)].join("\n")),
-    button,
+    actions,
   );
   screen.append(el("div", "sb-recovery__drag"), body);
-  container.replaceChildren(screen);
+  container.replaceWith(screen);
+
+  // What the recovery screen does first, as far as plain code can: stop the prototype, write the draft, and let the
+  // window close without the prompt that could only delete it. The session may be what broke, so none of it may throw.
+  const session = peekAppSession();
+  try {
+    session?.runtime.pause();
+  } catch {
+    // The message is up either way.
+  }
+  void keepDraft(session)
+    .then((status) => releaseEditedFlag(session, status))
+    .catch(() => undefined);
 }

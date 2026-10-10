@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EditorSession } from "../state/session.ts";
 import { Button } from "../ui/Button.tsx";
-import type { BoundaryProblem } from "../ui/ErrorBoundary.tsx";
+import { Tripwire, type BoundaryProblem } from "../ui/ErrorBoundary.tsx";
 import { reportIssue } from "./appActions.ts";
 import { errorDetails, errorText, keepDraft, type DraftStatus } from "./errorReports.ts";
 import { peekAppSession } from "./session.ts";
@@ -86,6 +86,7 @@ export function RecoveryScreen({ error, componentStack, session = peekAppSession
 
   return (
     <div className="sb-recovery" role="alert">
+      <Tripwire name="The recovery screen" />
       {/* Where the toolbar was, so the window still moves. */}
       <div className="sb-recovery__drag" />
       <div className="sb-recovery__body">

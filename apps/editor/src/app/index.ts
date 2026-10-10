@@ -5,7 +5,7 @@ export { commandMenuEntries, EditorApp, type EditorAppProps } from "./EditorApp.
 export { ScriptTrustBanner } from "./ScriptTrustBanner.tsx";
 export { mountEditor } from "./mount.tsx";
 export { RecoveryScreen, type RecoveryScreenProps } from "./RecoveryScreen.tsx";
-export { draftStatus, errorDetails, installErrorReporting, keepDraft, recentEditorErrors, reportEditorError, rootErrorOptions, showLastResort, type DraftStatus, type EditorErrorReport } from "./errorReports.ts";
+export { draftStatus, errorDetails, installErrorReporting, keepDraft, recentEditorErrors, releaseEditedFlag, reportEditorError, rootErrorOptions, showLastResort, type DraftStatus, type EditorErrorReport } from "./errorReports.ts";
 export { createAppBrowserHost, createAppSession, getAppSession, peekAppSession, type AppSessionOptions } from "./session.ts";
 export { appCommands, runInPatchEditor, runWhenRegistered, useAppCommands, zoomTarget, type AppCommandOptions } from "./useAppCommands.tsx";
 export { alignSelection, closePrototype, insertLayer, issueContext, renameSelection, reportIssue, toggleViewerFullscreen, useAsMask, type Notify } from "./appActions.ts";

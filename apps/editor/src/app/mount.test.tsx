@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { failRender } from "../ui/ErrorBoundary.tsx";
 import { clearEditorErrors } from "./errorReports.ts";
 import { mountEditor } from "./mount.tsx";
 
@@ -32,7 +33,8 @@ beforeEach(() => {
 
 afterEach(() => {
   root.unmount();
-  container.remove();
+  document.body.replaceChildren();
+  failRender("Sonobe", false);
   clearEditorErrors();
   vi.restoreAllMocks();
 });
@@ -41,7 +43,7 @@ function Broken(): never {
   throw new Error("no such layer");
 }
 
-const shown = (text: string) => vi.waitFor(() => expect(container.textContent).toContain(text));
+const shown = (text: string) => vi.waitFor(() => expect(document.body.textContent).toContain(text));
 
 describe("mountEditor", () => {
   it("renders the editor", async () => {
@@ -63,9 +65,25 @@ describe("mountEditor", () => {
     recovery.broken = true;
     root = mountEditor(container, <Broken />);
     await shown("The editor stopped and couldn't show its recovery screen.");
-    const details = container.querySelector("pre")!.textContent!;
+    const details = document.body.querySelector("pre")!.textContent!;
     expect(details).toContain("Error: no such layer");
     expect(details).toContain("Error: the recovery screen broke");
-    expect(container.querySelector("button")!.textContent).toBe("Reload Sonobe");
+    expect(document.body.querySelector("button")!.textContent).toBe("Reload Sonobe");
+  });
+
+  it("keeps the last resort when an editor that was drawn fails together with the recovery screen, whatever React does to its container next", async () => {
+    root = mountEditor(container, <main>Editor</main>);
+    await shown("Editor");
+    recovery.broken = true;
+    failRender("Sonobe");
+    await shown("The editor stopped and couldn't show its recovery screen.");
+    // React clears a container it emptied with its next commit there: any render will do.
+    root.render(null);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.body.querySelector("main")).toBeNull();
+    expect(document.body.querySelectorAll(".sb-recovery")).toHaveLength(1);
+    const details = document.body.querySelector("pre")!.textContent!;
+    expect(details).toContain("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
+    expect(details).toContain("Error: the recovery screen broke");
   });
 });

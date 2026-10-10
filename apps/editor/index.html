@@ -31,6 +31,49 @@
         var reduce = motion === "reduce" || (motion === "system" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
         document.documentElement.setAttribute("data-motion", reduce ? "reduce" : "full");
       })();
+      // Until the editor mounts, nothing of its own can say it failed (ARCHITECTURE §9, The last resort). A startup
+      // script that doesn't load, doesn't parse or throws leaves #root empty: say so there, in plain DOM with its
+      // own styles, since the stylesheet may be what's missing. The editor clears it if it mounts after all.
+      (function () {
+        function el(tag, style, text) {
+          var node = document.createElement(tag);
+          node.style.cssText = style;
+          if (text) node.textContent = text;
+          return node;
+        }
+        window.addEventListener(
+          "error",
+          function (event) {
+            var root = document.getElementById("root");
+            // Drawn already, or replaced by the editor's own last resort: the editor reports for itself.
+            if (!root || root.firstChild) return;
+            var target = event.target;
+            var file = target && target !== window && (target.src || target.href);
+            var detail = file ? "Couldn't load " + file : (event.error && event.error.stack) || event.message || "";
+            // The theme's tokens when the stylesheet is in, and the same two tones when it isn't.
+            var dark = document.documentElement.getAttribute("data-theme") !== "light";
+            var tones = "background:var(--bg-window," + (dark ? "#111113" : "#E9E9EC") + ");color:var(--text-primary," + (dark ? "#EDEDF0" : "#1B1B1F") + ")";
+            var screen = el("div", "position:fixed;inset:0;display:flex;flex-direction:column;font:13px/1.5 system-ui,sans-serif;" + tones);
+            screen.setAttribute("role", "alert");
+            var body = el("div", "display:flex;flex-direction:column;gap:12px;width:100%;max-width:560px;margin:0 auto;padding:32px 24px;overflow:auto");
+            var reload = el("button", "align-self:flex-start;margin-top:8px;padding:6px 14px;border:0;border-radius:6px;background:var(--accent,#4F62D2);color:#fff;font:inherit", "Reload Sonobe");
+            reload.type = "button";
+            reload.onclick = function () {
+              window.location.reload();
+            };
+            body.appendChild(el("h1", "margin:0;font-size:15px;font-weight:600", "Sonobe couldn’t start"));
+            body.appendChild(el("p", "margin:0;opacity:0.8", "The editor’s code didn’t load, or stopped while starting. Reload to try again. Drafts Sonobe kept of unsaved work are untouched: the welcome screen lists them under Recovered."));
+            body.appendChild(el("p", "margin:0;opacity:0.8", "If it keeps happening, install Sonobe again, or report it with the details below at github.com/thats2easyyy/sonobe/issues."));
+            body.appendChild(el("pre", "max-height:240px;margin:0;padding:12px;border-radius:6px;background:rgba(127,127,127,0.15);font:11px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text", detail));
+            body.appendChild(reload);
+            // Where the toolbar would be, so the desktop window still moves.
+            screen.appendChild(el("div", "flex:none;height:44px;-webkit-app-region:drag"));
+            screen.appendChild(body);
+            root.appendChild(screen);
+          },
+          true,
+        );
+      })();
     </script>
   </head>
   <body>

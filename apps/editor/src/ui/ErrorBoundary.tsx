@@ -159,7 +159,8 @@ export function failRender(name: string, on = true): void {
   for (const listener of [...tripListeners]) listener();
 }
 
-function Tripwire({ name }: { name: string }) {
+/** Throws while `failRender(name)` is on. Every boundary renders one; the recovery screen does too, so a test can reach the last resort. */
+export function Tripwire({ name }: { name: string }) {
   const snapshot = () => tripped.has(name);
   if (useSyncExternalStore(subscribeTrips, snapshot, snapshot)) throw new Error(`${name} was asked to fail (window.__sonobe.failRender).`);
   return null;

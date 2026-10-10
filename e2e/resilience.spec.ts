@@ -5,7 +5,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
-import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, waitForPrototype } from "./helpers.ts";
+import { blurFields, collectConsoleProblems, hook, modKey, openEditor, screenshot, skipWelcome, waitForPrototype } from "./helpers.ts";
 
 test.describe("when the editor can't draw", () => {
   test("shows the recovery screen, keeps the draft, and brings it back after Reload", async ({ page, context }) => {
@@ -79,6 +79,58 @@ test.describe("when the editor can't draw", () => {
     expect(url).toContain("github.com/thats2easyyy/sonobe/issues/new");
     expect(url).toContain("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
     expect(url).toMatch(/Sonobe 0\.1\.0 · browser/);
+  });
+});
+
+test.describe("when the recovery screen can't draw either", () => {
+  test("the last resort stays in the window, with both errors and a Reload that brings the editor back", async ({ page }) => {
+    await openEditor(page);
+    // React empties its container again after an error nothing caught: the last resort has to outlast that.
+    await hook(page, (s) => {
+      s.failRender("The recovery screen");
+      s.failRender("Sonobe");
+    });
+    const screen = page.locator(".sb-recovery");
+    await expect(screen).toContainText("The editor stopped and couldn't show its recovery screen.");
+    await expect(screen.locator("pre")).toContainText("Error: Sonobe was asked to fail (window.__sonobe.failRender).");
+    await expect(screen.locator("pre")).toContainText("Error: The recovery screen was asked to fail (window.__sonobe.failRender).");
+    // Still there once React has had every chance to clear the page.
+    await page.waitForTimeout(500);
+    await expect(screen.getByRole("heading", { name: "Sonobe hit a problem" })).toBeVisible();
+    await expect(page.locator(".sb-app")).toHaveCount(0);
+
+    await screen.getByRole("button", { name: "Reload Sonobe" }).click();
+    await waitForPrototype(page);
+    await expect(page.locator(".sb-recovery")).toHaveCount(0);
+    await expect(page.locator(".sb-app")).toBeVisible();
+  });
+});
+
+test.describe("when the editor's code can't start", () => {
+  // The dev server names the startup script with a timestamp after "?".
+  const MAIN = /\/src\/main\.tsx(\?|$)/;
+
+  test("the page says so instead of staying blank, and Reload starts the editor once it can", async ({ page }) => {
+    // A startup script that throws before anything mounts.
+    await page.route(MAIN, (route) => route.fulfill({ contentType: "text/javascript", body: 'throw new Error("no start");' }));
+    await page.goto("/");
+    const screen = page.locator('#root [role="alert"]');
+    await expect(screen.getByRole("heading", { name: "Sonobe couldn’t start" })).toBeVisible();
+    await expect(screen).toContainText("The editor’s code didn’t load, or stopped while starting. Reload to try again.");
+    await expect(screen.locator("pre")).toContainText("Error: no start");
+
+    // One that doesn't load at all.
+    await page.unroute(MAIN);
+    await page.route(MAIN, (route) => route.abort());
+    await page.reload();
+    await expect(screen.locator("pre")).toContainText(/Couldn't load http:\/\/localhost:\d+\/src\/main\.tsx/);
+
+    await page.unroute(MAIN);
+    await skipWelcome(page);
+    await screen.getByRole("button", { name: "Reload Sonobe" }).click();
+    await waitForPrototype(page);
+    await expect(page.locator(".sb-app")).toBeVisible();
+    await expect(page.locator('[role="alert"]')).toHaveCount(0);
   });
 });
 

@@ -131,33 +131,67 @@ describe("editor error reports", () => {
   });
 
   describe("the last resort", () => {
-    it("fills an emptied container with a plain message, both errors and a Reload that writes the draft first", async () => {
-      const container = document.createElement("div");
+    let container: HTMLDivElement;
+    beforeEach(() => {
+      container = document.createElement("div");
+      container.id = "root";
+      document.body.replaceChildren(container);
+    });
+    afterEach(() => document.body.replaceChildren());
+
+    it("takes the container's place with a plain message, both errors and a Reload that writes the draft first", async () => {
       const first = new Error("no such layer");
       ErrorBoundary.getDerivedStateFromError(first);
       const reload = vi.fn();
       const flush = vi.fn(async () => undefined);
-      app.session = { ...session, document: { getState: () => ({ ...session.document.getState(), dirty: true }) }, drafts: { flush, pending: () => false, current: () => null } } as unknown as EditorSession;
+      const setDocumentEdited = vi.fn();
+      const pause = vi.spyOn(session.runtime, "pause");
+      app.session = { ...session, host: { setDocumentEdited }, document: { getState: () => ({ ...session.document.getState(), dirty: true }) }, drafts: { flush, pending: () => false, current: () => ({ id: "draft-1", updatedAt: 1 }) } } as unknown as EditorSession;
 
       showLastResort(container, new Error("the recovery screen broke"), reload);
-      expect(container.querySelector(".sb-recovery")?.getAttribute("role")).toBe("alert");
-      expect(container.querySelector("h1")?.textContent).toBe("Sonobe hit a problem");
-      const details = container.querySelector("pre")!.textContent!;
+      // As the recovery screen would have: the prototype stops, the draft is written, and the window can close without the prompt that deletes it.
+      expect(pause).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(setDocumentEdited).toHaveBeenCalledWith(false));
+      expect(flush).toHaveBeenCalledTimes(1);
+      const screen = document.body.firstElementChild!;
+      expect(screen.className).toBe("sb-recovery");
+      expect(screen.getAttribute("role")).toBe("alert");
+      expect(screen.querySelector("h1")?.textContent).toBe("Sonobe hit a problem");
+      const details = screen.querySelector("pre")!.textContent!;
       expect(details.indexOf("Error: no such layer")).toBeGreaterThanOrEqual(0);
       expect(details.indexOf("Error: the recovery screen broke")).toBeGreaterThan(details.indexOf("Error: no such layer"));
 
-      container.querySelector("button")!.click();
+      screen.querySelector("button")!.click();
       expect(reload).not.toHaveBeenCalled();
       await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
-      expect(flush).toHaveBeenCalledTimes(1);
+      expect(flush).toHaveBeenCalledTimes(2);
     });
 
-    it("goes up when nothing caught a render error", () => {
-      const container = document.createElement("div");
-      rootErrorOptions(container).onUncaughtError!(new Error("no boundary"), { componentStack: "" });
-      expect(container.textContent).toContain("Sonobe hit a problem");
-      expect(container.textContent).toContain("Error: no boundary");
-      expect(entries()).toHaveLength(1);
+    it("goes up even when the session it asks about the draft throws", async () => {
+      app.session = {
+        get runtime(): never {
+          throw new Error("the session broke");
+        },
+        get document(): never {
+          throw new Error("the session broke");
+        },
+      } as unknown as EditorSession;
+      showLastResort(container, new Error("the recovery screen broke"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(document.body.textContent).toContain("Sonobe hit a problem");
+    });
+
+    it("stays when the container is emptied afterwards, and when a second error follows", () => {
+      const options = rootErrorOptions(container);
+      options.onUncaughtError!(new Error("no boundary"), { componentStack: "" });
+      // What React does to a container it emptied, with the next thing it commits there.
+      container.textContent = "";
+      options.onUncaughtError!(new Error("and another"), { componentStack: "" });
+      expect(document.body.children).toHaveLength(1);
+      expect(document.body.textContent).toContain("Sonobe hit a problem");
+      expect(document.body.textContent).toContain("Error: no boundary");
+      expect(document.body.textContent).not.toContain("Error: and another");
+      expect(entries()).toHaveLength(2);
     });
   });
 });
