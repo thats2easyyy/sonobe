@@ -1651,10 +1651,15 @@ function main(): void {
     //
     // It starts on what the app was asked to open before now (the command line, a double-click in Finder), else on what the
     // restart closed: its editor asks before its first render, so the first frame is that document and not the demo.
+    //
+    // The menu is live since rebuildMenu() above, and a command from it opens a window on nothing. If one did during the
+    // awaits since, that window is the first, and what was asked for is asked of its editor, as it is in any open window.
     const asked = pendingOpen.splice(0);
-    const launching = asked.length || reopening.length ? startNextWindowOn(asked, reopening) : null;
+    const launching = (asked.length || reopening.length) && noWindow() ? startNextWindowOn(asked, reopening) : null;
+    if (!launching) pendingOpen.unshift(...asked);
     const first = await ensureWindow();
     ready = true;
+    const reopenFailed = (err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`);
     if (launching) {
       const { info, restPaths, restSteps } = await launching;
       const { open } = info;
@@ -1663,9 +1668,11 @@ function main(): void {
         // looks that it's the one showing: an editor that gave up waiting renders first, and MCP calls must not land before the work.
         await waitForEditor(first);
         await waitForDocument(first, (shown) => showsLaunch(open, shown));
-        await reopen(restSteps).catch((err: unknown) => log("warn", `Couldn't reopen what was open before the restart: ${errorMessage(err)}`));
+        await reopen(restSteps).catch(reopenFailed);
       }
       pendingOpen.unshift(...restPaths);
+    } else if (!asked.length && reopening.length) {
+      await reopen(reopening).catch(reopenFailed);
     }
     // The other prototypes named at launch, then whatever was asked for while the window was coming up (open-file and a
     // second instance queue until `ready`): the editor takes them one at a time after its launch document, so the last one shows.
