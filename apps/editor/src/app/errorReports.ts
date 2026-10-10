@@ -85,6 +85,18 @@ export function recentEditorErrors(): readonly EditorErrorReport[] {
   return recent;
 }
 
+/**
+ * The latest editor error as an issue files it: the part that failed, the error with its stack, and
+ * where in the tree it was thrown. Null when the editor reported none. Help → Report an Issue sends
+ * it, so the report the console line asks for carries what the line couldn't.
+ */
+export function lastEditorErrorText(): string | null {
+  const report = recent.findLast((entry) => entry.level === "error");
+  if (!report) return null;
+  const stack = !report.stack ? report.summary : report.stack.startsWith(report.summary) ? report.stack : `${report.summary}\n${report.stack}`;
+  return [...(report.where ? [`${report.where} hit a problem.`] : []), stack, ...(report.componentStack ? ["", "Component stack", report.componentStack] : [])].join("\n");
+}
+
 /** Forget what was reported (tests). */
 export function clearEditorErrors(): void {
   reported = new WeakSet();

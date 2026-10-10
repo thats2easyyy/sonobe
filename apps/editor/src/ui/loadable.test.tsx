@@ -115,16 +115,26 @@ describe("loadable", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("says so in place when a panel's code can't load", async () => {
+  it("says so in place when a panel's code can't load, and raises the failure on the window once", async () => {
+    const raised = vi.fn();
+    vi.stubGlobal("reportError", raised);
     const { load, calls } = deferredImport();
     const Surface = loadable(load, { name: "The patch editor" });
     act(() => root.render(<Surface title="Patches" fallback={loading} />));
-    calls[0]!.reject(new Error("offline"));
+    const offline = new Error("offline");
+    calls[0]!.reject(offline);
     await settle();
 
     expect(text(".sb-empty__title")).toBe("The patch editor didn't load");
     expect(text(".sb-empty__description")).toBe("Restart Sonobe to try again.");
     expect(document.querySelector(".loading")).toBeNull();
+    // What the editor's error reporting hears: which surface, and why.
+    await Surface.preload();
+    expect(raised).toHaveBeenCalledTimes(1);
+    const problem = raised.mock.calls[0]![0] as Error;
+    expect(problem.message).toBe("The patch editor didn't load. offline");
+    expect(problem.cause).toBe(offline);
+    vi.unstubAllGlobals();
   });
 
   it("tells a dialog's caller each time it opens that its code can't load, with a toast", async () => {

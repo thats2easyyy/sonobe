@@ -247,6 +247,23 @@ test.describe("when one part of the editor can't draw", () => {
   });
 });
 
+test.describe("when a part's code can't load", () => {
+  test("it says so in its place, and the console gets a line as for a part that threw", async ({ page }) => {
+    await page.route(/\/src\/panels\/learn\/LearnDrawer\.tsx/, (route) => route.abort());
+    await openEditor(page);
+    await hook(page, (s) => s.layout().setDrawer("learn"));
+    const problem = page.locator(".sb-drawer .sb-surface-problem");
+    await expect(problem).toContainText("Learn didn't load");
+    await expect(problem).toContainText("Restart Sonobe to try again.");
+    await expect(page.locator(".sb-toolbar")).toBeVisible();
+
+    const hud = page.locator("#sb-hud");
+    await expect(hud.getByRole("tab", { name: /^Console/ })).toHaveAttribute("aria-selected", "true");
+    await expect(hud.locator(".sb-logrow")).toHaveCount(1);
+    await expect(hud.locator(".sb-logrow")).toContainText("Something in the editor failed. If it keeps happening, save your work and restart Sonobe, or use Help → Report an Issue. (Error: Learn didn't load.");
+  });
+});
+
 test.describe("a prototype's own errors", () => {
   test("stay the prototype's: a script that throws is a diagnostic on its patch, and no part of the editor fails", async ({ page }) => {
     const problems = collectConsoleProblems(page);

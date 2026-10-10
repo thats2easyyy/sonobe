@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createManualScheduler } from "../runtime/scheduler.ts";
 import { createEditorSession, type EditorSession } from "../state/session.ts";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
-import { clearEditorErrors, errorDetails, installErrorReporting, recentEditorErrors, reportEditorError, rootErrorOptions, showLastResort } from "./errorReports.ts";
+import { clearEditorErrors, errorDetails, installErrorReporting, lastEditorErrorText, recentEditorErrors, reportEditorError, rootErrorOptions, showLastResort } from "./errorReports.ts";
 
 const app = vi.hoisted(() => ({ session: null as EditorSession | null }));
 vi.mock("./session.ts", () => ({ peekAppSession: () => app.session }));
@@ -128,6 +128,19 @@ describe("editor error reports", () => {
     expect(details).toContain("Component stack\nat Row\n    at Inspector");
     expect(details).toMatch(/Earlier editor errors\n\d\d:\d\d:\d\d RangeError: too many rows/);
     expect(details).toMatch(/\nSonobe 0\.1\.0 · browser · \w+ · .+$/);
+  });
+
+  it("hands Report an Issue the latest error with its stack and where it was thrown, and nothing when there was none", () => {
+    expect(lastEditorErrorText()).toBeNull();
+    const error = new TypeError("layer is undefined");
+    options().onCaughtError!(error, { componentStack: "\n    at Row\n    at Inspector", errorBoundary: new ErrorBoundary({ name: "The Inspector" }) });
+    // A warning React recovered from isn't what a report is about.
+    options().onRecoverableError!(new Error("hydration"), { componentStack: "" });
+    const text = lastEditorErrorText()!;
+    expect(text.split("\n")[0]).toBe("The Inspector hit a problem.");
+    expect(text).toContain("TypeError: layer is undefined");
+    expect(text).toContain(error.stack!.split("\n")[1]!.trim());
+    expect(text).toContain("Component stack\nat Row\n    at Inspector");
   });
 
   describe("the last resort", () => {

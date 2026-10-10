@@ -9,7 +9,8 @@
  *
  * A loadable also contains what it loads (`ErrorBoundary.tsx`). A surface with a `fallback` says in
  * place that it didn't load or hit a problem; one without (a dialog) says it in a toast and calls
- * `onFailed`, so its caller closes it.
+ * `onFailed`, so its caller closes it. Either way a failed load is raised as an error on `window`,
+ * so it is reported like any other of the editor's.
  */
 
 import { createElement, useEffect, useSyncExternalStore, type Attributes, type ComponentType, type ReactNode } from "react";
@@ -57,7 +58,11 @@ export function loadable<P extends object>(load: () => Promise<ComponentType<P>>
     (started ??= new Promise<ComponentType<P>>((resolve) => resolve(load())).then(
       (Component) => set({ status: "ready", Component }),
       (error: unknown) => {
-        console.error(`${options.name} didn't load.`, error);
+        // Raised on `window`, where the editor's error reporting listens (`app/errorReports.ts`): the HUD console gets its
+        // line and Copy details lists it, as for a surface that threw. The browser prints it too.
+        const problem = new Error(`${options.name} didn't load. ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        if (typeof reportError === "function") reportError(problem);
+        else console.error(problem);
         set({ status: "failed" });
       },
     ));

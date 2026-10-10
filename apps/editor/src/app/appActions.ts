@@ -142,9 +142,10 @@ export function issueContext(session: Pick<EditorSession, "host"> | null): Issue
 
 /**
  * Help → Report an Issue: a new issue with the version and platform filled in, in the system browser.
- * The recovery screen passes the error that stopped the editor, and may have no session to pass.
+ * Help passes the editor's latest error when it reported one (`lastEditorErrorText`); the recovery
+ * screen passes the error that stopped the editor, and may have no session to pass.
  */
-export function reportIssue(session: Pick<EditorSession, "host"> | null, options: { error?: string } = {}): string {
+export function reportIssue(session: Pick<EditorSession, "host"> | null, options: { error?: string | null } = {}): string {
   const api = getDesktopHostApi();
   const url = issueUrl({ ...issueContext(session), ...(options.error ? { error: options.error } : {}) });
   if (api?.openExternal) void api.openExternal(url);

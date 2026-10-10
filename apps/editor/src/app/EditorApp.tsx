@@ -45,6 +45,7 @@ import { guardRpcRegistrar } from "./agentAccess.ts";
 import { reportIssue } from "./appActions.ts";
 import { AppDialogs } from "./AppDialogs.tsx";
 import { appPanels, useAppPanels } from "./appPanels.ts";
+import { lastEditorErrorText } from "./errorReports.ts";
 import { ExternalChangeBanner } from "./ExternalChangeBanner.tsx";
 import { useHudAutoOpen } from "./hudAutoOpen.ts";
 import { learnNav, useLearnNav } from "./learnStore.ts";
@@ -133,7 +134,7 @@ function Overlays() {
       {assistantLoaded && <AssistantHost onConnectClaude={() => connectClaudeStore.getState().show()} onFailed={unloadAssistant} />}
       {welcomeOpen && <WelcomeScreen open reason={welcomeReason} onClose={hideWelcome} onFailed={hideWelcome} />}
       {panel === "settings" && <SettingsDialog open onOpenChange={(open) => !open && hidePanel()} onFailed={hidePanel} />}
-      {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && hidePanel()} onReportIssue={() => reportIssue(session)} onFailed={hidePanel} />}
+      {panel === "about" && <AboutDialog open onOpenChange={(open) => !open && hidePanel()} onReportIssue={() => reportIssue(session, { error: lastEditorErrorText() })} onFailed={hidePanel} />}
       {panel === "shortcuts" && <KeyboardShortcutsDialog open onOpenChange={(open) => !open && hidePanel()} onFailed={hidePanel} />}
       {panel === "importDesign" && <ImportDesignDialog open onOpenChange={(open) => !open && hidePanel()} onFailed={hidePanel} />}
     </>
