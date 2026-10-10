@@ -71,6 +71,21 @@ function countFrames() {
   };
 }
 
+/**
+ * Counts the display refreshes the page gets, with a ticker of its own. Added before countFrames, so the
+ * ticker's requests aren't counted as the player's.
+ */
+function countRefreshes() {
+  const w = window as unknown as { __refreshes: number };
+  w.__refreshes = 0;
+  const raf = window.requestAnimationFrame.bind(window);
+  const tick = () => {
+    w.__refreshes++;
+    raf(tick);
+  };
+  raf(tick);
+}
+
 const framesAsked = (page: Page) => page.evaluate(() => (window as unknown as { __frames: number }).__frames);
 
 /** Wait until the player has asked for no frame for `quietMs`, and return its count then. */
@@ -472,20 +487,25 @@ describe.skipIf(!playwright)("web player on a phone", () => {
     const motion = await servePlayer({ doc, token: "motion-check" });
     const context = await browser.newContext({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     try {
+      await context.addInitScript(countRefreshes);
       await context.addInitScript(countFrames);
       const page = await context.newPage();
       await page.goto(motion.url);
       await page.waitForFunction(() => document.getElementById("status")?.dataset.state === "live", null, { timeout: 15_000 });
       await page.waitForTimeout(500);
-      // The count and the page's clock are read together, so a slow round trip to the page adds no frames.
-      const sample = () => page.evaluate(() => ({ frames: (window as unknown as { __frames: number }).__frames, at: performance.now() }));
+      // Both counts are read together, so a slow round trip to the page adds nothing to either.
+      const sample = () => page.evaluate(() => ({ asked: (window as unknown as { __frames: number }).__frames, refreshes: (window as unknown as { __refreshes: number }).__refreshes }));
       const before = await sample();
       await page.waitForTimeout(1_000);
       const after = await sample();
-      const perSecond = ((after.frames - before.frames) * 1000) / (after.at - before.at);
-      // A frame a display refresh, as before (60 Hz in Playwright's Chromium; a busy machine drops some).
-      expect(perSecond).toBeGreaterThan(30);
-      expect(perSecond).toBeLessThan(75);
+      const asked = after.asked - before.asked;
+      const refreshes = after.refreshes - before.refreshes;
+      // A frame for each refresh the display gave the page, as before, however many this machine managed in
+      // a second (60 in Playwright's Chromium on a quiet one, a third of that on a busy runner): it never
+      // stops asking, and never asks twice.
+      expect(refreshes).toBeGreaterThan(5);
+      expect(asked).toBeGreaterThanOrEqual(refreshes - 2);
+      expect(asked).toBeLessThanOrEqual(refreshes + 2);
     } finally {
       await context.close();
       await motion.close();

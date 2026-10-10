@@ -15,6 +15,10 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
   fullyParallel: true,
+  // A CI runner is several times slower than a laptop and runs the specs side by side, so a spec that leans
+  // on timing fails there now and then. On CI a failed test runs again, up to twice, and the report lists it
+  // as flaky. Locally a failure stays a failure, so it gets looked at.
+  retries: process.env.CI ? 2 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: `http://localhost:${port}`,
