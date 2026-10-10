@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "sonobe",
   "display_name": "Sonobe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Let Claude build, simulate and explain interaction prototypes in the Sonobe app.",
   "long_description": "Sonobe is an open-source interaction prototyping app: layers, a patch graph, and a live viewer. This extension connects Claude Desktop to the running Sonobe app over a local, token-protected MCP connection. Claude can read your document's outline, add layers and patches, wire interactions and springs, simulate taps and drags to verify how they feel, turn the numbers you tune into knobs with presets to compare, import screens from your app, explain graphs at your level, and undo its own changes. Everything happens on your computer and lands in Sonobe's undo history.",
   "author": { "name": "Sonobe contributors" },

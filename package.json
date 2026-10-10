@@ -1,6 +1,6 @@
 {
   "name": "sonobe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Open-source, AI-native interaction prototyping. Layers + patches + a live viewer, with an MCP server so Claude can build alongside you.",
   "license": "MIT",

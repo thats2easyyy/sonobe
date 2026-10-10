@@ -20,7 +20,7 @@ export function projectFormatVersion(doc: Pick<SonobeDocument, "knobs">): number
   return doc.knobs ? PROJECT_FORMAT_VERSION : FORMAT_VERSION;
 }
 export const ROOT_COMPONENT_ID = "main";
-export const GENERATOR = "Sonobe 0.1.0";
+export const GENERATOR = "Sonobe 0.2.0";
 /** Default artboard size for new layer components. */
 export const DEFAULT_LAYER_COMPONENT_SIZE: [number, number] = [200, 100];
 

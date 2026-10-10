@@ -3,7 +3,7 @@
 export const APP_NAME = "Sonobe";
 
 /** Editor version (apps/editor/package.json). The desktop app reports its own through sonobeHost.version. */
-export const EDITOR_VERSION = "0.1.0";
+export const EDITOR_VERSION = "0.2.0";
 
 export interface Credit {
   name: string;
