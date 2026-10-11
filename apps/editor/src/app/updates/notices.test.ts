@@ -8,7 +8,7 @@ import type { UpdateStatus } from "./updatesHost.ts";
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const network = { kind: "network", phase: "check", message: "Sonobe couldn't reach the release feed to check for updates.", hint: "Check your internet connection, then choose Check for Updates again." } as const;
 const rejected = { kind: "rejected", phase: "download", message: "macOS wouldn't install the update: its signature doesn't match this copy of Sonobe.", hint: "Download the new version from the release page and replace Sonobe in your Applications folder." } as const;
-const unpublished = { kind: "no-release", phase: "check", message: "There's no published release of Sonobe to update to yet.", hint: "Nothing to do for now." } as const;
+const unpublished = { kind: "no-release", phase: "check", message: "There's no published version of Sonobe to update to right now.", hint: "Nothing to do for now." } as const;
 /** What a 503 or a rate limit from the feed, or a proxy's page in its place, comes out as. */
 const unanswered = { kind: "other", phase: "check", message: "Sonobe couldn't check for updates.", hint: "Try again later, or look at the release page for the newest version. (The updater said: 503 Service Unavailable)" } as const;
 

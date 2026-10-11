@@ -167,7 +167,7 @@ try {
   const recorded = packaged.sonobe;
   // The entry turns on the compile cache and then loads main.cjs, which can't cache itself (electron/boot.ts).
   assert(packaged.main === "dist/boot.cjs", "the packaged package.json's main is dist/boot.cjs", packaged.main);
-  // Where a downloaded update waits (~/Library/Caches/sonobe-updater on a Mac). The first signed release freezes
+  // Where a downloaded update waits (~/Library/Caches/sonobe-updater on a Mac). 0.2.0, the first release, carries
   // the name. A --dir build has no app-update.yml, and never checks for updates.
   const updateConfig = path.join(resources, "app-update.yml");
   if (existsSync(updateConfig)) assert(/^updaterCacheDirName: sonobe-updater$/m.test(readFileSync(updateConfig, "utf8")), "Resources/app-update.yml names the update cache folder sonobe-updater", readFileSync(updateConfig, "utf8"));
