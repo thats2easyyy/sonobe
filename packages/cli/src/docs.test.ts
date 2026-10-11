@@ -205,14 +205,14 @@ describe("the experimental Claude subscription in the docs", () => {
     return named[1]!;
   };
 
-  /** Every text file of the repository: code, tests, scripts, configuration and documents. */
+  /** Every text file of the repository: code, tests, scripts, configuration and documents. Of the dot folders, only .github. */
   function textFiles(dir = ""): string[] {
-    const skipped = new Set(["node_modules", ".git", "dist", "release", "screenshots", "test-results", "playwright-report"]);
+    const skipped = new Set(["node_modules", "dist", "release", "screenshots", "test-results", "playwright-report"]);
     const out: string[] = [];
     for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (!skipped.has(entry.name)) out.push(...textFiles(rel));
+        if (!skipped.has(entry.name) && (!entry.name.startsWith(".") || entry.name === ".github")) out.push(...textFiles(rel));
       } else if (/\.(?:[cm]?[jt]sx?|json|md|ya?ml|html|css|sh|swift|plist|txt)$/.test(entry.name) && entry.name !== "package-lock.json") out.push(rel);
     }
     return out;
