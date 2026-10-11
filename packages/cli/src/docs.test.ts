@@ -197,10 +197,96 @@ describe("Claude setup in the README and guide 11", () => {
 });
 
 describe("the experimental Claude subscription in the docs", () => {
-  it("is offered only from a checkout, and README and the guides (which ship in the app) give no way to turn it on in a release", () => {
-    expect(read("apps/desktop/electron/main.ts")).toMatch(/available: !app\.isPackaged\b(?!\s*\|\|)/);
-    // No variable that would switch it on, and no way to launch the packaged app with one.
-    for (const { file, text } of [{ file: "README.md", text: read("README.md") }, ...GUIDES]) expect(text, file).not.toMatch(/SONOBE_CLAUDE_[A-Z_]*SUBSCRIPTION|Sonobe\.app\/Contents\/MacOS/);
+  const CONNECTION = "apps/desktop/electron/assistant/connection.ts";
+  /** The key a person sets by hand for a packaged app, from the one source file that names it. */
+  const optInKey = (): string => {
+    const named = /^export const PACKAGED_OPT_IN = "([A-Za-z]{12,})";$/m.exec(read(CONNECTION));
+    if (!named) throw new Error(`${CONNECTION} no longer names the opt-in key as PACKAGED_OPT_IN`);
+    return named[1]!;
+  };
+
+  /** Every text file of the repository: code, tests, scripts, configuration and documents. */
+  function textFiles(dir = ""): string[] {
+    const skipped = new Set(["node_modules", ".git", "dist", "release", "screenshots", "test-results", "playwright-report"]);
+    const out: string[] = [];
+    for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!skipped.has(entry.name)) out.push(...textFiles(rel));
+      } else if (/\.(?:[cm]?[jt]sx?|json|md|ya?ml|html|css|sh|swift|plist|txt)$/.test(entry.name) && entry.name !== "package-lock.json") out.push(rel);
+    }
+    return out;
+  }
+
+  // This test is a tripwire, and it pins source text on purpose. A packaged app, which every release is, offers the
+  // switch only to a person who opted in by hand (ARCHITECTURE.md §10). Whoever widens that has to change this first.
+  it("is offered from a checkout, and in a packaged app only through the hand-set opt-in: no variable, no other condition, no default", () => {
+    const main = read("apps/desktop/electron/main.ts");
+    // Main asks the one rule, with app.isPackaged and what the connection file held at launch, and nothing follows it.
+    expect(main).toMatch(/\n +available: offersSubscription\(\{ packaged: app\.isPackaged, optedIn: assistantConnection\.packagedOptIn\(\) \}\),\n/);
+    expect(main.match(/\boffersSubscription\(/g)).toHaveLength(1);
+    expect(main.match(/\bavailable: (?!offersSubscription\()[^\n]*[Pp]ackaged/g)).toBeNull();
+    // That store reads the file in the data folder, and nothing else.
+    expect(main).toContain('const assistantConnection = createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log });');
+    expect(main.match(/\bcreateConnectionStore\(/g)).toHaveLength(1);
+
+    const connection = read(CONNECTION);
+    // The rule: not packaged, or opted in. Nothing else is "or"ed in.
+    expect(connection).toContain("export function offersSubscription(build: { packaged: boolean; optedIn: boolean }): boolean {\n  return !build.packaged || build.optedIn === true;\n}");
+    // Only the JSON value true in the file opts in, and it starts out false.
+    expect(connection).toContain("  let optedIn = false;\n");
+    expect(connection).toContain("    optedIn = value === true;\n");
+    expect(connection.match(/\boptedIn = /g)).toHaveLength(2);
+    // The store reads no environment, and the desktop's switches have none for it.
+    expect(connection).not.toMatch(/process\.env|\benv\b/);
+    expect(read("apps/desktop/electron/env.ts")).not.toMatch(/subscription|claude/i);
+    // No default: the Assistant offers the switch only when main said true.
+    const register = read("apps/desktop/electron/assistant/register.ts");
+    expect(register).toContain("const available = !!subscription && setup?.available === true;");
+    expect(register).toMatch(/\n  available: boolean;\n/);
+    expect(register).not.toMatch(/\bavailable\?: boolean/);
+  });
+
+  it("names the opt-in key in the store and in CONTRIBUTING.md only, so nothing else in Sonobe can write it and nothing that ships says how", () => {
+    const key = optInKey();
+    // Not the renderer, Settings, the preload, an MCP tool, the CLI, a script, a guide or an example: a file that
+    // needs the key imports PACKAGED_OPT_IN, and a new name on this list is a decision.
+    expect(textFiles().filter((file) => read(file).includes(key)).sort()).toEqual(["CONTRIBUTING.md", CONNECTION, CONNECTION.replace(/\.ts$/, ".test.ts")].sort());
+    // What crosses to the renderer has the switch and the pick, and nothing more to patch.
+    for (const file of ["apps/desktop/electron/assistant/protocol.ts", "apps/editor/src/panels/assistant/types.ts"]) {
+      expect(read(file), file).toMatch(/export interface AssistantConnectionUpdate \{\n  subscriptionEnabled\?: boolean;\n  provider\?: AssistantProvider;\n\}/);
+      expect(read(file), file).not.toContain("PACKAGED_OPT_IN");
+    }
+    // The contributors' document has the exact steps, and why the default stays off.
+    const contributing = read("CONTRIBUTING.md");
+    expect(contributing).toContain("`~/Library/Application Support/Sonobe/assistant-connection.json` on macOS");
+    expect(contributing).toContain(`Add the key \`"${key}"\` with the value \`true\``);
+    expect(contributing).toContain(`"${key}": true`);
+    expect(contributing).toContain("The default stays off because Anthropic hasn't agreed");
+    expect(contributing).toContain("which the maintainer decided to allow on 2026-10-10");
+  });
+
+  it("isn't offered by default in a release, and README and the guides (which ship in the app) give no way to turn it on in one", () => {
+    const key = optInKey();
+    for (const { file, text } of [{ file: "README.md", text: read("README.md") }, ...GUIDES]) {
+      // No variable that would switch it on, no way to launch the packaged app with one, and no file or key to edit.
+      expect(text, file).not.toMatch(/SONOBE_CLAUDE_[A-Z_]*SUBSCRIPTION|Sonobe\.app\/Contents\/MacOS/);
+      expect(text, file).not.toContain("assistant-connection");
+      expect(text, file).not.toContain(key);
+      expect(text, file).not.toMatch(/opt(?:ed|s|ing)?[ -]in\b/i);
+    }
+    expect(read("README.md")).toContain("Packaged builds, like the DMG above, don't offer it by default, and no release will until Anthropic agrees");
+    expect(read("docs/guides/11-working-with-claude.md")).toContain("Until Anthropic agrees, no release offers it by default: the app you download shows no switch.");
+    // The contract says whose decision the opt-in is, and keeps the reason the default is off.
+    const arch = read("ARCHITECTURE.md");
+    const subscription = arch.slice(arch.indexOf("**The Assistant on a Claude subscription**"), arch.indexOf("**Outline projection**"));
+    expect(subscription).toContain("- **Never by default in a release.**");
+    expect(subscription).toContain("- **Why it waits on Anthropic.**");
+    expect(subscription).toContain("`offersSubscription` in `assistant/connection.ts`");
+    expect(subscription).toContain("The maintainer changed that on that day");
+    for (const stale of [/packaged builds?[^.]{0,40} never (?:do|does|offers?)/i, /not (?:to be )?released until Anthropic agrees/i, /!app\.isPackaged/]) {
+      for (const file of ["README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "ROADMAP.md", ...GUIDES.map((guide) => guide.file)]) expect(read(file), `${file} ${stale}`).not.toMatch(stale);
+    }
   });
 
   it("describes the mode reset the way the engine does it", () => {

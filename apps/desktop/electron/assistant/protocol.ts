@@ -9,7 +9,7 @@
  * or Claude Code over MCP, or choose Open in Claude Code, which starts their own `claude` in Terminal
  * (../claude-handoff.ts).
  *
- * Experimental, off by default and not released until Anthropic agrees: with the subscription switch on
+ * Experimental, off by default and offered by no release unless the person opts in by hand: with the subscription switch on
  * (AssistantConnection.subscriptionEnabled), the person can pick "Claude subscription", and the Assistant
  * runs Claude's agent adapter (@agentclientprotocol/claude-agent-acp) as a child process over ACP with
  * the Claude login they already have on this computer. Sonobe never reads Claude credentials itself: the
@@ -56,8 +56,9 @@ export type AssistantProvider = "api_key" | "subscription";
 /** The Assistant's connection settings, app-wide and kept by the main process. */
 export interface AssistantConnection {
   /**
-   * This build offers the experimental switch: only Sonobe run from a source checkout (npm run desktop).
-   * A packaged build, which every release is, never does, so no release offers it until Anthropic agrees.
+   * This build offers the experimental switch: Sonobe run from a source checkout (npm run desktop) does.
+   * A packaged app, which every release is, doesn't by default, so no release offers it until Anthropic
+   * agrees; it does only when the person opted in by hand on their own computer (connection.ts).
    * False: the switch is hidden and off.
    */
   available: boolean;

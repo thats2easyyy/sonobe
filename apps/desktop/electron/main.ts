@@ -17,7 +17,7 @@ import { abortCaptures, captureDesignInWindow, fetchCaptureImage } from "./desig
 import { createAppWindow, type AppWindow, type WindowContentSource } from "./app-window.ts";
 import { createDraftStore, installQuitOnSignal, registerDraftIpc, type DraftStore } from "./drafts.ts";
 import { createCodeFolderStore } from "./assistant/codeFolder.ts";
-import { createConnectionStore } from "./assistant/connection.ts";
+import { createConnectionStore, offersSubscription, packagedOfferNote } from "./assistant/connection.ts";
 import { registerAssistant, type AssistantRegistration } from "./assistant/register.ts";
 import { captureWebContents } from "./capture.ts";
 import { bundledCliPath } from "./cli-path.ts";
@@ -1555,6 +1555,10 @@ function main(): void {
     drafts = createDraftStore({ dir: path.join(app.getPath("userData"), "Drafts"), version: VERSION, log });
     registerDraftIpc(ipcMain, drafts, { requireWindow, reveal: (folder) => shell.showItemInFolder(folder) });
     void drafts.prune().then((n) => n && log("info", `Removed ${n} empty or 90-day-old draft${n === 1 ? "" : "s"}`)).catch(() => undefined);
+    // The Assistant's connection settings, and the key a person may have set by hand there: read once, here.
+    const assistantConnection = createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log });
+    const offerNote = packagedOfferNote({ packaged: app.isPackaged, optedIn: assistantConnection.packagedOptIn() }, assistantConnection.get());
+    if (offerNote) log("info", offerNote);
     assistant = registerAssistant({
       ipcMain,
       isTrustedSender: (event) => trustedWindow(event as IpcMainInvokeEvent) !== null,
@@ -1585,10 +1589,11 @@ function main(): void {
         openPath: (file) => shell.openPath(file),
       },
       // Experimental and off by default (Settings → Claude): the Assistant on the person's Claude subscription.
-      connection: createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log }),
+      connection: assistantConnection,
       subscription: {
-        // Never in a release until Anthropic agrees: every release is a packaged build, and a packaged build never offers the switch.
-        available: !app.isPackaged,
+        // Never offered by default in a release: every release is a packaged app, and a packaged app offers the switch only
+        // when the person opted in by hand in assistant-connection.json (connection.ts). No variable or flag does it.
+        available: offersSubscription({ packaged: app.isPackaged, optedIn: assistantConnection.packagedOptIn() }),
         sessionsDir: path.join(app.getPath("userData"), "assistant", "claude"),
         signIn: { platform: process.platform, dir: path.join(app.getPath("userData"), "handoff"), openPath: (file) => shell.openPath(file) },
       },

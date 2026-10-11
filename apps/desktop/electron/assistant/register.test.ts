@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { BetaTextBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages";
@@ -10,7 +10,7 @@ import { createSecretStore, createTestCipher, type SecretStore } from "../secret
 import type { SubscriptionAgent, SubscriptionAgentOptions } from "./acp/engine.ts";
 import { resolveLimits } from "./agent.ts";
 import { CODE_TOOL_NAMES, CodeFolderError, type CodeFolderKey, type CodeFolderStore } from "./codeFolder.ts";
-import { createConnectionStore } from "./connection.ts";
+import { createConnectionStore, offersSubscription, PACKAGED_OPT_IN } from "./connection.ts";
 import { emptyUsage } from "./models.ts";
 import { ASSISTANT_IPC, ASSISTANT_KEY_SECRET, type AssistantCodeFolderLinkResult, type AssistantCodeFolderStatus, type AssistantEvent, type AssistantRunResult, type AssistantSendRequest, type AssistantStatus, type AssistantSubscriptionStatus, type HandoffResult } from "./protocol.ts";
 import { keyHint, registerAssistant, type AssistantIpcEvent, type AssistantIpcMain, type AssistantSender, type RegisterAssistantOptions, type SubscriptionSetup } from "./register.ts";
@@ -534,7 +534,7 @@ describe("the Claude subscription (experimental)", () => {
     const bridges: string[] = [];
     const h = setup(turns, {
       register: {
-        subscription: { sessionsDir: path.join(dir, "assistant", "claude"), createAgent: () => sub.engine, ...subscription },
+        subscription: { available: true, sessionsDir: path.join(dir, "assistant", "claude"), createAgent: () => sub.engine, ...subscription },
         createToolBridge: (_host, _guides, provider) => {
           bridges.push(provider);
           return fakeBridge(() => text("ok"));
@@ -643,7 +643,7 @@ describe("the Claude subscription (experimental)", () => {
     const { invoke, sub, api, logs } = withSubscription([{ content: [{ type: "text", text: "On your key." }] }], { connection: createConnectionStore({ file }) }, { available: false });
     const window = fakeSender(1);
     expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.status)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
-    expect(logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: not offered in a packaged build)");
+    expect(logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: not offered in this build)");
     expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, on)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
     await store.set(ASSISTANT_KEY_SECRET, KEY);
     expect(await invoke<AssistantRunResult>(window, ASSISTANT_IPC.send, { text: "hello" })).toMatchObject({ outcome: "completed" });
@@ -653,6 +653,46 @@ describe("the Claude subscription (experimental)", () => {
     expect([sub.state.runs, sub.state.calls]).toEqual([[], []]);
     // The saved choice waits for a build that offers the switch.
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ subscriptionEnabled: true, provider: "subscription" });
+  });
+
+  it("doesn't offer the switch when main leaves the answer out: there is no default", async () => {
+    const { invoke, sub } = withSubscription([], {}, { available: undefined } as unknown as Partial<SubscriptionSetup>);
+    const window = fakeSender(1);
+    expect((await invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, on)).connection).toEqual({ available: false, subscriptionEnabled: false, provider: "api_key", active: "api_key" });
+    for (const junk of ["true", 1, {}]) {
+      const other = withSubscription([], {}, { available: junk } as unknown as Partial<SubscriptionSetup>);
+      expect((await other.invoke<AssistantStatus>(fakeSender(1), ASSISTANT_IPC.status)).connection.available).toBe(false);
+    }
+    expect(sub.state.calls).toEqual([]);
+  });
+
+  it("in a packaged app, offers the switch only with the hand-set opt-in, which no request can set and no save drops", async () => {
+    const file = path.join(dir, "assistant-connection.json");
+    const packaged = (store: ReturnType<typeof createConnectionStore>) => withSubscription([], { connection: store }, { available: offersSubscription({ packaged: true, optedIn: store.packagedOptIn() }) });
+    const saved = async () => JSON.parse(await readFile(file, "utf8")) as unknown;
+
+    // What a checkout's Settings wrote: not enough, and asking for the key over IPC neither sets it nor writes anything.
+    createConnectionStore({ file }).update(on);
+    const refused = packaged(createConnectionStore({ file }));
+    const asked = await refused.invoke<AssistantStatus>(fakeSender(1), ASSISTANT_IPC.setConnection, { ...on, [PACKAGED_OPT_IN]: true, available: true });
+    expect(asked.connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+    expect(await saved()).toEqual(on);
+    expect(JSON.stringify(asked)).not.toContain(PACKAGED_OPT_IN);
+
+    // The person adds the key by hand and starts Sonobe again: the switch is there, as saved.
+    await writeFile(file, JSON.stringify({ ...on, [PACKAGED_OPT_IN]: true }));
+    const offered = packaged(createConnectionStore({ file }));
+    const window = fakeSender(1);
+    const status = await offered.invoke<AssistantStatus>(window, ASSISTANT_IPC.status);
+    expect(status.connection).toEqual({ available: true, subscriptionEnabled: true, provider: "subscription", active: "subscription" });
+    // The renderer never learns the key, and can't clear it.
+    expect(JSON.stringify(status)).not.toContain(PACKAGED_OPT_IN);
+    const off = await offered.invoke<AssistantStatus>(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: false, [PACKAGED_OPT_IN]: false });
+    expect(off.connection).toEqual({ available: true, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+    expect(await saved()).toEqual({ subscriptionEnabled: false, provider: "subscription", [PACKAGED_OPT_IN]: true });
+    await offered.invoke(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: true });
+    expect(await saved()).toEqual({ ...on, [PACKAGED_OPT_IN]: true });
+    expect(packaged(createConnectionStore({ file })).logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: on)");
   });
 
   it("gives the subscription's engine preview_design, and hides it from the API key's", async () => {
@@ -667,6 +707,7 @@ describe("the Claude subscription (experimental)", () => {
       register: {
         host: () => canvas,
         subscription: {
+          available: true,
           sessionsDir: path.join(dir, "assistant", "claude"),
           createAgent: (options) => {
             subscriptionTools = options.tools;
@@ -702,6 +743,7 @@ describe("the Claude subscription (experimental)", () => {
         codeFolders: folders,
         createCodeTools: fakeCodeTools,
         subscription: {
+          available: true,
           sessionsDir: path.join(dir, "assistant", "claude"),
           createAgent: (options) => {
             engineOptions = options;
@@ -788,7 +830,7 @@ describe("the Claude subscription (experimental)", () => {
     const bridges: string[] = [];
     const { invoke } = setup([], {
       register: {
-        subscription: { sessionsDir: path.join(dir, "assistant", "claude"), locate: () => ({ ok: false, searched: ["/opt/homebrew/bin"] }) },
+        subscription: { available: true, sessionsDir: path.join(dir, "assistant", "claude"), locate: () => ({ ok: false, searched: ["/opt/homebrew/bin"] }) },
         createToolBridge: (_host, _guides, provider) => {
           bridges.push(provider);
           return fakeBridge(() => text("ok"));

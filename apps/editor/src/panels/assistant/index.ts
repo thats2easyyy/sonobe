@@ -4,7 +4,7 @@
  * Policy: Sonobe's primary AI path is MCP (Connect Claude: Claude Desktop or Claude Code on the
  * person's own plan). The Assistant uses the person's API key, stored in the OS keychain through
  * sonobeHost.secrets ("anthropic.apiKey"). An experimental switch in Settings → Claude (off by default,
- * awaiting Anthropic's permission, in no release) lets it run on the person's Claude subscription
+ * awaiting Anthropic's permission, offered by no release by default) lets it run on the person's Claude subscription
  * instead, through Claude's agent adapter, which does its own login: Sonobe never reads Claude
  * credentials. It runs in the desktop app's main process (apps/desktop/electron/assistant), which
  * drives Sonobe's MCP tools, so edits land in history as "Assistant". In the browser the drawer shows
