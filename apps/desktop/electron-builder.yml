@@ -10,7 +10,7 @@ artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 # Where releases live. Nothing is ever published from a build (scripts/package.mjs always passes
 # publish: "never", and the release workflow uploads the files itself). This block is what puts the feed's
 # address into the app (Resources/app-update.yml) and, with the zip target, writes latest-mac.yml and the
-# blockmaps an update is downloaded with. The first release freezes it: installed apps look here.
+# blockmaps an update is downloaded with. 0.2.0, the first release, froze it: installed apps look here.
 publish:
   provider: github
   owner: thats2easyyy

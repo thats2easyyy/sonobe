@@ -226,7 +226,7 @@ export function explainUpdateError(err: unknown, phase: UpdatePhase): UpdateProb
   // GitHub answers 404 for the latest release while only drafts or pre-releases exist. Any other answer (a 503, a
   // rate limit, a page that isn't the feed) is a check that failed, not a missing release.
   if (phase === "check" && /ERR_UPDATER_CHANNEL_FILE_NOT_FOUND|ERR_UPDATER_NO_PUBLISHED_VERSIONS|No published versions|\b404\b/i.test(text)) {
-    return problem("no-release", "There's no published release of Sonobe to update to yet.", "Nothing to do for now. The first release will show up on Sonobe's release page, and here.");
+    return problem("no-release", "There's no published version of Sonobe to update to right now.", "Nothing to do for now. The next version will show up on Sonobe's release page, and here.");
   }
   const said = `(The updater said: ${first.slice(0, 200)})`;
   if (phase === "check") return problem("other", "Sonobe couldn't check for updates.", `Try again later, or look at the release page for the newest version. ${said}`);

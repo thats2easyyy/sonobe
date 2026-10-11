@@ -196,8 +196,8 @@ describe("§12 packaging in CI and the release workflow", () => {
     const signing = read("../scripts/signing.ts");
     for (const name of names) expect(signing, name).toContain(name);
     expect(step).toContain('APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"');
-    // The checklist names the commands and the things the first release freezes.
-    for (const text of ["node scripts/set-version.ts", "`dev.sonobe.app`", "`thats2easyyy/sonobe`", "Confirm before the first release", "`latest-mac.yml`"]) expect(releasing, text).toContain(text);
+    // The checklist names the commands and the things the first release froze.
+    for (const text of ["node scripts/set-version.ts", "`dev.sonobe.app`", "`thats2easyyy/sonobe`", "What the first release froze", "`latest-mac.yml`"]) expect(releasing, text).toContain(text);
     const yml = read("../electron-builder.yml");
     expect(yml).toMatch(/^appId: dev\.sonobe\.app$/m);
     expect(yml).toMatch(/^  owner: thats2easyyy\n  repo: sonobe$/m);
