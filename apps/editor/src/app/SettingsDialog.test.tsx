@@ -76,8 +76,9 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     expect(row.textContent).toContain("Use my Claude subscription in the Assistant");
     expect(row.textContent).toContain("Experimental. Off by default until Anthropic allows it.");
     expect(row.textContent).toContain(SUBSCRIPTION_SWITCH_DESCRIPTION);
-    // Nothing tells anyone how to turn it on in a release: no environment variable, no command.
-    expect(row.textContent).not.toMatch(/SONOBE_|environment|npm |=1/);
+    // Nothing tells anyone how to turn it on in a release: no environment variable, no command, no file or key to edit.
+    expect(row.textContent).not.toMatch(/SONOBE_|environment|npm |=1|assistant-connection|\.json|PackagedApp/);
+    expect(row.textContent).not.toMatch(/release/i);
     expect(row.closest("section")?.getAttribute("aria-label")).toBe("Claude");
     expect(host.connectionCalls).toEqual([]);
     // A screen reader hears the whole description with the switch.
@@ -100,6 +101,7 @@ describe("Settings → Claude → the experimental subscription switch", () => {
     expect(subscriptionSwitch()).toBeNull();
     expect(document.body.textContent).not.toContain("awaiting Anthropic's permission");
     expect(document.body.textContent).not.toContain("Claude subscription");
+    expect(document.body.textContent).not.toMatch(/assistant-connection|PackagedApp/);
   });
 
   it("asks main to turn it on and off, and shows what main says", async () => {

@@ -201,7 +201,7 @@ export function SubscriptionSetup({ controller, subscription, onDone, doneLabel 
         <ul>
           <li>Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer.</li>
           <li>Your messages, the parts of this prototype Claude reads, and files from a linked code folder go to Anthropic under your Claude account.</li>
-          <li>Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.</li>
+          <li>Experimental: awaiting Anthropic's permission, so it's off by default.</li>
         </ul>
       </div>
     </div>

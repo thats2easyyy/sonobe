@@ -346,7 +346,7 @@ async function subscriptionSmoke() {
   assert((await sheet.getByRole("radio", { name: "API key" }).getAttribute("aria-checked")) === "true" && (await subscriptionChoice.textContent()).includes("Experimental"), "the setup offers Claude subscription (Experimental) and API key");
   await subscriptionChoice.click();
   await sheet.getByText("Signed in · Claude Max · fake@example.com").waitFor({ timeout: 15_000 });
-  await sheet.getByText("Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.").waitFor({ timeout: 5000 });
+  await sheet.getByText("Experimental: awaiting Anthropic's permission, so it's off by default.").waitFor({ timeout: 5000 });
   const ready = await hostStatus();
   assert(ready.connection.active === "subscription" && ready.subscription.state === "ready" && ready.subscription.kind === "account" && ready.subscription.adapterVersion === "0.0.0-fake", "main reads the fake's login", ready.subscription);
   const initialize = fakeLines().find((l) => l.kind === "initialize");
