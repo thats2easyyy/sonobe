@@ -13,9 +13,9 @@ If you've used Meta's Origami Studio, it will feel familiar. Sonobe is built so 
 
 - **AI-native.** Sonobe runs a local [MCP](https://modelcontextprotocol.io) server, so Claude Code or Claude Desktop can build, simulate, explain, and debug prototypes with you. Use your own Claude plan; you don't need an API key.
 - **Learnable.** Pulses light up as they travel. Every patch has plain-language docs. Errors tell you how to fix them. Lessons and guides go from "never prototyped" to expert.
-- **Open.** MIT licensed. Documents are readable JSON folders that work with git. Preview on your phone in a browser. It's an Electron app for macOS, Windows, and Linux, though so far only the macOS build is packaged and verified.
+- **Open.** MIT licensed. Documents are readable JSON folders that work with git. Preview on your phone in a browser. It's an Electron app for macOS, Windows, and Linux, though so far only the macOS build is verified and released.
 
-> **Status: pre-1.0.** Stages 1–3 (foundations, the engine, the MCP server and CLI, editor parity and polish) are done apart from the items the roadmap marks partial, and distribution is in progress: the macOS app builds and runs locally, while signed downloads and verified Windows and Linux builds are still ahead. Expect rough edges and breaking changes until 1.0. See [ROADMAP.md](ROADMAP.md).
+> **Status: pre-1.0.** Stages 1–3 (foundations, the engine, the MCP server and CLI, editor parity and polish) are done apart from the items the roadmap marks partial, and distribution is in progress: the macOS app is a signed, notarized [download](https://github.com/thats2easyyy/sonobe/releases/latest) since 0.2.0, the first release, while verified Windows and Linux builds are still ahead. Expect rough edges and breaking changes until 1.0. See [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -47,27 +47,33 @@ Your design doesn't have to be a web app. Paste HTML, or ask Claude from your ap
 
 ## Install
 
-Sonobe needs Node 22.18 or later. There are no prebuilt downloads yet, so you build the app from a checkout.
-
 ### The desktop app (macOS)
+
+Download Sonobe from the [latest release](https://github.com/thats2easyyy/sonobe/releases/latest): `Sonobe-<version>-mac-arm64.dmg` for a Mac with Apple silicon, or `Sonobe-<version>-mac-x64.dmg` for an Intel Mac. Open the DMG and drag Sonobe into Applications. The app needs macOS 13 or later. It is signed with a Developer ID certificate and notarized by Apple. The other files on that page aren't for installing: the `mac` zips, their `.blockmap` files and `latest-mac.yml` are what an installed Sonobe reads to update itself, and the source-map archive is for reading stack traces.
+
+0.2.0 is the first release. So far it has run on the workflow runner that built it and on the Mac that develops Sonobe (Apple silicon, macOS 27), and nobody has tried it yet on a Mac that never had Sonobe. The Intel build has run only under Rosetta, on that runner, and never on an Intel Mac.
+
+### Build the app yourself
+
+A checkout needs Node 22.18 or later, to build the app or to run it from source.
 
 ```bash
 npm install
 npm run package -w @sonobe/desktop
 ```
 
-On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-<version>-mac-arm64.dmg`. Open the DMG and drag Sonobe into Applications. The app needs macOS 13 or later. For an Intel Mac, add `-- --arch x64`; that build has never been launched, on an Intel Mac or under Rosetta.
+On an Apple silicon Mac, this builds the editor, the app, and the `sonobe` CLI, then writes `apps/desktop/release/Sonobe-<version>-mac-arm64.dmg`. For an Intel Mac, add `-- --arch x64`.
 
-Local builds are ad-hoc signed and not notarized. That's enough to run the app on the Mac that built it, but not to give it to other people. The signed, notarized build for everyone else comes from a release workflow that hasn't cut its first release yet ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). To check a build, run `npm run package:verify -w @sonobe/desktop -- --dmg`. It checks the app inside the DMG (its files, signature and entitlements), then launches it with audio muted and checks the editor, the MCP endpoint, and the bundled CLI.
+Local builds are ad-hoc signed and not notarized. That's enough to run the app on the Mac that built it, but not to give it to other people. The release is built, signed and notarized by a workflow, from a version tag ([CONTRIBUTING.md](CONTRIBUTING.md#releasing)). To check a build, run `npm run package:verify -w @sonobe/desktop -- --dmg`. It checks the app inside the DMG (its files, signature and entitlements), then launches it with audio muted and checks the editor, the MCP endpoint, and the bundled CLI.
 
-Windows (NSIS) and Linux (AppImage, deb) targets are configured in `apps/desktop/electron-builder.yml`, but those builds haven't been verified yet.
+Windows and Linux have no download. Their targets (NSIS, AppImage, deb) are configured in `apps/desktop/electron-builder.yml`, but those builds haven't been verified yet.
 
 ### Updates
 
-An installed Sonobe looks for a newer release a few seconds after it starts and every four hours while it runs. There is no release yet, so today the check finds nothing.
+An installed Sonobe looks for a newer release a few seconds after it starts and every four hours while it runs. No published version has had a newer one to find yet. One update has gone through GitHub so far, on one Mac: a signed 0.1.0 build that was never published found 0.2.0, downloaded it, and installed it when it quit.
 
-- A build signed for release downloads the new version in the background and offers **Restart to Update**. The restart asks about unsaved changes first, and Sonobe opens again with what you had open. The update also goes in the next time you quit.
-- A build you make yourself is ad-hoc signed, and macOS won't let an update replace it. It tells you a new version exists and opens its release page.
+- The app you download, in an Applications folder, downloads the new version in the background and offers **Restart to Update**. The restart asks about unsaved changes first, and Sonobe opens again with what you had open. The update also goes in the next time you quit.
+- A build you make yourself is ad-hoc signed, and macOS won't let an update replace it. It tells you a new version exists and opens its release page. So does a downloaded copy that runs from anywhere but an Applications folder.
 - Sonobe run from a checkout (`npm run desktop`) never checks.
 
 A check is a few ordinary web requests to GitHub: its list of Sonobe's releases, the newest one's tag, and that release's update file. GitHub sees what any site you visit sees: your network address and your system's language. The requests carry no identifier for you or your copy of Sonobe, and nothing about your prototypes. Turn the automatic check off in **Settings → Updates**; **Check for Updates…** in the Sonobe menu still works. `SONOBE_UPDATES=off` turns updates off altogether, the menu command included.

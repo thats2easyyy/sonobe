@@ -214,7 +214,7 @@ export interface ViewerWindowStatus {
 /** What went wrong with an update, in words for people. */
 export interface UpdateProblem {
   /**
-   * network: nothing answered. no-release: nothing is published yet. damaged: the download didn't arrive
+   * network: nothing answered. no-release: the feed has no published version to read. damaged: the download didn't arrive
    * whole. rejected: the system refused to install it. location: the app can't be replaced where it is.
    */
   kind: "network" | "no-release" | "damaged" | "rejected" | "location" | "other";

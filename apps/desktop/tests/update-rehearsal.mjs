@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Rehearses an update between two real, signed builds of Sonobe on this Mac. Nothing else shows that the
- * updater works before a release exists, and the updater in the first release is the one every person
- * keeps: run this on the commit you mean to tag.
+ * Rehearses an update between two real, signed builds of Sonobe on this Mac. Each release carries the
+ * updater that has to install the one after it, and nothing else tries that before the tag: run this on
+ * the commit you mean to tag.
  *
  *   node apps/desktop/tests/update-rehearsal.mjs --identity "Apple Development: Your Name"
  *
