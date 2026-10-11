@@ -76,7 +76,7 @@ test.describe("The Assistant on your Claude subscription (experimental)", () => 
     expect(await fakeConnectionCalls(page)).toEqual([{ subscriptionEnabled: true }, { provider: "subscription" }]);
     await expect(sheet(page).getByRole("heading", { name: "Use your Claude subscription" })).toBeVisible();
     await expect(sheet(page).getByText("Signed in · Claude Max · ava@example.com")).toBeVisible();
-    await expect(sheet(page).getByText("Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.")).toBeVisible();
+    await expect(sheet(page).getByText("Experimental: awaiting Anthropic's permission, so it's off by default.")).toBeVisible();
     await screenshot(page, "subscription-02-setup");
     await sheet(page).getByRole("button", { name: "Use Claude subscription" }).click();
     await expect(sheet(page).getByText("What should we build?")).toBeVisible();

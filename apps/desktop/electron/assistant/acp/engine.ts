@@ -1,6 +1,6 @@
 /**
- * The Assistant on the person's Claude subscription (experimental, off by default, not released until
- * Anthropic agrees): the same engine surface as the API key's agent loop (../agent.ts), over ACP.
+ * The Assistant on the person's Claude subscription (experimental, off by default, offered by no release
+ * unless the person opts in by hand): the same engine surface as the API key's agent loop (../agent.ts), over ACP.
  * Sonobe runs Claude's agent adapter as one child process for the app (./process.ts), opens one ACP
  * session per window's chat, and gives each session Sonobe's tools over its own loopback MCP endpoint
  * (./toolServer.ts), revoked with it. Every call there runs through the shared tool runner (../toolRunner.ts) with the

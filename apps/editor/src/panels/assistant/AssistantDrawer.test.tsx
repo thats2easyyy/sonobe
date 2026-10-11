@@ -441,6 +441,25 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(host.checks).toBe(0);
   });
 
+  it("in an app that doesn't offer the switch, a saved subscription choice shows the key setup, with Connect Claude and no way around it", async () => {
+    // What a packaged app reports for a file a checkout's Settings wrote: main keeps the switch off and the API key active.
+    const host = fakeAssistantHost({ connection: { available: false, subscriptionEnabled: true, provider: "subscription" } });
+    await mount(host);
+    expect(host.connection).toEqual({ available: false, subscriptionEnabled: false, provider: "subscription", active: "api_key" });
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(text()).toContain("Use your own Anthropic API key");
+    expect(text()).toContain("Prefer your Claude subscription?");
+    expect(text()).toContain("Connect Claude Desktop or Claude Code to Sonobe and build with your own Claude plan. No API key needed.");
+    expect(buttonByText("Connect Claude Desktop or Claude Code")).not.toBeNull();
+    expect(text()).not.toContain("Use your Claude subscription");
+    expect(text()).not.toContain("Choose Claude subscription above");
+    // The app never says how a packaged app comes to offer it.
+    expect(text()).not.toMatch(/assistant-connection|PackagedApp|SONOBE_|Settings → Claude/);
+    expect(container.querySelector(".sb-assistant__subtitle")?.textContent ?? "").not.toContain("subscription");
+    expect(host.checks).toBe(0);
+    expect(host.connectionCalls).toEqual([]);
+  });
+
   it("with the switch on, offers the subscription and the API key, and picking one tells main", async () => {
     const host = fakeAssistantHost({ connection: { subscriptionEnabled: true } });
     host.nextCheck = () => subscriptionStatus({ state: "signed_out", kind: "none", label: "Not logged in", message: SIGNED_OUT_MESSAGE });
@@ -457,7 +476,7 @@ describe("AssistantDrawer on the Claude subscription (experimental)", () => {
     expect(text()).toContain("Use your Claude subscription");
     expect(text()).toContain("It draws on your plan's usage limits. No API key.");
     expect(text()).toContain("Sonobe never sees your Claude login: the adapter uses the one Claude Code keeps on this computer.");
-    expect(text()).toContain("Experimental: awaiting Anthropic's permission, so it's off by default and not in any release.");
+    expect(text()).toContain("Experimental: awaiting Anthropic's permission, so it's off by default.");
     // Picking it read the login: signed out.
     expect(host.checks).toBe(1);
     expect(text()).toContain(SIGNED_OUT_MESSAGE);

@@ -1,6 +1,6 @@
 /**
- * The Assistant on the person's Claude subscription (experimental, off by default, not released until
- * Anthropic agrees): Sonobe is an ACP client of Claude's agent adapter (@agentclientprotocol/claude-agent-acp,
+ * The Assistant on the person's Claude subscription (experimental, off by default, offered by no release
+ * unless the person opts in by hand): Sonobe is an ACP client of Claude's agent adapter (@agentclientprotocol/claude-agent-acp,
  * built on the Claude Agent SDK), which it runs as a child process. These are the seams between the
  * subscription engine (./engine.ts) and the adapter's process (./process.ts, ./locate.ts, ./signIn.ts),
  * so tests can stand in for either side.

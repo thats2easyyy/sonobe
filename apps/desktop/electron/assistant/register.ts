@@ -10,8 +10,9 @@
  * Two engines run chats: the API key's agent loop (agent.ts), and, behind the experimental switch
  * (off by default, awaiting Anthropic's permission), the Claude subscription's (acp/engine.ts). The
  * switch and the pick live here (connection.ts), and main enforces them. A build offers the switch
- * only when main says so (SubscriptionSetup.available: Sonobe run from a source checkout, never a
- * packaged build), so no release offers it. A window's chat keeps the engine its first message ran on until
+ * only when main says so (SubscriptionSetup.available, from connection.ts's offersSubscription: Sonobe
+ * run from a source checkout does, and a packaged app only when the person opted in by hand), so no
+ * release offers it by default. A window's chat keeps the engine its first message ran on until
  * New chat; turning the switch off stops every subscription reply and the adapter.
  *
  * Each window's chat is pinned to the document that window shows (documentFor), and a code folder
@@ -107,11 +108,12 @@ export interface RegisterAssistantOptions {
 
 export interface SubscriptionSetup {
   /**
-   * This build offers the switch (main's build gate: only an unpackaged build, run from a source
-   * checkout; every release is packaged). False: the switch reads off, can't be turned on, and no
-   * subscription reply, check or sign-in starts. Default true.
+   * This build offers the switch (main's gate, connection.ts's offersSubscription: a build run from a
+   * source checkout, or a packaged app whose person opted in by hand). False: the switch reads off,
+   * can't be turned on, and no subscription reply, check or sign-in starts. Required, so nothing
+   * offers it by leaving this out.
    */
-  available?: boolean;
+  available: boolean;
   /** The adapter's working folder and every session's cwd (userData/assistant/claude). */
   sessionsDir: string;
   /** Sign in (macOS Terminal): where the one-time script goes and shell.openPath. */
@@ -246,7 +248,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
     : null;
 
   /** The switch and the pick as this build applies them: a build that doesn't offer the switch runs every chat on the API key. */
-  const available = !!subscription && setup?.available !== false;
+  const available = !!subscription && setup?.available === true;
   const connection = (): AssistantConnection => {
     const saved = connections.get();
     return available ? { available: true, ...saved } : { available: false, subscriptionEnabled: false, provider: saved.provider, active: "api_key" };
@@ -422,7 +424,7 @@ export function registerAssistant(options: RegisterAssistantOptions): AssistantR
   };
 
   for (const [channel, handler] of Object.entries(handlers)) options.ipcMain.handle(channel, handler);
-  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${!available ? "not offered in a packaged build" : connection().subscriptionEnabled ? "on" : "off"})`);
+  log("info", `Assistant ready (your Anthropic API key; Claude subscription: ${!available ? "not offered in this build" : connection().subscriptionEnabled ? "on" : "off"})`);
 
   return {
     agent,

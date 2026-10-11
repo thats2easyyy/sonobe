@@ -9,7 +9,8 @@
  * - a Developer ID build is also held to Gatekeeper and its stapled notarization ticket, and with --release to
  *   Apple's secure timestamp
  * - the app launches, shows the editor build from Resources/editor, and exposes window.sonobeHost
- * - the Assistant doesn't offer the experimental Claude subscription (no packaged build does)
+ * - the Assistant doesn't offer the experimental Claude subscription for a saved switch alone, and does once the
+ *   data folder's assistant-connection.json carries the opt-in a person sets by hand (electron/assistant/connection.ts)
  * - updates are off for this launch (SONOBE_UPDATES=off): the app says so, never loads the updater and asks no feed
  * - the entry is dist/boot.cjs, and the launch leaves Node's compile cache for main.cjs in the data folder, under this
  *   version's name, with the signature inside the bundle untouched; a second launch that has nowhere to keep one
@@ -46,6 +47,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { _electron as electron } from "playwright";
+import { PACKAGED_OPT_IN } from "../electron/assistant/connection.ts";
 import { DISABLE_LIBRARY_VALIDATION, buildInfoFor, entitlementKeys, readAssessment, readSignature } from "./signing.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -278,6 +280,12 @@ try {
     // NODE_COMPILE_CACHE would send the app's compile cache to the shell's folder, and NODE_DISABLE_COMPILE_CACHE turn it off.
     for (const key of ["ELECTRON_RUN_AS_NODE", "SONOBE_DEV_URL", "SONOBE_EDITOR_DIST", "SONOBE_MCP", "SONOBE_MCP_PORT", "SONOBE_LAN", "SONOBE_LAN_PORT", "SONOBE_UPDATE_FEED", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]) delete env[key];
     if (values["mcp-port"]) env.SONOBE_MCP_PORT = values["mcp-port"];
+    // What a checkout's Settings leaves in the data folder a packaged app shares with it: the subscription switch on,
+    // without the opt-in. A packaged app must not offer the switch for that.
+    const connectionFile = path.join(userData, "assistant-connection.json");
+    const savedSwitch = '{"subscriptionEnabled": true, "provider": "subscription"}';
+    mkdirSync(userData, { recursive: true });
+    writeFileSync(connectionFile, savedSwitch);
     // macOS reads -AppleLanguages as the app's preferred languages, as a non-English system would set them.
     app = await electron.launch({ executablePath: executable, args: ["--mute-audio", ...(values.lang && mac ? ["-AppleLanguages", `(${values.lang})`] : [])], env, timeout: 60_000 * patience });
     app.process().stderr?.on("data", (d) => process.stderr.write(`[app] ${d}`));
@@ -314,9 +322,10 @@ try {
     for (const key of ["getMcpStatus", "notifyDocumentChanged", "openExternal", "popOutViewer", "secrets", "updates"]) assert(host.keys.includes(key), `sonobeHost.${key}`, host.keys);
     assert(host.version === pkg.version, "sonobeHost.version", host.version);
     if (values.lang) log(`with the system language ${JSON.stringify(state.preferred)}: app.getLocale() is ${state.locale}, navigator.language is ${host.language}`);
-    // The experimental Claude subscription is offered only from a checkout, never in a packaged build.
-    const connection = await win.evaluate(async () => (await window.sonobeHost.assistant.status()).connection);
-    assert(connection?.available === false && connection.subscriptionEnabled === false && connection.active === "api_key", "the Claude subscription isn't offered", connection);
+    // The experimental Claude subscription: a packaged app doesn't offer it for the saved switch alone, whatever the page asks.
+    const connection = await win.evaluate(async (key) => (await window.sonobeHost.assistant.setConnection({ subscriptionEnabled: true, provider: "subscription", [key]: true })).connection, PACKAGED_OPT_IN);
+    assert(connection?.available === false && connection.subscriptionEnabled === false && connection.active === "api_key", "the Claude subscription isn't offered for a saved switch without the opt-in", connection);
+    assert(readFileSync(connectionFile, "utf8") === savedSwitch, "a packaged app that doesn't offer the subscription leaves assistant-connection.json as it was", readFileSync(connectionFile, "utf8"));
     // The editor build mounts into #root; a blank window means the bundled editor threw at startup.
     const mounted = await poll(() => win.evaluate(() => (document.getElementById("root")?.childElementCount ?? 0) > 0), { timeout: 15_000, message: "the editor to mount" }).catch(() => false);
     await new Promise((r) => setTimeout(r, 1500));
@@ -325,7 +334,7 @@ try {
     mkdirSync(path.dirname(screenshot), { recursive: true });
     await win.screenshot({ path: screenshot });
     assert(mounted, "the bundled editor renders (#root has content)", pageErrors.length ? pageErrors.slice(0, 5).join("\n  ") : "no page errors reported");
-    log(`window loads and renders the bundled editor; sonobeHost v${host.version}; the Claude subscription isn't offered${values.screenshot ? `; screenshot → ${values.screenshot}` : ""}`);
+    log(`window loads and renders the bundled editor; sonobeHost v${host.version}; the Claude subscription isn't offered for a saved switch without the opt-in${values.screenshot ? `; screenshot → ${values.screenshot}` : ""}`);
 
     // Updates are off: the app answers so (the answer waits until the window is up), the updater was never loaded,
     // and electron-updater left no per-install id behind, which it writes at its first check.
@@ -398,6 +407,10 @@ try {
     // (electron/launch.ts), and the document is the prototype, read by the preload on the way.
     const project = path.join(temp, "Like Toggle.sonobe");
     cpSync(path.resolve(root, "../../examples/02-like-toggle"), project, { recursive: true });
+    // Its data folder has the opt-in a person sets by hand, with the switch off, so nothing starts Claude's agent adapter.
+    const optedIn = path.join(temp, "userData-project", "assistant-connection.json");
+    mkdirSync(path.dirname(optedIn), { recursive: true });
+    writeFileSync(optedIn, JSON.stringify({ subscriptionEnabled: false, provider: "api_key", [PACKAGED_OPT_IN]: true }));
     app = await electron.launch({ executablePath: executable, args: ["--mute-audio", project], env: { ...env, SONOBE_USER_DATA: path.join(temp, "userData-project"), SONOBE_HOME: path.join(temp, "home-project") }, timeout: 60_000 * patience });
     const third = await app.firstWindow();
     await poll(() => app.evaluate(() => globalThis.__sonobeTest?.hasRendererMethod("document.info") === true), { timeout: 15_000, message: "the editor of a launch with a prototype" });
@@ -405,9 +418,17 @@ try {
     const told = await third.evaluate(async () => ({ launching: window.sonobeHost.launching, info: await window.sonobeHost.launch(), toolbar: document.querySelector(".sb-toolbar__doc-title")?.textContent ?? null, url: location.href }));
     assert(told.launching === true && told.info?.open?.kind === "project" && told.info.open.path === project && told.info.reopening === false, "a window opened for a prototype is told which (sonobeHost.launch())", told);
     assert(opened.projectPath === project && opened.name === "Like Toggle" && opened.dirty === false && told.toolbar === "Like Toggle", "the editor starts on the prototype it was launched with", { name: opened.name, projectPath: opened.projectPath, toolbar: told.toolbar });
+    // With the opt-in, a packaged app offers the switch, and saving the switch keeps the opt-in in the file.
+    const offered = await third.evaluate(async () => {
+      const before = (await window.sonobeHost.assistant.status()).connection;
+      return { before, after: (await window.sonobeHost.assistant.setConnection({ subscriptionEnabled: true })).connection };
+    });
+    assert(offered.before.available === true && offered.before.subscriptionEnabled === false && offered.after.available === true && offered.after.subscriptionEnabled === true && offered.after.active === "api_key", "with the hand-set opt-in, the Claude subscription switch is offered and can be turned on", offered);
+    const kept = JSON.parse(readFileSync(optedIn, "utf8"));
+    assert(kept.subscriptionEnabled === true && kept[PACKAGED_OPT_IN] === true, "saving the switch keeps the opt-in in assistant-connection.json", kept);
     await app.close();
     app = null;
-    log("launched with a prototype's path, the editor starts on it");
+    log("launched with a prototype's path, the editor starts on it; with the hand-set opt-in, the Claude subscription switch is offered");
     log(`PASS (${verdict})`);
   }
 } catch (err) {

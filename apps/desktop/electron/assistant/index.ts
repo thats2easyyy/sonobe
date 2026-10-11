@@ -5,7 +5,7 @@
  * The Assistant is for people who'd rather chat inside Sonobe with their own API key. The key lives
  * in the OS keychain (sonobeHost.secrets, "anthropic.apiKey") and is read only by the main process.
  *
- * Experimental, off by default and not released until Anthropic agrees: behind Settings → Claude's
+ * Experimental, off by default and offered by no release unless the person opts in by hand: behind Settings → Claude's
  * switch, the Assistant can also run on the person's Claude subscription through Claude's agent
  * adapter (acp/). Sonobe never reads Claude credentials: the adapter's Claude Code does its own login.
  *
@@ -15,8 +15,8 @@
  *                 codeFolders: createCodeFolderStore({ file, home }),     // Match my code… links (codeFolder.ts)
  *                 pickFolder,                                             // the native folder dialog
  *                 handoff: { platform, dir, server, openPath },           // Open in Claude Code (../claude-handoff.ts)
- *                 connection: createConnectionStore({ file }),            // the subscription switch and pick (connection.ts)
- *                 subscription: { available, sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/); available: !app.isPackaged
+ *                 connection,                                             // createConnectionStore({ file }): the subscription switch and pick (connection.ts)
+ *                 subscription: { available, sessionsDir, signIn: { platform, dir, openPath } } })  // the Claude subscription (acp/); available: offersSubscription(...) (connection.ts)
  *   preload.ts  attachAssistantBridge(host, ipcRenderer)   // before contextBridge.exposeInMainWorld
  *
  * Designing on the canvas (design.ts, draftStream.ts, designGuard.ts): the Design with Claude box

@@ -84,12 +84,31 @@ The Assistant's main-process side (`apps/desktop/electron/assistant`) and the ed
 4. The system prompt is the same for every message, and `design.test.ts` pins its hash. What a message knows about the editor goes in a block before the person's text (`<canvas_context>`, `<selection>`), never in the prompt. The chat's mentions have two halves that change together: the link shapes `SELECTION_GUIDE` (`assistant/selection.ts`) tells Claude to write, and `resolveMention` in the editor's `panels/assistant/mentions.ts`.
 5. Test with fakes: `scriptedClient` and `fakeBridge` (`assistant/testing.ts`), `fakeAssistantHost` in the editor, and `e2e/fakeAssistant.ts` for Playwright. The subscription path's tests run `apps/desktop/tests/fake-claude-agent.mjs`, a fake ACP agent, in place of Claude's agent adapter, by pointing `SONOBE_CLAUDE_AGENT` at it. It calls the per-chat tool endpoint the way the adapter does, a word in the message picks what it does (`design`, `save`, `crash`, `sessionend`, `limit`, `hang` and the others its header lists), `FAKE_CLAUDE_MODE` picks the permission mode its sessions start in, and `FAKE_CLAUDE_LOG=<file>` records what it was sent. No test uses an API key, starts the real adapter or needs a Claude account.
 
-The subscription path is experimental and off by default. Only the app run from a checkout offers its switch: `electron/main.ts` sets the connection's `available` to `!app.isPackaged`, so no packaged build, and so no release, can offer it, and no environment variable changes that ([ARCHITECTURE.md](ARCHITECTURE.md) §10). Keep that gate until Anthropic agrees. To try it on your own machine:
+The subscription path is experimental and off by default, and no release offers it by default. `electron/main.ts` sets the connection's `available` from one rule, `offersSubscription` in `assistant/connection.ts`: the app run from a checkout offers the switch, and a packaged app, which every release is, offers it only when a person has opted in by hand on their own computer (below). No environment variable, flag or setting does that, and nothing in Sonobe writes the opt-in ([ARCHITECTURE.md](ARCHITECTURE.md) §10). The default stays off because Anthropic hasn't agreed: its terms don't let another developer's app offer claude.ai login, or route requests through a person's plan, without approval, so Sonobe doesn't put the option in front of the people who download it. Opting in is a person's own call, for their own Claude plan on their own computer, which the maintainer decided to allow on 2026-10-10. Keep the default off until Anthropic agrees, keep the opt-in out of the app, the README and the guides, and when you change the rule, change `packages/cli/src/docs.test.ts` with it, on purpose. To try it on your own machine:
 
 1. Install the adapter with `npm install -g @agentclientprotocol/claude-agent-acp` (it needs Node.js 22 or later). It draws on your Claude plan's usage limits.
-2. Run the desktop app from a checkout: `npm run desktop` (or `npm run start -w @sonobe/desktop`). A DMG from `npm run package -w @sonobe/desktop` doesn't offer the switch.
+2. Run the desktop app from a checkout: `npm run desktop` (or `npm run start -w @sonobe/desktop`). A packaged app, such as a downloaded release or a DMG from `npm run package -w @sonobe/desktop`, doesn't offer the switch until you opt in for it (below).
 3. Turn on **Use my Claude subscription in the Assistant** in Settings → Claude, and choose **Claude subscription** in the Assistant. If Claude isn't signed in, **Sign in…** opens Terminal for it, or run `claude-agent-acp --cli auth login` yourself.
 4. To use another copy of the adapter, or the fake agent without a Claude account, start the app with `SONOBE_CLAUDE_AGENT` set to its absolute path.
+
+To opt in for a packaged app on your own computer:
+
+1. Quit Sonobe. It reads the file once, when it starts.
+2. Open `assistant-connection.json` in Sonobe's data folder in a text editor: `~/Library/Application Support/Sonobe/assistant-connection.json` on macOS, `%APPDATA%\Sonobe\assistant-connection.json` on Windows, `~/.config/Sonobe/assistant-connection.json` on Linux. A checkout and an installed app share that folder. If the file isn't there, create it.
+3. Add the key `"subscriptionInPackagedApp"` with the value `true`, and keep what the file already has:
+
+   ```json
+   {
+     "subscriptionEnabled": true,
+     "provider": "subscription",
+     "subscriptionInPackagedApp": true
+   }
+   ```
+
+   In a new file, `{ "subscriptionInPackagedApp": true }` is enough. Mind the commas: the line before the new key needs one, and the last line takes none. Only the JSON value `true` counts: `"true"` in quotes or `1` leaves the packaged app as it was. A file that isn't valid JSON is ignored whole: the saved switch reads as off and the pick as API key, in a checkout too. Sonobe says so in its log and doesn't save over the file, so you can fix it. An app opened from the Finder shows no log: to read it, start the app from Terminal with `/Applications/Sonobe.app/Contents/MacOS/Sonobe`.
+4. Start Sonobe again. Settings → Claude now has the switch, as in a checkout. Install the adapter if you haven't (step 1 above), then carry on from step 3. With `"subscriptionEnabled": true` and `"provider": "subscription"` already in the file, as a checkout's Settings leaves them, the switch is on and the Assistant uses your subscription at once.
+
+The saved switch alone, without that key, never makes a packaged app offer it. Sonobe never sets the key itself: when it saves the switch or your pick, it keeps the key only if the file has it as `true` at that moment, so a key set to `false` isn't kept. To opt out, quit Sonobe, take the key out or set it to `false`, and start Sonobe again. The app that runs has to be a version with this rule: 0.2.0 was released before it, and ignores the key. A checkout from before this rule shares the file and drops the key when its switch or pick is saved, so add the key again after running one.
 
 ## Measuring how well Claude builds with Sonobe
 
