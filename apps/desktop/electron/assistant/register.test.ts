@@ -649,7 +649,8 @@ describe("the Claude subscription (experimental)", () => {
     expect(await invoke<AssistantRunResult>(window, ASSISTANT_IPC.send, { text: "hello" })).toMatchObject({ outcome: "completed" });
     expect(api.requests).toHaveLength(1);
     expect(await invoke(window, ASSISTANT_IPC.checkSubscription)).toMatchObject({ state: "unknown" });
-    expect(await invoke(window, ASSISTANT_IPC.signInToClaude)).toMatchObject({ ok: false });
+    // Not "turn the switch on first": this build has no switch to turn on.
+    expect(await invoke(window, ASSISTANT_IPC.signInToClaude)).toEqual({ ok: false, error: "This version of Sonobe can't run the Assistant on your Claude subscription. Start a new chat to use your API key." });
     expect([sub.state.runs, sub.state.calls]).toEqual([[], []]);
     // The saved choice waits for a build that offers the switch.
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ subscriptionEnabled: true, provider: "subscription" });
@@ -693,6 +694,30 @@ describe("the Claude subscription (experimental)", () => {
     await offered.invoke(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: true });
     expect(await saved()).toEqual({ ...on, [PACKAGED_OPT_IN]: true });
     expect(packaged(createConnectionStore({ file })).logs).toContain("Assistant ready (your Anthropic API key; Claude subscription: on)");
+  });
+
+  it("in a packaged app, never puts the opt-in back once the person took it out, even from a file left broken", async () => {
+    const file = path.join(dir, "assistant-connection.json");
+    const launch = () => {
+      const store = createConnectionStore({ file });
+      return withSubscription([], { connection: store }, { available: offersSubscription({ packaged: true, optedIn: store.packagedOptIn() }) });
+    };
+    // CONTRIBUTING.md's example has the key on the last line. Deleting that line leaves a trailing comma.
+    const withKey = `{\n  "subscriptionEnabled": true,\n  "provider": "subscription",\n  "${PACKAGED_OPT_IN}": true\n}\n`;
+    const takenOut = ['{\n  "subscriptionEnabled": true,\n  "provider": "subscription",\n}\n', '{\n  "subscriptionEnabled": true,\n  "provider": "subscription"\n}\n', "", "{ half an edit"];
+    for (const left of takenOut) {
+      await writeFile(file, withKey);
+      const running = launch();
+      const window = fakeSender(1);
+      expect((await running.invoke<AssistantStatus>(window, ASSISTANT_IPC.status)).connection.available).toBe(true);
+      // The person takes the key out by hand while Sonobe runs, then turns the switch off in Settings and picks the API key.
+      await writeFile(file, left);
+      await running.invoke(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: false });
+      await running.invoke(window, ASSISTANT_IPC.setConnection, { subscriptionEnabled: true, provider: "api_key" });
+      expect(await readFile(file, "utf8"), JSON.stringify(left)).not.toContain(PACKAGED_OPT_IN);
+      // The next launch doesn't offer the switch.
+      expect([left, (await launch().invoke<AssistantStatus>(fakeSender(1), ASSISTANT_IPC.status)).connection.available]).toEqual([left, false]);
+    }
   });
 
   it("gives the subscription's engine preview_design, and hides it from the API key's", async () => {

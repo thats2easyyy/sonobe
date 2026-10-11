@@ -105,10 +105,10 @@ To opt in for a packaged app on your own computer:
    }
    ```
 
-   In a new file, `{ "subscriptionInPackagedApp": true }` is enough. Only the JSON value `true` counts: `"true"` in quotes, `1` or a file that isn't valid JSON leaves the app as it was.
-4. Start Sonobe again. Settings → Claude now has the switch, as in a checkout, and the steps above apply from step 3. With `"subscriptionEnabled": true` and `"provider": "subscription"` already in the file, as a checkout's Settings leaves them, the switch is on and the Assistant uses your subscription at once.
+   In a new file, `{ "subscriptionInPackagedApp": true }` is enough. Mind the commas: the line before the new key needs one, and the last line takes none. Only the JSON value `true` counts: `"true"` in quotes or `1` leaves the packaged app as it was. A file that isn't valid JSON is ignored whole: the saved switch reads as off and the pick as API key, in a checkout too. Sonobe says so in its log and doesn't save over the file, so you can fix it. An app opened from the Finder shows no log: to read it, start the app from Terminal with `/Applications/Sonobe.app/Contents/MacOS/Sonobe`.
+4. Start Sonobe again. Settings → Claude now has the switch, as in a checkout. Install the adapter if you haven't (step 1 above), then carry on from step 3. With `"subscriptionEnabled": true` and `"provider": "subscription"` already in the file, as a checkout's Settings leaves them, the switch is on and the Assistant uses your subscription at once.
 
-The saved switch alone, without that key, never makes a packaged app offer it. Sonobe keeps the key when it saves the switch or your pick, and never adds or removes it. To opt out, take the key out, or set it to `false`, and start Sonobe again. The app that runs has to be a version with this rule: 0.2.0 was released before it, and ignores the key.
+The saved switch alone, without that key, never makes a packaged app offer it. Sonobe never sets the key itself: when it saves the switch or your pick, it keeps the key only if the file has it as `true` at that moment, so a key set to `false` isn't kept. To opt out, quit Sonobe, take the key out or set it to `false`, and start Sonobe again. The app that runs has to be a version with this rule: 0.2.0 was released before it, and ignores the key. A checkout from before this rule shares the file and drops the key when its switch or pick is saved, so add the key again after running one.
 
 ## Measuring how well Claude builds with Sonobe
 

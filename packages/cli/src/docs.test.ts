@@ -218,40 +218,114 @@ describe("the experimental Claude subscription in the docs", () => {
     return out;
   }
 
-  // This test is a tripwire, and it pins source text on purpose. A packaged app, which every release is, offers the
-  // switch only to a person who opted in by hand (ARCHITECTURE.md §10). Whoever widens that has to change this first.
+  /** The files that contain `text`, sorted. */
+  let texts: { file: string; text: string }[] | undefined;
+  const naming = (text: string): string[] => {
+    texts ??= textFiles().map((file) => ({ file, text: read(file) }));
+    return texts.filter((entry) => entry.text.includes(text)).map((entry) => entry.file).sort();
+  };
+
+  const MAIN = "apps/desktop/electron/main.ts";
+  const REGISTER = "apps/desktop/electron/assistant/register.ts";
+  const CONNECTION_TEST = CONNECTION.replace(/\.ts$/, ".test.ts");
+  const REGISTER_TEST = REGISTER.replace(/\.ts$/, ".test.ts");
+  const VERIFY_PACKAGE = "apps/desktop/scripts/verify-package.mjs";
+  const DOCS_TEST = "packages/cli/src/docs.test.ts";
+
+  /** The agent guides: they ship in every app, and the Assistant and any connected Claude read them to the person. */
+  const AGENT_GUIDES = readdirSync(path.join(ROOT, "packages/mcp/guides"))
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .map((f) => ({ file: `packages/mcp/guides/${f}`, text: read(`packages/mcp/guides/${f}`) }));
+
+  // These tests are a tripwire, and they pin source text on purpose. A packaged app, which every release is, offers the
+  // switch only to a person who opted in by hand (ARCHITECTURE.md §10). Whoever widens that has to change them first.
+  // They catch a change made in passing, not one written to get around them: connection.test.ts and register.test.ts
+  // hold the behaviour.
   it("is offered from a checkout, and in a packaged app only through the hand-set opt-in: no variable, no other condition, no default", () => {
-    const main = read("apps/desktop/electron/main.ts");
-    // Main asks the one rule, with app.isPackaged and what the connection file held at launch, and nothing follows it.
-    expect(main).toMatch(/\n +available: offersSubscription\(\{ packaged: app\.isPackaged, optedIn: assistantConnection\.packagedOptIn\(\) \}\),\n/);
+    const main = read(MAIN);
+    // Main asks the one rule, with app.isPackaged and what the connection file held at launch, and nothing follows it:
+    // the subscription's setup is that answer and two folders, with nothing spread in after.
+    expect(main).toMatch(
+      /\n +subscription: \{\n(?: +\/\/[^\n]*\n)* +available: offersSubscription\(\{ packaged: app\.isPackaged, optedIn: assistantConnection\.packagedOptIn\(\) \}\),\n +sessionsDir: [^\n]+,\n +signIn: [^\n]+,\n +\},\n/,
+    );
     expect(main.match(/\boffersSubscription\(/g)).toHaveLength(1);
     expect(main.match(/\bavailable: (?!offersSubscription\()[^\n]*[Pp]ackaged/g)).toBeNull();
     // That store reads the file in the data folder, and nothing else.
     expect(main).toContain('const assistantConnection = createConnectionStore({ file: path.join(app.getPath("userData"), "assistant-connection.json"), log });');
     expect(main.match(/\bcreateConnectionStore\(/g)).toHaveLength(1);
+    // Nothing sits between the store and the rule. Main names the store where it makes it, twice where it logs the
+    // note, where it hands it to the Assistant and where it asks the rule; it asks for the opt-in for the note and
+    // for the rule. One more mention of either is a decision.
+    expect(main.match(/\bassistantConnection\b/g)).toHaveLength(5);
+    expect(main.match(/\bpackagedOptIn\b/g)).toHaveLength(2);
+    expect(main).toContain('import { createConnectionStore, offersSubscription, packagedOfferNote } from "./assistant/connection.ts";');
+    // Only main and the Assistant's registration (its in-memory default) make a store.
+    expect(naming("createConnectionStore")).toEqual([CONNECTION_TEST, CONNECTION, "apps/desktop/electron/assistant/index.ts", REGISTER_TEST, REGISTER, MAIN, DOCS_TEST].sort());
 
     const connection = read(CONNECTION);
-    // The rule: not packaged, or opted in. Nothing else is "or"ed in.
-    expect(connection).toContain("export function offersSubscription(build: { packaged: boolean; optedIn: boolean }): boolean {\n  return !build.packaged || build.optedIn === true;\n}");
+    // The rule: exactly not packaged, or exactly opted in. Nothing else is "or"ed in, and a missing answer offers nothing.
+    expect(connection).toContain("export function offersSubscription(build: { packaged: boolean; optedIn: boolean }): boolean {\n  return build.packaged === false || build.optedIn === true;\n}");
     // Only the JSON value true in the file opts in, and it starts out false.
     expect(connection).toContain("  let optedIn = false;\n");
     expect(connection).toContain("    optedIn = value === true;\n");
     expect(connection.match(/\boptedIn = /g)).toHaveLength(2);
-    // The store reads no environment, and the desktop's switches have none for it.
-    expect(connection).not.toMatch(/process\.env|\benv\b/);
+    // The store has three answers and no fourth that could set the key, and it's frozen so nobody swaps one.
+    const members = /export interface ConnectionStore \{\n([\s\S]*?)\n\}/.exec(connection)![1]!;
+    expect([...members.matchAll(/^  (\w+)\??[(:]/gm)].map((m) => m[1])).toEqual(["get", "update", "packagedOptIn"]);
+    expect(connection).toContain("  return Object.freeze({\n    get: () => withActive(stored),\n    packagedOptIn: () => optedIn,\n    update(patch) {\n");
+    // One place writes the file, and it writes the key only when the file it just read has it as true: never from
+    // what the launch read, and never over a file it can't read.
+    expect(connection.match(/\batomicWriteFileSync\(/g)).toHaveLength(1);
+    expect(connection.match(/\[PACKAGED_OPT_IN\]: true/g)).toHaveLength(1);
+    expect(connection).toContain(
+      '    const now = readSaved(to);\n    if (now.state === "unreadable") {\n      log("warn", `assistant-connection.json ${now.problem}, so Sonobe left it as it is and this change lasts only until Sonobe quits. ${now.hint}`);\n      return;\n    }\n    const keep = now.state === "read" && now.raw[PACKAGED_OPT_IN] === true;\n    atomicWriteFileSync(to, `${JSON.stringify({ ...stored, ...(keep ? { [PACKAGED_OPT_IN]: true } : {}) }, null, 2)}\\n`, { mode: 0o600 });\n',
+    );
+    // It reads one file and writes through one helper: no other module, no environment, and the desktop's switches have none for it.
+    expect(connection.match(/^import .*$/gm)).toEqual([
+      'import { readFileSync } from "node:fs";',
+      'import { atomicWriteFileSync } from "../fs-utils.ts";',
+      'import type { AssistantConnection, AssistantConnectionUpdate, AssistantProvider } from "./protocol.ts";',
+    ]);
+    expect(connection).not.toMatch(/process\.env|\benv\b|\brequire\(|\bimport\(/);
     expect(read("apps/desktop/electron/env.ts")).not.toMatch(/subscription|claude/i);
     // No default: the Assistant offers the switch only when main said true.
-    const register = read("apps/desktop/electron/assistant/register.ts");
+    const register = read(REGISTER);
     expect(register).toContain("const available = !!subscription && setup?.available === true;");
     expect(register).toMatch(/\n  available: boolean;\n/);
     expect(register).not.toMatch(/\bavailable\?: boolean/);
+    // The registration reads the store and patches the switch and the pick, field by field, and asks it nothing else.
+    expect(register.match(/\bconnections\.\w+/g)).toEqual(["connections.get", "connections.update"]);
+    expect(register).toContain(
+      '      connections.update({\n        ...(typeof body.subscriptionEnabled === "boolean" ? { subscriptionEnabled: body.subscriptionEnabled } : {}),\n        ...(body.provider === "api_key" || body.provider === "subscription" ? { provider: body.provider } : {}),\n      });\n',
+    );
   });
 
   it("names the opt-in key in the store and in CONTRIBUTING.md only, so nothing else in Sonobe can write it and nothing that ships says how", () => {
     const key = optInKey();
     // Not the renderer, Settings, the preload, an MCP tool, the CLI, a script, a guide or an example: a file that
     // needs the key imports PACKAGED_OPT_IN, and a new name on this list is a decision.
-    expect(textFiles().filter((file) => read(file).includes(key)).sort()).toEqual(["CONTRIBUTING.md", CONNECTION, CONNECTION.replace(/\.ts$/, ".test.ts")].sort());
+    expect(naming(key)).toEqual(["CONTRIBUTING.md", CONNECTION, CONNECTION_TEST].sort());
+    // So who names the constant is pinned too: the store, the tests that hold the gate, the packaged app's check, and
+    // the contract. Not main, the registration, the editor, the MCP server or the CLI.
+    expect(naming("PACKAGED_OPT_IN")).toEqual(["ARCHITECTURE.md", CONNECTION_TEST, CONNECTION, REGISTER_TEST, VERIFY_PACKAGE, DOCS_TEST].sort());
+    // And who names the file: main, which makes the store; the tests and the two app runs that check it; and the two
+    // documents for contributors. Nothing a person who downloads the app reads, and nothing Claude reads to them.
+    expect(naming("assistant-connection")).toEqual(
+      [
+        "ARCHITECTURE.md",
+        "CONTRIBUTING.md",
+        CONNECTION_TEST,
+        CONNECTION,
+        REGISTER_TEST,
+        MAIN,
+        VERIFY_PACKAGE,
+        "apps/desktop/tests/smoke.mjs",
+        "apps/editor/src/app/SettingsDialog.test.tsx",
+        "apps/editor/src/panels/assistant/AssistantDrawer.test.tsx",
+        DOCS_TEST,
+      ].sort(),
+    );
     // What crosses to the renderer has the switch and the pick, and nothing more to patch.
     for (const file of ["apps/desktop/electron/assistant/protocol.ts", "apps/editor/src/panels/assistant/types.ts"]) {
       expect(read(file), file).toMatch(/export interface AssistantConnectionUpdate \{\n  subscriptionEnabled\?: boolean;\n  provider\?: AssistantProvider;\n\}/);
@@ -266,15 +340,29 @@ describe("the experimental Claude subscription in the docs", () => {
     expect(contributing).toContain("which the maintainer decided to allow on 2026-10-10");
   });
 
-  it("isn't offered by default in a release, and README and the guides (which ship in the app) give no way to turn it on in one", () => {
+  it("isn't offered by default in a release, and nothing that ships in the app or sits in the README gives a way to turn it on in one", () => {
     const key = optInKey();
-    for (const { file, text } of [{ file: "README.md", text: read("README.md") }, ...GUIDES]) {
+    // The README, the guides, the agent guides and the examples' READMEs, which the app carries and Claude reads out.
+    const shipped = [{ file: "README.md", text: read("README.md") }, ...GUIDES, ...AGENT_GUIDES, ...EXAMPLE_DOCS];
+    expect(AGENT_GUIDES.length).toBeGreaterThan(5);
+    expect(read("apps/desktop/scripts/build.mjs")).toContain('cpSync(path.join(repo, "packages", "mcp", "guides"), path.join(dist, "guides"), { recursive: true });');
+    for (const { file, text } of shipped) {
       // No variable that would switch it on, no way to launch the packaged app with one, and no file or key to edit.
       expect(text, file).not.toMatch(/SONOBE_CLAUDE_[A-Z_]*SUBSCRIPTION|Sonobe\.app\/Contents\/MacOS/);
       expect(text, file).not.toContain("assistant-connection");
       expect(text, file).not.toContain(key);
       expect(text, file).not.toMatch(/opt(?:ed|s|ing)?[ -]in\b/i);
+      // And no pointer to where the steps are: a paragraph about the subscription doesn't send its reader to the
+      // contributors' document or to the app's data folder.
+      for (const paragraph of lines(text).filter((line) => /subscription/i.test(line))) {
+        expect(paragraph, file).not.toMatch(/contribut|data folder|Application Support\/Sonobe|%APPDATA%\\Sonobe|\.config\/Sonobe/i);
+      }
     }
+    // The editor's copy is held the same way: a source file that talks about the subscription names neither.
+    const editorCopy = textFiles("apps/editor/src").filter((file) => !/\.test\.tsx?$/.test(file) && /subscription/i.test(read(file)));
+    expect(editorCopy).toContain("apps/editor/src/app/SettingsDialog.tsx");
+    expect(editorCopy).toContain("apps/editor/src/panels/assistant/SubscriptionSetup.tsx");
+    for (const file of editorCopy) expect(read(file), file).not.toMatch(/contribut|assistant-connection|data folder|Application Support/i);
     expect(read("README.md")).toContain("Packaged builds, like the DMG above, don't offer it by default, and no release will until Anthropic agrees");
     expect(read("docs/guides/11-working-with-claude.md")).toContain("Until Anthropic agrees, no release offers it by default: the app you download shows no switch.");
     // The contract says whose decision the opt-in is, and keeps the reason the default is off.
@@ -284,6 +372,10 @@ describe("the experimental Claude subscription in the docs", () => {
     expect(subscription).toContain("- **Why it waits on Anthropic.**");
     expect(subscription).toContain("`offersSubscription` in `assistant/connection.ts`");
     expect(subscription).toContain("The maintainer changed that on that day");
+    // What a save does with the key, as the store does it.
+    expect(subscription).toContain("writes the key only when the file has it as `true` at that moment, never from what the launch read");
+    expect(subscription).toContain("is left as it is at a save");
+    expect(read("CONTRIBUTING.md")).toContain("Sonobe never sets the key itself: when it saves the switch or your pick, it keeps the key only if the file has it as `true` at that moment");
     for (const stale of [/packaged builds?[^.]{0,40} never (?:do|does|offers?)/i, /not (?:to be )?released until Anthropic agrees/i, /!app\.isPackaged/]) {
       for (const file of ["README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "ROADMAP.md", ...GUIDES.map((guide) => guide.file)]) expect(read(file), `${file} ${stale}`).not.toMatch(stale);
     }
