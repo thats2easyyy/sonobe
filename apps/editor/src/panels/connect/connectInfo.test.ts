@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  availableSummary,
   claudeCodeCommand,
   claudeCodeRemoveCommand,
   claudeDesktopConfig,
@@ -11,7 +12,10 @@ import {
   parseMcpStatus,
   relativeTime,
   repoPathFromDevUrl,
+  runsOlderRelay,
   sessionSummary,
+  sessionsUsingSonobe,
+  sessionsWithSonobeAvailable,
   shellForPlatform,
   shellQuote,
   tildePath,
@@ -65,6 +69,15 @@ describe("parseMcpStatus", () => {
     expect(connectedSessions(null)).toEqual([]);
   });
 
+  it("tells sessions using Sonobe from sessions that only have it available", () => {
+    const unused = { ...SESSION, id: "22222222-aaaa-4bbb-8ccc-000000000002", lastActivityAt: null, lastTool: null, toolCalls: 0 };
+    const status = parseMcpStatus({ running: true, port: 1, url: null, tokenFile: null, clients: [SESSION, unused, { ...SESSION, id: "33333333-aaaa-4bbb-8ccc-000000000003", state: "gone" }, { ...unused, id: "44444444-aaaa-4bbb-8ccc-000000000004", state: "gone" }] });
+    expect(sessionsUsingSonobe(status).map((c) => c.id)).toEqual([SESSION.id]);
+    expect(sessionsWithSonobeAvailable(status).map((c) => c.id)).toEqual([unused.id]);
+    expect(sessionsUsingSonobe(status && { ...status, running: false })).toEqual([]);
+    expect(sessionsWithSonobeAvailable(null)).toEqual([]);
+  });
+
   it("rejects anything else", () => {
     expect(parseMcpStatus(null)).toBeNull();
     expect(parseMcpStatus("running")).toBeNull();
@@ -85,6 +98,22 @@ describe("session text", () => {
     const [session] = parseMcpStatus({ running: true, clients: [SESSION] })!.clients;
     expect(sessionSummary(session!, 52_000)).toBe("Claude Code · placemark · active 12 s ago");
     expect(sessionSummary({ ...session!, folder: null, lastActivityAt: null }, 61_000)).toBe("Claude Code · connected 1 min ago");
+  });
+
+  it("counts the sessions that have Sonobe available", () => {
+    expect(availableSummary(6, true)).toBe("6 more sessions have Sonobe available");
+    expect(availableSummary(1, true)).toBe("1 more session has Sonobe available");
+    expect(availableSummary(7, false)).toBe("7 sessions have Sonobe available");
+    expect(availableSummary(1, false)).toBe("1 session has Sonobe available");
+  });
+
+  it("spots a relay from another version of Sonobe", () => {
+    const [session] = parseMcpStatus({ running: true, clients: [SESSION] })!.clients;
+    expect(runsOlderRelay(session!, "0.1.0")).toBe(false);
+    expect(runsOlderRelay(session!, "0.2.0")).toBe(true);
+    expect(runsOlderRelay(session!, null)).toBe(false);
+    expect(runsOlderRelay({ ...session!, relayVersion: null }, "0.2.0")).toBe(false);
+    expect(runsOlderRelay({ ...session!, via: "http" }, "0.2.0")).toBe(false);
   });
 });
 

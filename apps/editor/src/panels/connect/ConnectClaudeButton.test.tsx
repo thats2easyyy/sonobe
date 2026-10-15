@@ -15,6 +15,8 @@ import type { McpStatusSource } from "./useMcpStatus.ts";
 const RUNNING = { running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/me/.sonobe/mcp.json", cliPath: null, version: "0.1.0" };
 const now = Date.now();
 const session = (id: string, folder: string, state = "connected") => ({ id, label: "Claude Code", name: "claude-code", version: "2.1.278", folder, via: "relay", state, connectedAt: now - 60_000, lastSeenAt: now, lastActivityAt: now - 12_000, lastTool: "get_outline", toolCalls: 3, relayVersion: "0.1.0" });
+/** A session that has Sonobe available and never called a tool. */
+const unused = (id: string, folder: string) => ({ ...session(id, folder), lastActivityAt: null, lastTool: null, toolCalls: 0 });
 
 let container: HTMLDivElement;
 let root: Root;
@@ -71,6 +73,18 @@ describe("ConnectClaudeButton", () => {
     const button = await show({ ...RUNNING, clients: [session("11111111-aaaa-4bbb-8ccc-000000000001", "/Users/me/placemark"), session("22222222-aaaa-4bbb-8ccc-000000000002", "/Users/me/sonobe")] });
     expect(button.dataset.state).toBe("connected");
     expect(button.textContent).toBe("Claude ×2");
+  });
+
+  it("isn't green for sessions that have Sonobe available and never called a tool", async () => {
+    const button = await show({ ...RUNNING, clients: [unused("11111111-aaaa-4bbb-8ccc-000000000001", "/Users/me/portfolio"), unused("22222222-aaaa-4bbb-8ccc-000000000002", "/Users/me/notes")] });
+    expect(button.dataset.state).toBe("ready");
+    expect(button.textContent).toBe("Claude");
+  });
+
+  it("counts only the sessions that have called a tool", async () => {
+    const button = await show({ ...RUNNING, clients: [session("11111111-aaaa-4bbb-8ccc-000000000001", "/Users/me/placemark"), unused("22222222-aaaa-4bbb-8ccc-000000000002", "/Users/me/portfolio"), unused("33333333-aaaa-4bbb-8ccc-000000000003", "/Users/me/notes")] });
+    expect(button.dataset.state).toBe("connected");
+    expect(button.textContent).toBe("Claude");
   });
 
   it("warns when the server is off", async () => {

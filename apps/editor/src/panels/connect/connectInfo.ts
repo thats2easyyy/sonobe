@@ -83,9 +83,37 @@ export function parseMcpStatus(value: unknown): McpStatusInfo | null {
   };
 }
 
-/** Sessions connected right now (a green dot), most recently active first. */
+/** Sessions connected right now, most recently active first. Connected only means Claude started Sonobe's server. */
 export function connectedSessions(status: McpStatusInfo | null): McpSessionInfo[] {
   return status?.running ? status.clients.filter((c) => c.state === "connected") : [];
+}
+
+/**
+ * A session uses Sonobe once it calls a tool. Until then it only has Sonobe available: Claude Code
+ * starts the relay in every session, whatever folder it works in.
+ */
+export function hasUsedSonobe(session: McpSessionInfo): boolean {
+  return session.toolCalls > 0;
+}
+
+/** Connected sessions that have called a tool (a green dot), most recently active first. */
+export function sessionsUsingSonobe(status: McpStatusInfo | null): McpSessionInfo[] {
+  return connectedSessions(status).filter(hasUsedSonobe);
+}
+
+/** Connected sessions that haven't called a tool yet. */
+export function sessionsWithSonobeAvailable(status: McpStatusInfo | null): McpSessionInfo[] {
+  return connectedSessions(status).filter((c) => !hasUsedSonobe(c));
+}
+
+/** True when the session's relay comes from another version of Sonobe than this app's. */
+export function runsOlderRelay(session: McpSessionInfo, appVersion: string | null): boolean {
+  return session.via === "relay" && session.relayVersion !== null && appVersion !== null && session.relayVersion !== appVersion;
+}
+
+/** "6 more sessions have Sonobe available", or "1 session has Sonobe available" when no session is using it. */
+export function availableSummary(count: number, more: boolean): string {
+  return `${count}${more ? " more" : ""} ${count === 1 ? "session has" : "sessions have"} Sonobe available`;
 }
 
 /** "just now", "12 s ago", "4 min ago", "2 h ago". */

@@ -5,14 +5,15 @@ import { usePresence } from "../../state/EditorProvider.tsx";
 import type { WorkingItem } from "../../state/presence.ts";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { cx } from "../../ui/lib/cx.ts";
-import { connectedSessions, folderName, sessionSummary } from "./connectInfo.ts";
+import { availableSummary, folderName, sessionsUsingSonobe, sessionsWithSonobeAvailable, sessionSummary } from "./connectInfo.ts";
 import { connectClaudeStore } from "./connectStore.ts";
 import { useMcpStatus, type McpStatusSource } from "./useMcpStatus.ts";
 import "./connect.css";
 
 /**
- * working: an agent has a working badge. connected: a Claude session talked to Sonobe recently (green).
- * ready: the server runs but nothing is connected (neutral). checking, off (warn), browser.
+ * working: an agent has a working badge. connected: a connected Claude session has called a tool (green).
+ * ready: the server runs and no session is using it, though some may have it available (neutral).
+ * checking, off (warn), browser.
  */
 export type ClaudeButtonState = "working" | "connected" | "ready" | "checking" | "off" | "browser";
 
@@ -31,21 +32,23 @@ function workingTooltip(item: WorkingItem): string {
 }
 
 /**
- * Toolbar Claude button: green only while a Claude session is connected, and names who is working.
- * A running server with no session reads "Connect Claude". Opens Connect Claude.
+ * Toolbar Claude button: green only while a connected Claude session has called a tool, and names who
+ * is working. Sessions that only have Sonobe available read "Claude" without the green, and a running
+ * server with no session reads "Connect Claude". Opens Connect Claude.
  */
 export function ConnectClaudeButton({ onClick, host, className }: ConnectClaudeButtonProps) {
   const [api] = useState<McpStatusSource | null>(() => (host === undefined ? (getDesktopHostApi() ?? null) : host));
   const mcp = useMcpStatus(api, { intervalMs: 10_000 });
   const working = usePresence((s) => s.working[0] ?? null);
-  const sessions = connectedSessions(mcp.status);
+  const sessions = sessionsUsingSonobe(mcp.status);
+  const available = sessionsWithSonobeAvailable(mcp.status).length;
   const state: ClaudeButtonState = working ? "working" : api === null ? "browser" : mcp.status?.running ? (sessions.length ? "connected" : "ready") : mcp.loading ? "checking" : "off";
-  const label = state === "working" ? "Claude is working" : state === "connected" ? (sessions.length > 1 ? `Claude ×${sessions.length}` : "Claude") : "Connect Claude";
+  const label = state === "working" ? "Claude is working" : state === "connected" ? (sessions.length > 1 ? `Claude ×${sessions.length}` : "Claude") : state === "ready" && available > 0 ? "Claude" : "Connect Claude";
   const now = Date.now();
   const tooltip: Record<ClaudeButtonState, string> = {
     working: working ? workingTooltip(working) : "Claude is working",
-    connected: sessions.map((s) => sessionSummary(s, now)).join("\n"),
-    ready: "Sonobe is ready. No Claude session is connected yet.",
+    connected: [...sessions.map((s) => sessionSummary(s, now)), ...(available > 0 ? [availableSummary(available, true)] : [])].join("\n"),
+    ready: available > 0 ? `${availableSummary(available, false)}. ${available === 1 ? "It hasn't" : "None has"} called a tool yet.` : "Sonobe is ready. No Claude session is connected yet.",
     checking: "Checking Sonobe's MCP server…",
     off: "Sonobe's MCP server is off. Open connection setup.",
     browser: "Connect Claude Desktop or Claude Code",

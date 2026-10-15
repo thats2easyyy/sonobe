@@ -1,8 +1,8 @@
 /**
  * Connect Claude: bring your own Claude plan over MCP (Claude Desktop or Claude Code; no API key,
- * no claude.ai login). A dialog with MCP status and the connected sessions, setup commands for this
+ * no claude.ai login). A dialog with MCP status and the sessions using Sonobe, setup commands for this
  * machine, example prompts, and privacy notes; a toolbar Claude button that's green only while a
- * session is connected; an app-wide open store; and the palette command.
+ * connected session has called a tool; an app-wide open store; and the palette command.
  *
  * Integration (inside <EditorProvider> and <CommandProvider>):
  *
@@ -35,6 +35,7 @@ export {
   connectedSessions,
   EXAMPLE_PROMPTS,
   folderName,
+  hasUsedSonobe,
   isHeadlessSpec,
   joinRepoPath,
   mcpLaunchSpec,
@@ -42,6 +43,8 @@ export {
   relativeTime,
   repoPathFromDevUrl,
   sessionSummary,
+  sessionsUsingSonobe,
+  sessionsWithSonobeAvailable,
   shellForPlatform,
   shellQuote,
   tildePath,
