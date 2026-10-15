@@ -557,11 +557,11 @@ try {
       expect(info.text.includes(`Path: ${project}`) && info.text.includes("unsaved"), "the document is unsaved", info.text);
     });
 
-    await step("A8", "Restart to Update names the connected session, then offers Save, Keep Draft or Cancel; Cancel keeps the app, the window and the ready update", async () => {
+    await step("A8", "Restart to Update names the session using Sonobe, then offers Save, Keep Draft or Cancel; Cancel keeps the app, the window and the ready update", async () => {
       await answerDialogs(app, "Cancel");
       await notice(page, `Sonobe ${N1} is ready`).getByRole("button", { name: "Restart to Update" }).click();
       const questions = await poll(async () => ((await asked(app)).length >= 2 && (await status(app)).restarting === false ? asked(app) : null), { message: "the confirmation and the unsaved-changes prompt" });
-      expect(questions[0].message === `Restart Sonobe to update to ${N1}?` && /Claude Code is connected/.test(questions[0].detail), "the confirmation names the connected Claude session", questions[0]);
+      expect(questions[0].message === `Restart Sonobe to update to ${N1}?` && /Claude Code is using Sonobe/.test(questions[0].detail), "the confirmation names the Claude session using Sonobe", questions[0]);
       expect(questions[1].buttons.join() === "Save,Keep Draft,Cancel" && /opens it again after the update/.test(questions[1].detail), "the prompt offers Save, Keep Draft or Cancel", questions[1]);
       const after = await app.evaluate(({ BrowserWindow }) => ({ windows: BrowserWindow.getAllWindows().filter((w) => w.isVisible()).length, status: globalThis.__sonobeTest.updates.status() }));
       expect(after.windows === 1 && after.status.state === "ready" && !existsSync(record) && alive(pid), "the app and its window are still here, the update is still ready, and nothing was written down", after);

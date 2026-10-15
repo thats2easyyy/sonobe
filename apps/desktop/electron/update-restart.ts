@@ -10,6 +10,7 @@
 
 import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import type { McpClientStatus } from "@sonobe/mcp";
 import { DRAFT_ID } from "./drafts.ts";
 import { atomicWriteFileSync } from "./fs-utils.ts";
 
@@ -210,26 +211,33 @@ export function reopenPlan(record: ReopenRecord, state: { /** Drafts no window c
 
 // --- Claude sessions -----------------------------------------------------------------------------
 
+/** What the restart reads of a Claude session: a row of the client registry. */
+export type RestartSession = Pick<McpClientStatus, "label" | "state" | "toolCalls">;
+
 /**
- * What to ask before a restart while Claude sessions are connected, or null when none is. `sessions`
- * are their labels ("Claude Code"). The relay finds the app again by itself; on Windows the installer
- * stops it, so the session has to be reconnected. A session that carries on keeps the tool list it read
- * from the old version: the relay doesn't tell Claude to read it again.
+ * What to ask before a restart while Claude sessions are using Sonobe, or null when none is. A session
+ * counts once it's connected and has called a tool, as in Connect Claude: Claude Code starts the relay
+ * in every session, whatever folder it works in, and a call is counted when it starts, so a session
+ * without one has no call for a restart to stop. The sessions are named by their labels ("Claude Code").
+ * The relay finds the app again by itself; on Windows the installer stops it, so the session has to be
+ * reconnected. A session that carries on keeps the tool list it read from the old version: the relay
+ * doesn't tell Claude to read it again.
  */
-export function restartConfirmation(sessions: readonly string[], version: string | null, platform: string): ClosePromptQuestion | null {
-  if (!sessions.length) return null;
+export function restartConfirmation(sessions: readonly RestartSession[], version: string | null, platform: string): ClosePromptQuestion | null {
+  const using = sessions.filter((session) => session.state === "connected" && session.toolCalls > 0);
+  if (!using.length) return null;
   const counts = new Map<string, number>();
-  for (const label of sessions) counts.set(label, (counts.get(label) ?? 0) + 1);
+  for (const { label } of using) counts.set(label, (counts.get(label) ?? 0) + 1);
   const names = [...counts].map(([label, count]) => (count > 1 ? `${count} ${label} sessions` : label));
   const listed = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]!;
-  const one = sessions.length === 1;
+  const one = using.length === 1;
   const after =
     platform === "win32"
       ? `Reconnect ${one ? "it" : "them"} once Sonobe is back.`
       : `The session${one ? " carries" : "s carry"} on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.`;
   return {
     message: version ? `Restart Sonobe to update to ${version}?` : "Restart Sonobe?",
-    detail: `${listed} ${one ? "is" : "are"} connected. A tool call that's running now will stop. ${after}`,
+    detail: `${listed} ${one ? "is" : "are"} using Sonobe. A tool call that's running now will stop. ${after}`,
     buttons: ["Restart", "Cancel"],
   };
 }
@@ -252,7 +260,7 @@ export function moveConflict(conflict: "exists" | "existsAndRunning"): { replace
 
 export interface RestartSteps {
   reason: Exclude<CloseReason, "close">;
-  /** Asked first, when there's something to ask (connected Claude sessions). False calls it off. */
+  /** Asked first, when there's something to ask (Claude sessions using Sonobe). False calls it off. */
   confirm(): Promise<boolean>;
   /** The editor windows, front first. */
   windows(): readonly RestartWindow[];

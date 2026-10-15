@@ -31,7 +31,7 @@ import { chatProvider, providerReady, subscriptionSwitchedOff } from "../assista
 import { ConfirmCard } from "../assistant/Transcript.tsx";
 import type { AssistantCodeFolderStatus, AssistantStatus, AssistantSubscriptionStatus } from "../assistant/types.ts";
 import type { Rect } from "../canvas/geometry.ts";
-import { connectedSessions, folderName } from "../connect/connectInfo.ts";
+import { folderName, sessionsUsingSonobe, sessionsWithSonobeAvailable } from "../connect/connectInfo.ts";
 import { connectClaudeStore } from "../connect/connectStore.ts";
 import { useMcpStatus, type McpStatusSource } from "../connect/useMcpStatus.ts";
 import { canvasContext, designTarget, type DesignTarget } from "./context.ts";
@@ -254,11 +254,14 @@ function DesignBoxPanel({ session, bounds, onHeightChange }: DesignBoxProps): JS
       toast({ title: "Prompt copied", description: "Paste it into Claude, then paste the HTML it writes into File → Import Design.", tone: "ai" });
       return;
     }
-    const connected = connectedSessions(mcp.status)[0];
+    // Only a session that has called a tool is named: one that just has Sonobe available may work in an unrelated folder.
+    const using = sessionsUsingSonobe(mcp.status)[0];
+    // With Sonobe available in a session, Claude is set up, so there's nothing to connect.
+    const setUp = sessionsWithSonobeAvailable(mcp.status).length > 0;
     toast(
-      connected
-        ? { title: "Prompt copied", description: `Paste it into ${connected.label}${connected.folder ? ` in ${folderName(connected.folder)}` : ""}. It builds on this canvas through Sonobe's tools.`, tone: "ai" }
-        : { title: "Prompt copied", description: "Paste it into Claude Code in your app's folder.", tone: "ai", action: { label: "Connect Claude…", onClick: () => connectClaudeStore.getState().show() } },
+      using
+        ? { title: "Prompt copied", description: `Paste it into ${using.label}${using.folder ? ` in ${folderName(using.folder)}` : ""}. It builds on this canvas through Sonobe's tools.`, tone: "ai" }
+        : { title: "Prompt copied", description: "Paste it into Claude Code in your app's folder.", tone: "ai", ...(setUp ? {} : { action: { label: "Connect Claude…", onClick: () => connectClaudeStore.getState().show() } }) },
     );
   };
 

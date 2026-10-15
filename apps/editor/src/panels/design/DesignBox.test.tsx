@@ -599,6 +599,29 @@ describe("DesignBox", () => {
     expect(assistantStore.getState().open).toBe(true);
   });
 
+  // Claude Code starts Sonobe's relay in every session, so the most recently connected one may sit in an unrelated folder.
+  const AVAILABLE = { id: "11111111-aaaa-4bbb-8ccc-000000000001", label: "Claude Code", version: "2.1.278", folder: "/Users/me/notes", via: "relay", state: "connected", connectedAt: 60_000, lastActivityAt: null, lastTool: null, toolCalls: 0, relayVersion: "0.1.0" };
+  const USING = { ...AVAILABLE, id: "22222222-aaaa-4bbb-8ccc-000000000002", folder: "/Users/me/placemark", connectedAt: 1_000, lastActivityAt: 40_000, lastTool: "get_outline", toolCalls: 3 };
+
+  it.each([
+    ["names the session that is using Sonobe", [AVAILABLE, USING], "Paste it into Claude Code in placemark. It builds on this canvas through Sonobe's tools.", undefined],
+    ["names no session when they only have Sonobe available, and has nothing to connect", [AVAILABLE, { ...AVAILABLE, id: "33333333-aaaa-4bbb-8ccc-000000000003", folder: "/Users/me/taxes" }], "Paste it into Claude Code in your app's folder.", undefined],
+    ["offers Connect Claude when no session is connected", [], "Paste it into Claude Code in your app's folder.", "Connect Claude…"],
+  ])("the copied prompt's toast %s", async (_name, clients, description, action) => {
+    await mount(Object.assign(fakeAssistantHost({}), { getMcpStatus: async () => ({ running: true, port: 52817, url: null, tokenFile: null, clients }) }));
+    type("a checkout screen");
+    press("Enter");
+    await settle();
+    await act(async () => {
+      buttonNamed("Copy for Claude Code")!.click();
+      await Promise.resolve();
+    });
+    const toastEl = document.querySelector<HTMLElement>(".sb-toast")!;
+    expect(toastEl.querySelector(".sb-toast__title")?.textContent).toBe("Prompt copied");
+    expect(toastEl.querySelector(".sb-toast__description")?.textContent).toBe(description);
+    expect(toastEl.querySelector(".sb-toast__action")?.textContent).toBe(action);
+  });
+
   it("without an API key, offers Open in Claude Code first, and opens the request in Terminal with the folder it linked", async () => {
     const fake = fakeAssistantHost({});
     await mount(fake);

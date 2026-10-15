@@ -19,6 +19,7 @@ import {
   type FlushReply,
   type ReopenRecord,
   type ReopenWindow,
+  type RestartSession,
   type RestartSteps,
   type RestartWindow,
 } from "./update-restart.ts";
@@ -296,22 +297,36 @@ describe("the reopen record", () => {
 });
 
 describe("restartConfirmation", () => {
+  /** A connected session that has called a tool. */
+  const using = (label = "Claude Code"): RestartSession => ({ label, state: "connected", toolCalls: 3 });
+  /** A connected session that hasn't: Claude Code starts the relay in every session, whatever folder it works in. */
+  const available: RestartSession = { label: "Claude Code", state: "connected", toolCalls: 0 };
+
   it("asks nothing when no Claude session is connected", () => {
     expect(restartConfirmation([], "0.3.0", "darwin")).toBeNull();
   });
 
+  it("asks nothing when the sessions only have Sonobe available, or have left", () => {
+    expect(restartConfirmation(Array.from({ length: 7 }, () => available), "0.3.0", "darwin")).toBeNull();
+    expect(restartConfirmation(Array.from({ length: 7 }, () => available), "0.3.0", "win32")).toBeNull();
+    expect(restartConfirmation([{ ...using(), state: "gone" }, { ...using("Unidentified MCP client"), state: "idle" }], "0.3.0", "darwin")).toBeNull();
+  });
+
   it("names the sessions a restart interrupts, and says they carry on", () => {
-    expect(restartConfirmation(["Claude Code"], "0.3.0", "darwin")).toEqual({
+    const one = {
       message: "Restart Sonobe to update to 0.3.0?",
-      detail: "Claude Code is connected. A tool call that's running now will stop. The session carries on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.",
+      detail: "Claude Code is using Sonobe. A tool call that's running now will stop. The session carries on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.",
       buttons: ["Restart", "Cancel"],
-    });
-    expect(restartConfirmation(["Claude Code", "Claude Desktop", "Claude Code"], "0.3.0", "linux")?.detail).toBe("2 Claude Code sessions and Claude Desktop are connected. A tool call that's running now will stop. The sessions carry on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.");
-    expect(restartConfirmation(["Claude Code"], null, "darwin")?.message).toBe("Restart Sonobe?");
+    };
+    expect(restartConfirmation([using()], "0.3.0", "darwin")).toEqual(one);
+    // Sessions that never called a tool aren't counted beside it.
+    expect(restartConfirmation([available, using(), available, { ...using(), state: "gone" }], "0.3.0", "darwin")).toEqual(one);
+    expect(restartConfirmation([using(), using("Claude Desktop"), using(), available], "0.3.0", "linux")?.detail).toBe("2 Claude Code sessions and Claude Desktop are using Sonobe. A tool call that's running now will stop. The sessions carry on once Sonobe is back. If the update changes Sonobe's tools, start a new session to see them.");
+    expect(restartConfirmation([using()], null, "darwin")?.message).toBe("Restart Sonobe?");
   });
 
   it("says to reconnect on Windows, where the installer stops the relay", () => {
-    expect(restartConfirmation(["Claude Code"], "0.3.0", "win32")?.detail).toBe("Claude Code is connected. A tool call that's running now will stop. Reconnect it once Sonobe is back.");
+    expect(restartConfirmation([using(), available], "0.3.0", "win32")?.detail).toBe("Claude Code is using Sonobe. A tool call that's running now will stop. Reconnect it once Sonobe is back.");
   });
 });
 
