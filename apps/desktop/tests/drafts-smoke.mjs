@@ -335,7 +335,7 @@ try {
   assert(!restartEdit.isError, "add_layers before the restart", restartEdit.text);
   const restartDraft = await poll(() => Object.entries(draftsOnDisk()).find(([, d]) => d.projectPath === target)?.[0], { message: "a draft of the unsaved change" });
 
-  // The native dialogs, answered by a stub that records them: the confirmation about connected Claude sessions, then the prompt.
+  // The native dialogs, answered by a stub that records them: the confirmation about Claude sessions using Sonobe, then the prompt.
   const answerPrompts = (choice) =>
     app.evaluate(({ dialog }, pick) => {
       globalThis.__asked = [];
@@ -355,7 +355,7 @@ try {
   assert(cancelled === false && afterCancel.windows === 1 && afterCancel.installs === 0 && !existsSync(recordFile), "Cancel keeps the app and its window, installs nothing and writes no record", afterCancel);
   assert(afterCancel.status.state === "ready" && afterCancel.status.restarting === false, "the update stays ready after a cancelled restart", afterCancel.status);
   assert(unsavedPrompt?.buttons.join() === "Save,Keep Draft,Cancel" && unsavedPrompt.detail.includes("opens it again after the update"), "the restart's prompt offers Save, Keep Draft or Cancel", afterCancel.asked);
-  assert(afterCancel.asked[0].message === "Restart Sonobe to update to 9.9.9?" && afterCancel.asked[0].detail.includes("is connected"), "the restart says a Claude session is connected before it asks anything else", afterCancel.asked);
+  assert(afterCancel.asked[0].message === "Restart Sonobe to update to 9.9.9?" && afterCancel.asked[0].detail.includes("is using Sonobe"), "the restart says a Claude session is using Sonobe before it asks anything else", afterCancel.asked);
   assert(draftsOnDisk()[restartDraft], "the draft is still there after Cancel");
   log("Restart to Update, then Cancel: the app, the window and the ready update all stayed");
 

@@ -730,8 +730,7 @@ function main(): void {
       const outcome = await restartKeepingWork({
         reason: "restart",
         confirm: async () => {
-          const sessions = mcpClients.list().filter((client) => client.state === "connected").map((client) => client.label);
-          const question = restartConfirmation(sessions, status.version, process.platform);
+          const question = restartConfirmation(mcpClients.list(), status.version, process.platform);
           if (!question) return true;
           const parent = primaryWindow()?.win;
           const options = { type: "question" as const, message: question.message, detail: question.detail, buttons: question.buttons, defaultId: 0, cancelId: question.buttons.length - 1 };

@@ -206,7 +206,7 @@ It takes about three minutes on an Apple silicon Mac and prints one PASS or FAIL
 Before the first Windows release, two things about updates there need deciding. Neither has run.
 
 - **Silent update or installer pages.** The app asks for a silent install that opens Sonobe again (`quitAndInstall(true, true)`), on top of the assisted installer (`nsis.oneClick: false`). A one-click installer is the other choice.
-- **Claude sessions.** The installer stops every process running from the install folder, which includes `sonobe mcp`, so a connected session has to be reconnected after an update. The restart's question says so on Windows.
+- **Claude sessions.** The installer stops every process running from the install folder, which includes `sonobe mcp`, so a connected session has to be reconnected after an update. The restart's question says so on Windows when a session has called a tool. Sessions that only have Sonobe available bring up no question, and lose their relay all the same.
 
 One more thing is open on every platform. A Claude session that outlives an update keeps the tool list it read from the old version: the relay finds the new app but doesn't tell Claude to list its tools again, because the server doesn't declare `tools.listChanged`. The restart's question says to start a new session if the update changes Sonobe's tools. Declaring the capability and sending `notifications/tools/list_changed` when the relay adopts a launch of another version would close it.
 
