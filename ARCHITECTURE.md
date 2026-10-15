@@ -690,7 +690,7 @@ The web player (`apps/desktop/player`) runs the real engine and DOM renderer ful
   - `createClientRegistry` holds the sessions: connected, gone after a goodbye or 75 s of silence, forgotten after 10 minutes. Clients without the relay share one anonymous row.
   - The client id rides the HTTP transport's per-request call scope (`CallScope.clientId`), so every tool call counts toward its session. Over stateless HTTP, initialize's `clientInfo` is gone by `tools/call`, so edits are attributed by the name the hello announced.
   - Working badges are kept per session (`WorkIntent.client`), so two sessions don't replace each other's.
-  - `getMcpStatus` returns the sessions, and the toolbar's Claude button is green only while one is connected.
+  - `getMcpStatus` returns the sessions. Connected only means that Claude started the relay, and Claude Code starts it in every session, whatever folder it works in. So Connect Claude and the toolbar's Claude button tell a session that has called a tool (`toolCalls > 0`) from one that only has Sonobe available (`connectInfo.ts`). The dialog lists the first kind as rows and names them in its title. It folds the second kind into one closed line, which says when any of them runs an older relay, and it leaves out a session that quit without calling a tool. The button is green only while a session that has called a tool is connected.
 - Tool handlers run against `SonobeHost`:
 
   ```ts

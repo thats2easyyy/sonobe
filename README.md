@@ -133,7 +133,7 @@ npm run build -w @sonobe/cli
 claude mcp add --scope user sonobe -- node "/absolute/path/to/sonobe/packages/cli/dist/sonobe.mjs" mcp
 ```
 
-`--scope user` gives every Claude Code session Sonobe's tools, whatever folder it starts in. If you set Sonobe up before, an older entry may be tied to one folder, and it wins there: run `claude mcp remove --scope local sonobe` in that folder. Check the setup with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe." The Connect Claude screen lists each session once it connects, with its folder and last activity, and the toolbar's Claude button turns green only while a session is connected.
+`--scope user` gives every Claude Code session Sonobe's tools, whatever folder it starts in. If you set Sonobe up before, an older entry may be tied to one folder, and it wins there: run `claude mcp remove --scope local sonobe` in that folder. Check the setup with `claude mcp list`, keep Sonobe open, and ask Claude, "List the documents open in Sonobe." The Connect Claude screen lists each session once it calls a tool, with its folder and last activity, and counts the sessions that only have Sonobe available on one line. The toolbar's Claude button turns green only while a session that has called a tool is connected.
 
 The Claude Code plugin adds the same server plus a skill that teaches Claude Sonobe's workflow. From a checkout:
 

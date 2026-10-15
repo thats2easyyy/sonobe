@@ -47,7 +47,7 @@ Sonobe fills in the setup for your machine, so start here. Any of these opens th
 - "Connect Claude…" in the command palette (⌘K).
 - **Build with Claude** on the welcome screen, or **Connect Claude** in the empty AI Activity panel.
 
-At the top, one status row says whether Sonobe's server is running and lists the Claude sessions connected to it: which app, its project folder, when it last did something and the last tool it called. A session shows up once Claude starts Sonobe's server, and it's marked disconnected when Claude quits. "No Claude session is connected" means exactly that, even though Sonobe's server is running and ready. The toolbar button works the same way: its dot turns green only while a session is connected, and its tooltip names each one.
+At the top, one status row says whether Sonobe's server is running and lists the Claude sessions using it: which app, its project folder, when it last did something and the last tool it called. A session is listed once it calls one of Sonobe's tools, and it's marked disconnected when Claude quits. Once Sonobe is set up, every Claude Code session can reach it, whatever folder it works in, so the sessions that haven't called a tool are counted on one line ("6 more sessions have Sonobe available"). Click the line to see them. "No Claude session is connected" means exactly that, even though Sonobe's server is running and ready. The toolbar button works the same way: its dot turns green only while a session that has called a tool is connected, and its tooltip names each one.
 
 Below the status row, choose **Claude Code** or **Claude Desktop** and follow its steps. Under **Try asking**, choose an audience (beginners, designers or engineers) and click a prompt to copy it. Two sections start closed:
 
@@ -153,7 +153,7 @@ Extensions you build yourself don't update automatically. To update, build and p
 - **Sonobe restarted while Claude was connected** (an update does this). The session finds Sonobe again by itself within about 20 seconds; a tool call that was running fails once and says to check what's open. If Sonobe stays closed longer, calls fail until you open it again, and the next one finds it.
 - **A custom settings folder.** If you launch Sonobe with `SONOBE_HOME`, set the same variable for the relay, or set the extension's **Sonobe settings folder**.
 - **A session has no Sonobe tools.** Run `claude mcp list` in that session's folder. If `sonobe` is missing, it was set up for another folder only: add it with `--scope user` as above.
-- **A session isn't listed on the Connect Claude screen.** Sessions appear once Claude starts Sonobe's server; in Claude Code, check `/mcp`. A client that doesn't go through the `sonobe mcp` relay, or an older copy of the relay, can't say which session it is, so it shows as one "Unidentified MCP client" row.
+- **A session isn't listed on the Connect Claude screen.** A session gets its own row once it calls a tool. Before that it's counted on the line that says how many sessions have Sonobe available. If it isn't there either, Claude hasn't started Sonobe's server; in Claude Code, check `/mcp`. A client that doesn't go through the `sonobe mcp` relay, or an older copy of the relay, can't say which session it is, so it shows as one "Unidentified MCP client" row.
 - **Logs.** The relay writes what went wrong to stderr. Claude Code shows it in the `/mcp` details, and Claude Desktop writes it to its logs folder (`~/Library/Logs/Claude` on a Mac, `%APPDATA%\Claude\logs` on Windows).
 
 ## Long calls: progress and cancelling

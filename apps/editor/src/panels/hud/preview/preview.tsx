@@ -3,7 +3,8 @@
  * demo document plus a few problems, console output, agent changes, and work in progress. Served by
  * the editor dev server at /src/panels/hud/preview/index.html?view=<view>&theme=dark|light.
  * Views: hud-console, hud-diagnostics, hud-ai, hud-performance, learn-home, learn-guide, learn-patch,
- * learn-patches, connect-desktop, connect-desktop-config, connect-browser. See screenshots.mjs.
+ * learn-patches, connect-desktop, connect-desktop-config, connect-browser, connect-available,
+ * connect-folded. See screenshots.mjs.
  */
 
 import { getDevicePreset, type Op, type SonobeDocument } from "@sonobe/core";
@@ -27,18 +28,34 @@ const previewSession = (id: string, folder: string, secondsAgo: number, extra: R
   return { id, label: "Claude Code", name: "claude-code", version: "2.1.278", folder, via: "relay", state: "connected", connectedAt: now - 20 * 60_000, lastSeenAt: now, lastActivityAt: now - secondsAgo * 1000, lastTool: "sim_trace", toolCalls: 42, relayVersion: "0.1.0", ...extra };
 };
 
-const DESKTOP_HOST: ConnectHostLike = {
+/** A session that has had Sonobe available for `minutes` and never called a tool, as Claude Code starts one in every folder. */
+const availableSession = (n: number, folder: string, minutes: number, extra: Record<string, unknown> = {}) =>
+  previewSession(`5e55104a-0000-4000-8000-00000000000${n}`, `/Users/you/workspace/${folder}`, 0, { connectedAt: Date.now() - minutes * 60_000, lastActivityAt: null, lastTool: null, toolCalls: 0, ...extra });
+
+const desktopHost = (clients: () => unknown[]): ConnectHostLike => ({
   platform: "darwin",
-  getMcpStatus: async () => ({
-    running: true,
-    port: 52817,
-    url: "http://127.0.0.1:52817/mcp",
-    tokenFile: "/Users/you/.sonobe/mcp.json",
-    version: "0.1.0",
-    checkedAt: Date.now(),
-    clients: [previewSession("0f6b2c1e-5d0a-4a57-9a3e-1c2d3e4f5a60", "/Users/you/workspace/placemark", 12), previewSession("7a1c9e44-2b3d-4c5e-8f60-718293a4b5c6", "/Users/you/workspace/sonobe", 540, { state: "gone", lastTool: "finish_work", toolCalls: 7 })],
-  }),
-};
+  getMcpStatus: async () => ({ running: true, port: 52817, url: "http://127.0.0.1:52817/mcp", tokenFile: "/Users/you/.sonobe/mcp.json", version: "0.1.0", checkedAt: Date.now(), clients: clients() }),
+});
+
+const DESKTOP_HOST = desktopHost(() => [
+  previewSession("0f6b2c1e-5d0a-4a57-9a3e-1c2d3e4f5a60", "/Users/you/workspace/placemark", 12),
+  previewSession("7a1c9e44-2b3d-4c5e-8f60-718293a4b5c6", "/Users/you/workspace/sonobe", 540, { state: "gone", lastTool: "finish_work", toolCalls: 7 }),
+]);
+
+const AVAILABLE = () => [
+  availableSession(1, "my-portfolio", 3),
+  availableSession(2, "claude-bot", 11),
+  availableSession(3, "chalktalk", 26, { relayVersion: "0.0.9" }),
+  availableSession(4, "scratch", 48),
+  availableSession(5, "notes", 95),
+  availableSession(6, "recipes", 140),
+];
+
+/** connect-available: sessions in other folders, none of which has called a tool. */
+const AVAILABLE_HOST = desktopHost(() => [...AVAILABLE(), availableSession(7, "sonobe", 190)]);
+
+/** connect-folded: one session at work, and the rest. */
+const FOLDED_HOST = desktopHost(() => [previewSession("0f6b2c1e-5d0a-4a57-9a3e-1c2d3e4f5a60", "/Users/you/workspace/placemark", 12), ...AVAILABLE()]);
 
 function withProblems(doc: SonobeDocument): SonobeDocument {
   const main = doc.components[doc.project.root]!;
@@ -150,7 +167,7 @@ function PreviewApp({ view }: { view: string }) {
   const learnView: LearnView | null =
     view === "learn-home" ? { kind: "home" } : view === "learn-guide" ? { kind: "guide", slug: "05-springs-and-feel" } : view === "learn-patch" ? { kind: "patches", type: "popAnimation" } : view === "learn-patches" ? { kind: "patches", type: null } : null;
   const [connectOpen, setConnectOpen] = useState(view.startsWith("connect-"));
-  const host = view === "connect-browser" ? null : DESKTOP_HOST;
+  const host = view === "connect-browser" ? null : view === "connect-available" ? AVAILABLE_HOST : view === "connect-folded" ? FOLDED_HOST : DESKTOP_HOST;
 
   useEffect(() => {
     const timer = setTimeout(() => document.body.setAttribute("data-preview-ready", ""), 300);

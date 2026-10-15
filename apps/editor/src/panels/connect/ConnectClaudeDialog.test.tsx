@@ -68,6 +68,16 @@ const session = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/** A session that has Sonobe available and never called a tool, as Claude Code starts one in every folder. */
+const unused = (n: number, overrides: Record<string, unknown> = {}) => session({ id: `99999999-aaaa-4bbb-8ccc-00000000000${n}`, folder: `/Users/me/workspace/other-${n}`, lastActivityAt: null, lastTool: null, toolCalls: 0, ...overrides });
+
+const statusBox = () => document.querySelector<HTMLElement>(".sb-connect__status")!;
+const statusTitle = () => statusBox().querySelector(".sb-connect__status-title")!.textContent;
+/** The folders of the full rows: the sessions that have called a tool. */
+const usedRows = () => [...statusBox().querySelectorAll('ul[aria-label="Sessions"] > li code')].map((code) => code.textContent);
+const folded = () => statusBox().querySelector<HTMLDetailsElement>("details.sb-connect__available");
+const foldedRows = () => [...folded()!.querySelectorAll<HTMLElement>("li.sb-connect__session")];
+
 describe("Connect Claude sessions", () => {
   it("says nothing is connected while the server only listens", async () => {
     const text = await show({ host: appHost({ ...RUNNING, clients: [], version: "0.1.0" }), initialTab: "code", defaults: { mode: "installed", platform: "darwin" } });
@@ -75,22 +85,75 @@ describe("Connect Claude sessions", () => {
     expect(text).toContain("Sessions show up here once Claude starts Sonobe's server");
     expect(text).not.toContain("ready for Claude");
     expect(document.querySelector(".sb-connect__status")?.getAttribute("data-tone")).toBe("neutral");
+    expect(folded()).toBeNull();
   });
 
   it("lists connected sessions with their folder and last activity", async () => {
     const text = await show({ host: appHost({ ...RUNNING, clients: [session(), session({ id: "22222222-aaaa-4bbb-8ccc-000000000002", folder: "/Users/me/workspace/sonobe", state: "gone", lastTool: "finish_work" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
-    expect(text).toContain("Claude Code is connected");
+    expect(statusTitle()).toBe("Claude Code is using Sonobe");
     expect(text).toContain("~/workspace/placemark");
     expect(text).toContain("Active 12 s ago · get_outline · 3 tool calls");
     expect(text).toContain("~/workspace/sonobe");
     expect(text).toContain("Disconnected");
     expect(text).toContain("Last active 12 s ago · finish_work");
     expect(document.querySelector(".sb-connect__status")?.getAttribute("data-tone")).toBe("success");
+    expect(folded()).toBeNull();
+  });
+
+  it("doesn't call sessions connected that have Sonobe available and never called a tool", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [1, 2, 3, 4, 5, 6, 7].map((n) => unused(n)), version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(statusTitle()).toBe("No session is using Sonobe");
+    expect(text).toContain("A session is listed here once it calls one of Sonobe's tools.");
+    expect(text).not.toContain("sessions are connected");
+    expect(statusBox().getAttribute("data-tone")).toBe("neutral");
+    expect(usedRows()).toEqual([]);
+    expect(folded()!.querySelector("summary")!.textContent).toBe("7 sessions have Sonobe available");
+  });
+
+  it("folds the sessions that never called a tool into one closed line that opens to their rows", async () => {
+    const text = await show({ host: appHost({ ...RUNNING, clients: [session(), ...[1, 2, 3, 4, 5, 6].map((n) => unused(n))], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(statusTitle()).toBe("Claude Code is using Sonobe");
+    expect(statusBox().getAttribute("data-tone")).toBe("success");
+    expect(usedRows()).toEqual(["~/workspace/placemark"]);
+    expect(folded()!.open).toBe(false);
+    expect(folded()!.querySelector("summary")!.textContent).toBe("6 more sessions have Sonobe available");
+    expect(foldedRows().map((row) => row.querySelector("code")!.textContent)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `~/workspace/other-${n}`));
+    expect(text).toContain("no tool calls yet");
+    // Green is for a session that has called a tool.
+    expect(statusBox().querySelectorAll(".sb-connect__session[data-used]")).toHaveLength(1);
+    expect(foldedRows().some((row) => row.hasAttribute("data-used"))).toBe(false);
+  });
+
+  it("counts several sessions using Sonobe, and one more that has it available", async () => {
+    const clients = [session(), session({ id: "22222222-aaaa-4bbb-8ccc-000000000002", folder: "/Users/me/workspace/sonobe" }), session({ id: "33333333-aaaa-4bbb-8ccc-000000000003", folder: "/Users/me/workspace/deck" }), unused(1)];
+    await show({ host: appHost({ ...RUNNING, clients, version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(statusTitle()).toBe("3 sessions are using Sonobe");
+    expect(usedRows()).toEqual(["~/workspace/placemark", "~/workspace/sonobe", "~/workspace/deck"]);
+    expect(folded()!.querySelector("summary")!.textContent).toBe("1 more session has Sonobe available");
+  });
+
+  it("says on the folded line when a session there runs an older relay, and keeps its warning", async () => {
+    await show({ host: appHost({ ...RUNNING, clients: [session(), unused(1, { relayVersion: "0.0.9" }), unused(2)], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(folded()!.querySelector("summary")!.textContent).toBe("2 more sessions have Sonobe available · 1 runs an older relay");
+    expect(foldedRows()[0]!.textContent).toContain("Runs the relay from Sonobe 0.0.9, not this app's 0.1.0. Set up again to use this app's version.");
+    expect(foldedRows()[1]!.textContent).not.toContain("Runs the relay");
+  });
+
+  it("counts the folded sessions that run an older relay", async () => {
+    await show({ host: appHost({ ...RUNNING, clients: [unused(1, { relayVersion: "0.0.9" }), unused(2, { relayVersion: "0.0.8" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(folded()!.querySelector("summary")!.textContent).toBe("2 sessions have Sonobe available · 2 run an older relay");
+  });
+
+  it("leaves out a session that quit without calling a tool", async () => {
+    await show({ host: appHost({ ...RUNNING, clients: [unused(1, { state: "gone" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
+    expect(statusTitle()).toBe("No Claude session is connected");
+    expect(statusBox().querySelector(".sb-connect__session")).toBeNull();
+    expect(folded()).toBeNull();
   });
 
   it("flags a session running an older relay, and explains clients without one", async () => {
     const text = await show({ host: appHost({ ...RUNNING, clients: [session({ relayVersion: "0.0.9" }), session({ id: "http", label: "Unidentified MCP client", name: null, version: null, folder: null, via: "http" })], version: "0.1.0" }), defaults: { mode: "installed", platform: "darwin" } });
-    expect(text).toContain("2 sessions are connected");
+    expect(statusTitle()).toBe("2 sessions are using Sonobe");
     expect(text).toContain("Runs the relay from Sonobe 0.0.9, not this app's 0.1.0. Set up again to use this app's version.");
     expect(text).toContain("Unidentified MCP client");
     expect(text).toContain("Sonobe can't tell which session it is");

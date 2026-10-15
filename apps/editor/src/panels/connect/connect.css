@@ -128,7 +128,8 @@
   background: var(--text-disabled);
 }
 
-.sb-connect__session[data-state="connected"] .sb-connect__session-dot {
+/* Green means the session has called a tool, never just that Claude started Sonobe's server. */
+.sb-connect__session[data-state="connected"][data-used] .sb-connect__session-dot {
   background: var(--success);
 }
 
@@ -174,6 +175,30 @@
 
 .sb-connect__session-note[data-tone="warn"] {
   color: var(--warn-text);
+}
+
+/* Sessions that have Sonobe available and haven't used it: one closed line under the rows */
+.sb-connect__available {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sb-connect__available-warn {
+  color: var(--warn-text);
+}
+
+.sb-connect__available .sb-connect__disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-3);
+}
+
+.sb-connect__available .sb-connect__sessions {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
 }
 
 /* Sections and steps */
@@ -524,7 +549,7 @@
   box-shadow: 0 0 0 2px var(--bg-toolbar);
 }
 
-/* Green means a Claude session is connected, never just that the server is listening. */
+/* Green means a connected Claude session has called a tool, never just that the server is listening. */
 .sb-claudebtn[data-state="connected"] .sb-claudebtn__dot {
   background: var(--success);
 }

@@ -17,6 +17,11 @@ const BASE = process.env.BASE ?? "http://localhost:5203/src/panels/hud/preview/i
 const OUT = process.env.OUT ?? `${root}apps/editor/screenshots`;
 mkdirSync(OUT, { recursive: true });
 
+/** Opens the line that counts the sessions with Sonobe available. */
+const openAvailable = async (/** @type {import("playwright").Page} */ page) => {
+  await page.locator(".sb-connect__available > summary").click();
+};
+
 /** @type {{ name: string; view: string; theme?: "dark" | "light"; wait?: number; run?: (page: import("playwright").Page) => Promise<void> }[]} */
 const SHOTS = [
   { name: "hud-console", view: "hud-console" },
@@ -57,6 +62,10 @@ const SHOTS = [
   { name: "connect-desktop-config", view: "connect-desktop-config" },
   { name: "connect-browser", view: "connect-browser" },
   { name: "connect-light", view: "connect-desktop", theme: "light" },
+  { name: "connect-available", view: "connect-available" },
+  { name: "connect-available-light", view: "connect-available", theme: "light" },
+  { name: "connect-folded", view: "connect-folded", run: openAvailable },
+  { name: "connect-folded-light", view: "connect-folded", theme: "light", run: openAvailable },
 ];
 
 const wanted = new Set(process.argv.slice(2));

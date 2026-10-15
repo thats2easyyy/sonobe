@@ -12,15 +12,19 @@ import { readString, writeString } from "../../ui/lib/storage.ts";
 import { getAssistantHost, supportsAssistant } from "../assistant/types.ts";
 import { claudeDesktopBundle, detectRepoPath, IS_DEV_BUILD } from "./buildInfo.ts";
 import {
+  availableSummary,
   claudeCodeCommand,
   claudeCodeRemoveCommand,
   claudeDesktopConfig,
   claudeDesktopConfigPath,
-  connectedSessions,
   EXAMPLE_PROMPTS,
+  hasUsedSonobe,
   isHeadlessSpec,
   mcpLaunchSpec,
   relativeTime,
+  runsOlderRelay,
+  sessionsUsingSonobe,
+  sessionsWithSonobeAvailable,
   shellForPlatform,
   tildePath,
   type LaunchMode,
@@ -238,7 +242,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 /** A closed-by-default section: its text stays in the page, so find-in-page opens it. */
-function Disclosure({ title, className, children }: { title: string; className?: string; children: ReactNode }) {
+function Disclosure({ title, className, children }: { title: ReactNode; className?: string; children: ReactNode }) {
   return (
     <details className={cx("sb-connect__disclosure", className)}>
       <summary>
@@ -266,7 +270,7 @@ function ClaudeCodeSteps({ spec, shell, browser, blocked, projectField }: { spec
       <Step n={2} title={headless ? "Start Claude Code in that folder and ask" : "Start a new Claude Code session in any folder and ask"}>
         <div className="sb-connect__ask">“{browser ? "Show me the outline of this prototype." : "List the documents open in Sonobe."}”</div>
         <p className="sb-connect__hint">
-          {browser ? null : "The session shows up at the top of this screen once it connects. "}Run <code>claude mcp list</code> anytime to check the setup.
+          {browser ? null : "The session shows up at the top of this screen once it answers. "}Run <code>claude mcp list</code> anytime to check the setup.
         </p>
       </Step>
     </ol>
@@ -287,7 +291,7 @@ function SetUpBefore() {
   );
 }
 
-/** One status row: the server, the sessions connected to it, or what to do when it's off. */
+/** One status row: the server, the sessions using it, or what to do when it's off. */
 function StatusRow({ browser, mcp }: { browser: boolean; mcp: McpStatusState }) {
   if (browser) {
     return (
@@ -301,24 +305,28 @@ function StatusRow({ browser, mcp }: { browser: boolean; mcp: McpStatusState }) 
   }
   if (mcp.status?.running) {
     const status = mcp.status;
-    const connected = connectedSessions(status);
-    // Green only for a connected session: a server that's listening says nothing about Claude.
+    const using = sessionsUsingSonobe(status);
+    const available = sessionsWithSonobeAvailable(status);
+    // A session that left without calling a tool has nothing to show.
+    const used = status.clients.filter(hasUsedSonobe);
+    // Green only for a session that has called a tool: Claude Code starts Sonobe's server in every session, in any folder.
     return (
       <Status
-        tone={connected.length ? "success" : "neutral"}
-        lead={connected.length > 0 ? <Check size={14} strokeWidth={2} /> : <span className="sb-connect__status-dot" />}
-        title={connected.length === 0 ? "No Claude session is connected" : connected.length === 1 ? `${connected[0]!.label} is connected` : `${connected.length} sessions are connected`}
+        tone={using.length ? "success" : "neutral"}
+        lead={using.length > 0 ? <Check size={14} strokeWidth={2} /> : <span className="sb-connect__status-dot" />}
+        title={using.length === 1 ? `${using[0]!.label} is using Sonobe` : using.length > 1 ? `${using.length} sessions are using Sonobe` : available.length > 0 ? "No session is using Sonobe" : "No Claude session is connected"}
       >
-        {connected.length === 0 ? "Sessions show up here once Claude starts Sonobe's server. Set it up below, then start a new session or restart Claude Desktop. " : null}
+        {using.length > 0 ? null : available.length > 0 ? "A session is listed here once it calls one of Sonobe's tools. " : "Sessions show up here once Claude starts Sonobe's server. Set it up below, then start a new session or restart Claude Desktop. "}
         Sonobe's server is running{status.url ? " at " : "."}
         {status.url && <code className="sb-connect__url">{status.url}</code>}
-        {status.clients.length > 0 && (
+        {used.length > 0 && (
           <ul className="sb-connect__sessions" aria-label="Sessions">
-            {status.clients.map((session) => (
+            {used.map((session) => (
               <SessionRow key={session.id} session={session} appVersion={status.version} />
             ))}
           </ul>
         )}
+        {available.length > 0 && <AvailableSessions sessions={available} more={using.length > 0} appVersion={status.version} />}
       </Status>
     );
   }
@@ -353,6 +361,33 @@ function Status({ tone, lead, title, action, children }: { tone: "neutral" | "su
   );
 }
 
+/**
+ * Sessions that have Sonobe available and haven't called a tool, folded into one line so they don't read
+ * as sessions at work. The line says when any of them runs an older relay.
+ */
+function AvailableSessions({ sessions, more, appVersion }: { sessions: McpSessionInfo[]; more: boolean; appVersion: string | null }) {
+  const older = sessions.filter((session) => runsOlderRelay(session, appVersion)).length;
+  return (
+    <Disclosure
+      className="sb-connect__available"
+      title={
+        <span>
+          {availableSummary(sessions.length, more)}
+          {older > 0 && " · "}
+          {older > 0 && <span className="sb-connect__available-warn">{older === 1 ? "1 runs" : `${older} run`} an older relay</span>}
+        </span>
+      }
+    >
+      <p className="sb-connect__hint">Once Sonobe is set up, every Claude session can reach it, whatever folder it works in. {sessions.length === 1 ? "This one hasn't" : "These haven't"} called a tool yet.</p>
+      <ul className="sb-connect__sessions" aria-label="Sessions with Sonobe available">
+        {sessions.map((session) => (
+          <SessionRow key={session.id} session={session} appVersion={appVersion} />
+        ))}
+      </ul>
+    </Disclosure>
+  );
+}
+
 /** One session: who, where, and what it did last. */
 function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersion: string | null }) {
   const now = Date.now();
@@ -363,9 +398,9 @@ function SessionRow({ session, appVersion }: { session: McpSessionInfo; appVersi
         ? `Connected ${relativeTime(session.connectedAt, now)} · no tool calls yet`
         : "No tool calls";
   const state = session.state === "gone" ? "Disconnected" : session.state === "idle" ? "Idle" : null;
-  const olderRelay = session.via === "relay" && session.relayVersion !== null && appVersion !== null && session.relayVersion !== appVersion;
+  const olderRelay = runsOlderRelay(session, appVersion);
   return (
-    <li className="sb-connect__session" data-state={session.state}>
+    <li className="sb-connect__session" data-state={session.state} data-used={hasUsedSonobe(session) ? "" : undefined}>
       <span className="sb-connect__session-dot" aria-hidden />
       <div className="sb-connect__session-text">
         <div className="sb-connect__session-title">
