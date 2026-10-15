@@ -57,6 +57,8 @@ const SHOTS = [
   { name: "connect-desktop-config", view: "connect-desktop-config" },
   { name: "connect-browser", view: "connect-browser" },
   { name: "connect-light", view: "connect-desktop", theme: "light" },
+  { name: "connect-available", view: "connect-available" },
+  { name: "connect-available-light", view: "connect-available", theme: "light" },
 ];
 
 const wanted = new Set(process.argv.slice(2));
